@@ -42,7 +42,7 @@
         "object_1": "STARLINK-1234",
         "object_2": "UNKNOWN DEBRIS",
         "closest_distance_km": 0.45,
-        "time_utc": "2024-05-10T14:22:00Z",
+        "time_of_closest_approach_utc": "2024-05-10T14:22:00Z",
         "relative_velocity_km_s": 11.2,
         "risk_classification": "High Risk"
       }

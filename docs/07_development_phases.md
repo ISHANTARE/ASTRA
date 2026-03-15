@@ -19,6 +19,8 @@ The immediate focus for the developer AI.
 - [ ] Implement multi-stage progressive filtering algorithm (Stages 1-4).
 - [ ] Implement orbital spatial grid indexing to reduce candidate pair generation (Stage 5-6).
 - [ ] Build `/predict/approaches` API endpoint (Stage 7).
+- [ ] Implement Time of Closest Approach (TCA) detection during conjunction analysis (after distance calculations).
+- [ ] Compute relative velocity at TCA for each conjunction event.
 - [ ] Connect frontend "Run Prediction" button to the backend API.
 - [ ] Render prediction report UI (tables, high-risk markers).
 

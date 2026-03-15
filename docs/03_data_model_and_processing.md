@@ -30,6 +30,19 @@ To avoid O(N^2) complexity across 30k objects, use progressive filtering before 
 
 ## 4. Close Approach Detection & Risk Classification
 - **Distance Formula:** `Distance = √((x1-x2)² + (y1-y2)² + (z1-z2)²)`
+- **Time of Closest Approach (TCA) & Relative Velocity:**
+  - For each candidate pair, calculate distances across all 288 simulation time steps.
+  - Identify the index of the minimum distance in the array.
+  - Extract the exact `closest_distance` and corresponding `TCA timestamp` from that index.
+  - Retrieve the velocity vectors (`v1`, `v2`) for both objects at that specific time step.
+  - Compute the **relative velocity**: `Relative Velocity = |v1 - v2|` (magnitude of the velocity difference vector).
+  - Conceptual Logic:
+    ```python
+    tca_index = argmin(distances)
+    closest_distance = distances[tca_index]
+    tca_time = simulation_times[tca_index]
+    relative_velocity = numpy.linalg.norm(v1[tca_index] - v2[tca_index])
+    ```
 - **Risk Tiers:**
   - `< 10 km`: Conjunction
   - `< 1 km`: High Risk
