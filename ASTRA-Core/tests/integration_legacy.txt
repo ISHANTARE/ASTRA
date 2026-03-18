@@ -1,0 +1,35 @@
+import pytest
+import numpy as np
+
+from astra.debris import make_debris_object, filter_altitude, filter_time_window
+from astra.orbit import propagate_many
+from astra.conjunction import find_conjunctions
+
+def test_full_pipeline_end_to_end(small_catalog):
+    """Test: load -> filter -> propagate -> conjunctions does not error."""
+    catalog = [make_debris_object(t) for t in small_catalog]
+    
+    leo = filter_altitude(catalog, min_km=10.0, max_km=10000.0)
+    
+    # 2021 TLEs, use an epoch near 2021
+    epoch = small_catalog[0].epoch_jd
+    t_start = epoch
+    t_end = epoch + 1.0
+    
+    current = filter_time_window(leo, t_start, t_end)
+    assert len(current) > 0, "Pipeline should have survivors"
+    
+    time_steps = np.arange(0, 24 * 60, 5.0)
+    trajectories = propagate_many([obj.tle for obj in current], time_steps)
+    
+    assert len(trajectories) == len(current)
+    
+    times_jd = t_start + time_steps / 1440.0
+    
+    elements_map = {obj.tle.norad_id: obj for obj in current}
+    events = find_conjunctions(trajectories, times_jd, elements_map, threshold_km=10000.0)
+    
+    assert isinstance(events, list)
+    for e in events:
+        assert str(e.object_a_id) < str(e.object_b_id)
+        assert e.risk_level in ("LOW", "MEDIUM", "HIGH", "CRITICAL")
