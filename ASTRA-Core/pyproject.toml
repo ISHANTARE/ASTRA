@@ -3,10 +3,10 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "astra"
-version = "2.0.0"
+name = "astra-core-engine"
+version = "1.0.0"
 authors = [
-  { name="ASTRA Team" },
+  { name="ASTRA Team - Ishan Tare" },
 ]
 description = "Autonomous Space Traffic Risk Analyzer - Computation Engine"
 readme = "README.md"
