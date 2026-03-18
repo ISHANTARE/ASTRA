@@ -14,6 +14,7 @@ from astra.covariance import (
 )
 from astra.data import (
     fetch_celestrak_active,
+    fetch_celestrak_comprehensive,
     fetch_celestrak_group,
 )
 from astra.debris import (
@@ -77,6 +78,7 @@ __all__ = [
     "estimate_covariance",
     # Data
     "fetch_celestrak_active",
+    "fetch_celestrak_comprehensive",
     "fetch_celestrak_group",
     # Plotting
     "plot_trajectories",
