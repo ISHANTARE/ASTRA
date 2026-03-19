@@ -10,8 +10,12 @@ import requests
 from astra.errors import AstraError
 from astra.models import SatelliteTLE
 from astra.tle import load_tle_catalog
+from astra.log import get_logger
+
+logger = get_logger(__name__)
 
 CELESTRAK_ACTIVE_URL = "https://celestrak.org/NORAD/elements/gp.php?GROUP=active&FORMAT=tle"
+
 
 
 def fetch_celestrak_active() -> list[SatelliteTLE]:
@@ -20,6 +24,7 @@ def fetch_celestrak_active() -> list[SatelliteTLE]:
     Downloads the entire live active catalog and parses it into ASTRA data models.
     """
     try:
+        logger.info("Fetching active satellite catalog from CelesTrak...")
         response = requests.get(CELESTRAK_ACTIVE_URL, timeout=20.0)
         response.raise_for_status()
     except requests.RequestException as e:
@@ -61,11 +66,14 @@ def fetch_celestrak_comprehensive() -> list[SatelliteTLE]:
         "analyst",            # Analyst objects
     ]
     
+    logger.info(f"Assembling comprehensive satellite catalog from {len(groups)} CelesTrak groups...")
+    
     seen_ids = set()
     unified_catalog = []
     
     for g in groups:
         try:
+            logger.debug(f"Fetching group: {g}")
             tles = fetch_celestrak_group(g)
             for tle in tles:
                 if tle.norad_id not in seen_ids:

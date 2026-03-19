@@ -1,4 +1,5 @@
-# ASTRA-Core v1.0.1 🚀
+# ASTRA-Core v2.0.0 🚀
+
 
 **The High-Performance Mathematical Foundation for Space Situational Awareness.**
 
@@ -74,6 +75,17 @@ events = astra.find_conjunctions(
 
 print(f"Detected {len(events)} potential threats.")
 ```
+
+---
+
+## 🚀 What's New in v2.0.0 (Industry-Grade Update)
+
+The v2.0.0 release transforms ASTRA from a mathematical core into an elite, production-ready aerospace library.
+* **`examples/` Directory**: Added 3 fully-commented tutorial scripts for Conjunctions, 3D Visualization, and Pass Predictions.
+* **Professional Logging**: Replaced silent execution with configurable, formatted Python `logging`.
+* **GitHub Actions CI/CD**: Added robust automated test pipelines via GitHub Actions.
+* **Space Force CDM Parser**: Added `astra.cdm` to directly ingest official CCSDS Conjunction Data Message XMLs.
+* **Multithreaded Interpolation**: Upgraded the `find_conjunctions` module with `ThreadPoolExecutor` to automatically utilize all CPU cores, bypassing the GIL during heavy spline math.
 
 ---
 

@@ -9,12 +9,17 @@ advanced 3-phase optimization algorithm including:
 """
 from __future__ import annotations
 
+import concurrent.futures
 import numpy as np
 import scipy.interpolate
 
 from astra.errors import AstraError
 from astra.models import ConjunctionEvent, DebrisObject, TrajectoryMap
 from astra.covariance import compute_collision_probability, estimate_covariance
+from astra.log import get_logger
+
+logger = get_logger(__name__)
+
 
 
 def distance_3d(pos_a: np.ndarray, pos_b: np.ndarray) -> np.ndarray:
@@ -71,9 +76,12 @@ def find_conjunctions(
     if T_len < 3:
         raise AstraError("At least 3 timesteps required for CubicSpline interpolation.")
 
+    logger.info(f"Initiating Conjunction Analysis for {len(norad_ids)} objects over {T_len} time steps.")
+
     # ---------------------------------------------------------
     # Phase 1: Radial Bounding Shells (Sweep-And-Prune)
     # ---------------------------------------------------------
+    logger.debug("Running Phase 1: 1D Sweep-and-Prune Radial Bounding...")
     intervals = []
     for nid in norad_ids:
         obj = elements_map.get(nid)
@@ -96,11 +104,15 @@ def find_conjunctions(
         active.append((min_r, max_r, nid))
 
     if not candidate_pairs_phase1:
+        logger.info("Sweep-and-Prune complete: 0 candidate pairs found.")
         return []
+
+    logger.debug(f"Phase 1 Complete: Pruned to {len(candidate_pairs_phase1)} radial collision candidates.")
 
     # ---------------------------------------------------------
     # Phase 2: Trajectory Volume Cartesian AABB
     # ---------------------------------------------------------
+    logger.debug("Running Phase 2: Cartesian Axis-Aligned Bounding Box Intersection...")
     traj_bounds = {}
     for nid in norad_ids:
         traj = trajectories[nid]
@@ -116,12 +128,17 @@ def find_conjunctions(
         if np.all((minA - margin <= maxB) & (maxA + margin >= minB)):
             candidate_pairs_phase2.add((min(A, B), max(A, B)))
 
+    logger.info(f"AABB Filter Complete: Analyzing precise geometry for {len(candidate_pairs_phase2)} pairs.")
+
     # ---------------------------------------------------------
     # Phase 3: Exact Curvilinear TCA Interpolation
     # ---------------------------------------------------------
+    logger.debug("Running Phase 3: Root-finding via Spline interpolation & Mahalanobis B-Plane Covariance Projection...")
     events = []
 
-    for A, B in candidate_pairs_phase2:
+    def evaluate_pair(pair: tuple[str, str]) -> ConjunctionEvent | None:
+        """Worker function for concurrent execution."""
+        A, B = pair
         traj_A = trajectories[A]
         traj_B = trajectories[B]
         
@@ -131,10 +148,9 @@ def find_conjunctions(
         coarse_min = coarse_dists[t_idx]
         
         if coarse_min > coarse_threshold_km:
-            continue
+            return None
             
         # 2. Build Cubic Splines for exact curvilinear motion mapping
-        # bc_type 'natural' works well for orbital segments
         spline_A = scipy.interpolate.CubicSpline(times_jd, traj_A, bc_type='natural')
         spline_B = scipy.interpolate.CubicSpline(times_jd, traj_B, bc_type='natural')
         
@@ -157,22 +173,19 @@ def find_conjunctions(
         min_dist = float(dense_dists[tca_dense_idx])
         
         if min_dist > threshold_km:
-            continue
+            return None
             
         tca_jd = float(t_dense[tca_dense_idx])
         
-        # Exact position & velocity (1st derivative of spline) at TCA
         pos_A = rA_dense[tca_dense_idx]
         pos_B = rB_dense[tca_dense_idx]
         
-        # Velocities are in km per JD. Convert to km/s.
         vel_A = spline_A(tca_jd, nu=1) / 86400.0
         vel_B = spline_B(tca_jd, nu=1) / 86400.0
         
         rel_vel_vec = vel_A - vel_B
         rel_vel = float(np.linalg.norm(rel_vel_vec))
         
-        # Realistic Unconstrained Probability Modeling via Encounter Plane
         obj_A = elements_map[A]
         obj_B = elements_map[B]
         
@@ -190,7 +203,7 @@ def find_conjunctions(
         
         risk = _classify_risk(P_c)
         
-        events.append(ConjunctionEvent(
+        return ConjunctionEvent(
             object_a_id=A,
             object_b_id=B,
             tca_jd=tca_jd,
@@ -200,7 +213,20 @@ def find_conjunctions(
             risk_level=risk,
             position_a_km=pos_A,
             position_b_km=pos_B
-        ))
+        )
+
+    # Execute geometric evaluations concurrently across all CPU threads
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        futures = {executor.submit(evaluate_pair, pair): pair for pair in candidate_pairs_phase2}
+        
+        for future in concurrent.futures.as_completed(futures):
+            try:
+                result = future.result()
+                if result is not None:
+                    events.append(result)
+            except Exception as e:
+                logger.error(f"Error evaluating conjunction pair: {e}")
 
     events.sort(key=lambda x: x.miss_distance_km)
+    logger.info(f"Conjunction Sweep Complete: {len(events)} events detected.")
     return events

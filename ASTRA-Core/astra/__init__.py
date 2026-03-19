@@ -12,6 +12,7 @@ from astra.covariance import (
     compute_collision_probability,
     estimate_covariance,
 )
+from astra.cdm import parse_cdm_xml, ConjunctionDataMessage
 from astra.data import (
     fetch_celestrak_active,
     fetch_celestrak_comprehensive,
@@ -80,6 +81,7 @@ __all__ = [
     "fetch_celestrak_active",
     "fetch_celestrak_comprehensive",
     "fetch_celestrak_group",
+    "parse_cdm_xml",
     # Plotting
     "plot_trajectories",
     # Visibility
@@ -99,6 +101,7 @@ __all__ = [
     "Observer",
     "PassEvent",
     "FilterConfig",
+    "ConjunctionDataMessage",
     # Errors
     "AstraError",
     "InvalidTLEError",

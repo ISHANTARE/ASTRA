@@ -16,7 +16,9 @@ from skyfield.sgp4lib import TEME
 
 from astra.errors import AstraError
 from astra.models import OrbitalState, SatelliteTLE, TrajectoryMap
+from astra.log import get_logger
 
+logger = get_logger(__name__)
 
 def propagate_orbit(
     satellite: SatelliteTLE, epoch_jd: float, t_since_minutes: float
@@ -63,6 +65,8 @@ def propagate_many(
             store np.nan at that timestep row.
     """
     results: TrajectoryMap = {}
+
+    logger.info(f"Vector-propagating {len(satellites)} orbits across {len(time_steps)} discrete time steps using SGP4...")
 
     for sat in satellites:
         satrec = Satrec.twoline2rv(sat.line1, sat.line2)
