@@ -42,11 +42,11 @@ def test_closest_approach_finds_minimum():
 @pytest.fixture
 def conjunction_elements():
     line1 = "1 25544U 98067A   21001.00000000  .00001480  00000-0  34282-4 0  9990"
-    line2 = "2 25544  51.6442 284.1199 0001364 338.5498  21.5664 15.48922536 12345"
+    line2 = "2 25544  51.6442 284.1199 0001364 338.5498  21.5664 15.48922536 12341"
     sat_a = parse_tle("A", line1, line2)
     
-    line1b = "1 99999U 98067A   21001.00000000  .00001480  00000-0  34282-4 0  9990"
-    line2b = "2 99999  51.6442 284.1199 0001364 338.5498  21.5664 15.48922536 12342"
+    line1b = "1 99999U 98067A   21001.00000000  .00001480  00000-0  34282-4 0  9995"
+    line2b = "2 99999  51.6442 284.1199 0001364 338.5498  21.5664 15.48922536 12346"
     sat_b = parse_tle("B", line1b, line2b)
     
     # Must override the derived parameters manually to ensure the artificial 

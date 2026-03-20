@@ -12,8 +12,9 @@ from typing import Any
 
 from astra.models import DebrisObject, FilterConfig, SatelliteTLE
 from astra.utils import orbit_period, orbital_elements
+from astra.constants import EARTH_RADIUS_KM, EARTH_MU_KM3_S2, TLE_AGE_LEO_MAX_DAYS, TLE_AGE_DEFAULT_MAX_DAYS
 
-_MU_EARTH = 398600.4418
+
 
 
 def make_debris_object(tle: SatelliteTLE) -> DebrisObject:
@@ -27,12 +28,12 @@ def make_debris_object(tle: SatelliteTLE) -> DebrisObject:
         a = 0.0
     else:
         n_rad_s = (2.0 * math.pi) / (period_min * 60.0)
-        a = (_MU_EARTH / (n_rad_s**2)) ** (1.0 / 3.0)
+        a = (EARTH_MU_KM3_S2 / (n_rad_s**2)) ** (1.0 / 3.0)
 
     e = elements["eccentricity"]
-    perigee_km = a * (1.0 - e) - 6371.0
-    apogee_km = a * (1.0 + e) - 6371.0
-    altitude_km = a - 6371.0
+    perigee_km = a * (1.0 - e) - EARTH_RADIUS_KM
+    apogee_km = a * (1.0 + e) - EARTH_RADIUS_KM
+    altitude_km = a - EARTH_RADIUS_KM
 
     return DebrisObject(
         tle=tle,
@@ -131,10 +132,10 @@ def filter_time_window(
         # Stricter threshold for LEO due to higher atmospheric drag
         is_stale = False
         if obj.altitude_km < 2000:
-            if age_days > 7.0:
+            if age_days > TLE_AGE_LEO_MAX_DAYS:
                 is_stale = True
         else:
-            if age_days > 14.0:
+            if age_days > TLE_AGE_DEFAULT_MAX_DAYS:
                 is_stale = True
                 
         if not is_stale:

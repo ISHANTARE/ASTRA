@@ -72,17 +72,58 @@ def parse_tle(name: str, line1: str, line2: str) -> SatelliteTLE:
     line1 = line1.strip()
     line2 = line2.strip()
 
-    # Length and checksum checks
-    if len(line1) != 69 or len(line2) != 69:
-        raise InvalidTLEError("Length != 69", norad_id="UNKNOWN", object_name=name, invalid_line=line1, reason="LENGTH")
-    if not line1.startswith("1 ") or not line2.startswith("2 "):
-        raise InvalidTLEError("Bad start", norad_id="UNKNOWN", object_name=name, invalid_line=line1, reason="START")
-    
+    # 2. Length checks (each line must be exactly 69 characters)
+    if len(line1) != 69:
+        raise InvalidTLEError(
+            f"Line 1 length is {len(line1)}, expected 69",
+            norad_id="UNKNOWN", object_name=name, invalid_line=line1, reason="L1_LENGTH",
+        )
+    if len(line2) != 69:
+        raise InvalidTLEError(
+            f"Line 2 length is {len(line2)}, expected 69",
+            norad_id="UNKNOWN", object_name=name, invalid_line=line2, reason="L2_LENGTH",
+        )
+
+    # 3. Prefix checks (line 1 must start with "1 ", line 2 with "2 ")
+    if not line1.startswith("1 "):
+        raise InvalidTLEError(
+            "Line 1 does not start with '1 '",
+            norad_id="UNKNOWN", object_name=name, invalid_line=line1, reason="L1_PREFIX",
+        )
+    if not line2.startswith("2 "):
+        raise InvalidTLEError(
+            "Line 2 does not start with '2 '",
+            norad_id="UNKNOWN", object_name=name, invalid_line=line2, reason="L2_PREFIX",
+        )
+
+    # 4. Checksum validation
     try:
-        if _compute_checksum(line1) != int(line1[68]) or _compute_checksum(line2) != int(line2[68]):
-            raise InvalidTLEError("Bad checksum", norad_id="UNKNOWN", object_name=name, invalid_line=line1, reason="CHECKSUM")
+        expected_cs1 = int(line1[68])
+        if _compute_checksum(line1) != expected_cs1:
+            raise InvalidTLEError(
+                "Line 1 checksum mismatch",
+                norad_id="UNKNOWN", object_name=name, invalid_line=line1, reason="L1_CHECKSUM",
+            )
     except ValueError:
-        raise InvalidTLEError("Invalid checksum character", norad_id="UNKNOWN", object_name=name, invalid_line=line1, reason="CHECKSUM")
+        raise InvalidTLEError(
+            "Line 1 checksum character is not a digit",
+            norad_id="UNKNOWN", object_name=name, invalid_line=line1, reason="L1_CHECKSUM",
+        )
+
+    try:
+        expected_cs2 = int(line2[68])
+        if _compute_checksum(line2) != expected_cs2:
+            raise InvalidTLEError(
+                "Line 2 checksum mismatch",
+                norad_id="UNKNOWN", object_name=name, invalid_line=line2, reason="L2_CHECKSUM",
+            )
+    except ValueError:
+        raise InvalidTLEError(
+            "Line 2 checksum character is not a digit",
+            norad_id="UNKNOWN", object_name=name, invalid_line=line2, reason="L2_CHECKSUM",
+        )
+
+    # 5. NORAD ID consistency
     norad_id = line1[2:7].strip()
     norad_id2 = line2[2:7].strip()
     if norad_id != norad_id2:
@@ -94,7 +135,7 @@ def parse_tle(name: str, line1: str, line2: str) -> SatelliteTLE:
             reason="ID_MISMATCH",
         )
 
-    # 8. Extract epoch and convert to Julian Date
+    # 6. Extract epoch and convert to Julian Date
     epoch_str = line1[18:32].strip()
     try:
         epoch_jd = _parse_epoch_to_jd(epoch_str)
@@ -107,7 +148,7 @@ def parse_tle(name: str, line1: str, line2: str) -> SatelliteTLE:
             reason="EPOCH_PARSE_ERROR",
         )
 
-    # 9. Extract object_type
+    # 7. Extract object_type from classification character
     classification = line1[7]
     if classification == "U":
         object_type = "UNKNOWN"
@@ -118,10 +159,9 @@ def parse_tle(name: str, line1: str, line2: str) -> SatelliteTLE:
     elif classification == "R":
         object_type = "ROCKET_BODY"
     else:
-        # Default fallback, though typically unclassified/unknown is used
         object_type = "UNKNOWN"
 
-    # 10. Instantiate and return
+    # 8. Instantiate and return
     return SatelliteTLE(
         norad_id=norad_id,
         name=name,
@@ -161,8 +201,6 @@ def _chunk_tle_lines(tle_lines: list[str]) -> list[tuple[str, str, str]]:
         name = lines[i]
         line1 = lines[i+1]
         line2 = lines[i+2]
-        # Very basic check to ensure we are somewhat aligned on 1 and 2
-        # If not, try to realign by skipping one line
         if line1.startswith("1 ") and line2.startswith("2 "):
             triplets.append((name, line1, line2))
             i += 3
@@ -192,26 +230,20 @@ def load_tle_catalog(tle_lines: list[str]) -> list[SatelliteTLE]:
 
     triplets = _chunk_tle_lines(tle_lines)
     
-    # If we couldn't form any triplets but had lines, the format is totally broken
     if not triplets and any(L.strip() for L in tle_lines):
         raise AstraError("Failed to parse any TLE triplets from input lines.")
 
     results: list[SatelliteTLE] = []
     
     for name, line1, line2 in triplets:
-        if validate_tle(name, line1, line2):
-            try:
-                sat = parse_tle(name, line1, line2)
-                results.append(sat)
-            except InvalidTLEError as e:
-                # Should theoretically not happen as validate_tle caught it, but safely catch
-                logger.warning(
-                    f"Skipping invalid TLE for {name} (NORAD {e.norad_id}): {e.message}"
-                )
-        else:
-            # Attempt to extract norad if possible for logging
-            norad_id = line1[2:7].strip() if len(line1) >= 7 and line1.startswith("1 ") else "UNKNOWN"
-            logger.warning(f"Skipping invalid TLE for {name} (NORAD {norad_id})")
+        try:
+            sat = parse_tle(name, line1, line2)
+            results.append(sat)
+        except InvalidTLEError as e:
+            norad_id = e.norad_id or "UNKNOWN"
+            logger.warning(
+                f"Skipping invalid TLE for {name} (NORAD {norad_id}): {e.message}"
+            )
 
     if not results and any(L.strip() for L in tle_lines):
         raise AstraError("Total parse failure: no valid TLEs found in non-empty catalog input.")

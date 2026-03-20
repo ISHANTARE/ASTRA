@@ -46,10 +46,10 @@ def test_visible_from_location_shapes(iss_tle, observer):
 
 def test_passes_over_location_integration(iss_tle, observer):
     # This involves binary search and full SGP4
-    start_jd = sample_tle.epoch_jd
+    start_jd = iss_tle.epoch_jd
     end_jd = start_jd + (100.0 / 1440.0) # 100 minutes
     
-    passes = passes_over_location(sample_tle, observer, float(start_jd), float(end_jd), 1.0)
+    passes = passes_over_location(iss_tle, observer, float(start_jd), float(end_jd), 1.0)
     
     # We don't guarantee a pass in 100 mins, but it shouldn't crash
     assert isinstance(passes, list)

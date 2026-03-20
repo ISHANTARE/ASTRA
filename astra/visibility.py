@@ -72,7 +72,7 @@ def visible_from_location(
         return np.array([])
 
     ts = load.timescale()
-    t = ts.utc(jd=times_jd)
+    t = ts.tt_jd(times_jd)
 
     r_teme_au = positions_teme.T / AU_KM
     
@@ -108,7 +108,7 @@ def get_azimuths(
 ) -> np.ndarray:
     """Companion function for azimuth processing using the same fast matrix algebra."""
     ts = load.timescale()
-    t = ts.utc(jd=times_jd)
+    t = ts.tt_jd(times_jd)
 
     r_teme_au = positions_teme.T / AU_KM
     R_teme_to_gcrs = np.transpose(TEME.rotation_at(t), axes=(1, 0, 2)) if hasattr(t, 'shape') else np.transpose(TEME.rotation_at(t))
@@ -147,7 +147,8 @@ def _find_exact_crossing(
     
     for _ in range(iterations):
         t_mid = (tl + th) / 2.0
-        state = propagate_orbit(satellite, t_mid, 0.0) 
+        t_since_min = (t_mid - satellite.epoch_jd) * 1440.0
+        state = propagate_orbit(satellite, satellite.epoch_jd, t_since_min)
         
         if state.error_code != 0:
             return t_mid 

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from astra.errors import AstraError
@@ -39,12 +39,60 @@ class ConjunctionDataMessage:
 
 def _parse_time(time_str: str) -> datetime:
     """Parse standard ISO 8601 formatting from CCSDS XML."""
-    # Often formatted as 2023-10-15T12:00:00.000Z
     clean_str = time_str.replace("Z", "+00:00")
     return datetime.fromisoformat(clean_str)
 
+def _findtext(element: ET.Element, tag: str, default: str = "") -> str:
+    """Search for a tag at any depth within the XML tree."""
+    result = element.findtext(f".//{tag}", default=default)
+    return result
+
+def _parse_cdm_object(root: ET.Element, prefix: str) -> CDMObject:
+    """Parse a single CDM object (OBJECT1 or OBJECT2) from the XML tree.
+    
+    Extracts the object designator, name, state vector, and covariance matrix.
+    """
+    designator = _findtext(root, f"{prefix}_OBJECT_DESIGNATOR", "UNKNOWN")
+    if not designator or designator == "UNKNOWN":
+        designator = _findtext(root, "OBJECT_DESIGNATOR", "UNKNOWN")
+    
+    name = _findtext(root, f"{prefix}_OBJECT_NAME", "Unknown")
+    if not name or name == "Unknown":
+        name = _findtext(root, "OBJECT_NAME", "Unknown")
+    
+    # State vector (km, km/s)
+    x = float(_findtext(root, f"{prefix}_X", "0.0"))
+    y = float(_findtext(root, f"{prefix}_Y", "0.0"))
+    z = float(_findtext(root, f"{prefix}_Z", "0.0"))
+    vx = float(_findtext(root, f"{prefix}_X_DOT", "0.0"))
+    vy = float(_findtext(root, f"{prefix}_Y_DOT", "0.0"))
+    vz = float(_findtext(root, f"{prefix}_Z_DOT", "0.0"))
+    
+    # RTN Covariance (21 elements, upper-triangular row-major)
+    cov_tags = [
+        "CR_R", "CT_R", "CT_T", "CN_R", "CN_T", "CN_N",
+        "CRDOT_R", "CRDOT_T", "CRDOT_N", "CRDOT_RDOT",
+        "CTDOT_R", "CTDOT_T", "CTDOT_N", "CTDOT_RDOT", "CTDOT_TDOT",
+        "CNDOT_R", "CNDOT_T", "CNDOT_N", "CNDOT_RDOT", "CNDOT_TDOT", "CNDOT_NDOT",
+    ]
+    cov = []
+    for tag in cov_tags:
+        val_str = _findtext(root, tag, "0.0")
+        cov.append(float(val_str))
+    
+    return CDMObject(
+        object_designator=designator,
+        object_name=name,
+        position_xyz=(x, y, z),
+        velocity_xyz=(vx, vy, vz),
+        covariance_matrix=cov,
+    )
+
 def parse_cdm_xml(xml_string: str) -> ConjunctionDataMessage:
     """Parses a standard CCSDS XML Conjunction Data Message.
+    
+    Extracts all fields including object state vectors and RTN covariance 
+    matrices from the standard CCSDS CDM format.
     
     Args:
         xml_string: Raw XML response from Space-Track or local CDM file.
@@ -65,25 +113,32 @@ def parse_cdm_xml(xml_string: str) -> ConjunctionDataMessage:
             
         root = ET.fromstring(clean_xml)
         
-        # This is a structural scaffold for the parser. 
-        # A full production parser decodes exactly 21 covariance elements per object
-        # and transforms GCRF state vectors into the encounter B-Plane.
+        msg_id = _findtext(root, "MESSAGE_ID", "UNKNOWN")
+        creation_str = _findtext(root, "CREATION_DATE", "1970-01-01T00:00:00Z")
+        tca_str = _findtext(root, "TCA", "1970-01-01T00:00:00Z")
+        miss_m = float(_findtext(root, "MISS_DISTANCE", "0.0"))
+        rel_vel = float(_findtext(root, "RELATIVE_SPEED", "0.0"))
         
-        msg_id = root.findtext(".//MESSAGE_ID", default="UNKNOWN")
-        tca = _parse_time(root.findtext(".//TCA", default="1970-01-01T00:00:00Z"))
-        miss_m = float(root.findtext(".//MISS_DISTANCE", default="0.0"))
+        pc_str = _findtext(root, "COLLISION_PROBABILITY", "")
+        pc_val = float(pc_str) if pc_str else None
+        
+        obj1 = _parse_cdm_object(root, "OBJECT1")
+        obj2 = _parse_cdm_object(root, "OBJECT2")
+        
+        tca = _parse_time(tca_str)
+        creation = _parse_time(creation_str)
         
         logger.debug(f"Decoded CDM {msg_id} - TCA: {tca.isoformat()} - Miss: {miss_m}m")
         
         return ConjunctionDataMessage(
             message_id=msg_id,
-            creation_date=datetime.utcnow(),
+            creation_date=creation,
             tca_time=tca,
             miss_distance_m=miss_m,
-            relative_velocity_m_s=0.0,
-            collision_probability=None,
-            object_1=CDMObject("OBJ1", "Primary", (0,0,0), (0,0,0), []),
-            object_2=CDMObject("OBJ2", "Secondary", (0,0,0), (0,0,0), [])
+            relative_velocity_m_s=rel_vel,
+            collision_probability=pc_val,
+            object_1=obj1,
+            object_2=obj2,
         )
     except Exception as e:
         logger.error(f"CDM Parsing failed: {e}")

@@ -9,8 +9,9 @@ import numpy as np
 import plotly.graph_objects as go
 
 from astra.models import ConjunctionEvent, TrajectoryMap
+from astra.constants import EARTH_RADIUS_KM
 
-_EARTH_RADIUS_KM = 6371.0
+_EARTH_RADIUS_KM = EARTH_RADIUS_KM
 
 
 def _add_earth_sphere(fig: go.Figure, resolution: int = 50) -> None:
@@ -86,9 +87,9 @@ def plot_trajectories(
     fig.update_layout(
         title=title,
         scene=dict(
-            xaxis_title='X (km GCRS)',
-            yaxis_title='Y (km GCRS)',
-            zaxis_title='Z (km GCRS)',
+            xaxis_title='X (km TEME)',
+            yaxis_title='Y (km TEME)',
+            zaxis_title='Z (km TEME)',
             aspectmode='data',
         ),
         margin=dict(l=0, r=0, b=0, t=40)
