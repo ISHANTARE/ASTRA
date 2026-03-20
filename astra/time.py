@@ -171,4 +171,4 @@ def convert_time(
 
     # to_format == "skyfield"
     ts = _get_timescale()
-    return ts.from_jd(jd)  # type: ignore[no-any-return]
+    return ts.tt_jd(jd)  # type: ignore[no-any-return]

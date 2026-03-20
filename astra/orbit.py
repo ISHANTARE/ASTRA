@@ -133,7 +133,7 @@ def ground_track(
         return []
 
     ts = load.timescale()
-    t = ts.utc(jd=times_jd)
+    t = ts.tt_jd(times_jd)
     
     # 1. Convert positions to AU for skyfield operations. shape (3, T)
     r_teme_au = positions_teme.T / AU_KM

@@ -31,7 +31,7 @@ def test_fetch_celestrak_group(mock_get):
     
     catalog = fetch_celestrak_group("starlink")
     assert len(catalog) == 2
-    mock_get.assert_called_with("https://celestrak.org/NORAD/elements/gp.php?GROUP=starlink&FORMAT=tle", timeout=15.0)
+    mock_get.assert_called_with("https://celestrak.org/NORAD/elements/gp.php?GROUP=starlink&FORMAT=tle", timeout=20.0)
 
 @patch("requests.get")
 def test_fetch_celestrak_error(mock_get):

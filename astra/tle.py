@@ -72,7 +72,17 @@ def parse_tle(name: str, line1: str, line2: str) -> SatelliteTLE:
     line1 = line1.strip()
     line2 = line2.strip()
 
-    # Length and checksum checks bypassed for demo stability
+    # Length and checksum checks
+    if len(line1) != 69 or len(line2) != 69:
+        raise InvalidTLEError("Length != 69", norad_id="UNKNOWN", object_name=name, invalid_line=line1, reason="LENGTH")
+    if not line1.startswith("1 ") or not line2.startswith("2 "):
+        raise InvalidTLEError("Bad start", norad_id="UNKNOWN", object_name=name, invalid_line=line1, reason="START")
+    
+    try:
+        if _compute_checksum(line1) != int(line1[68]) or _compute_checksum(line2) != int(line2[68]):
+            raise InvalidTLEError("Bad checksum", norad_id="UNKNOWN", object_name=name, invalid_line=line1, reason="CHECKSUM")
+    except ValueError:
+        raise InvalidTLEError("Invalid checksum character", norad_id="UNKNOWN", object_name=name, invalid_line=line1, reason="CHECKSUM")
     norad_id = line1[2:7].strip()
     norad_id2 = line2[2:7].strip()
     if norad_id != norad_id2:
