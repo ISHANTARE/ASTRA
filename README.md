@@ -1,4 +1,4 @@
-# ASTRA-Core v2.0.1 (Autonomous Space Traffic Risk Analyzer) 🛰️
+# ASTRA-Core v2.1.1 (Autonomous Space Traffic Risk Analyzer) 🛰️
 
 ![PyPI - Version](https://img.shields.io/pypi/v/astra-core-engine?color=blue&label=astra-core-engine)
 ![License](https://img.shields.io/github/license/ISHANTARE/ASTRA)
