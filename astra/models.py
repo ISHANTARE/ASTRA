@@ -10,6 +10,7 @@ Every dataclass uses ``frozen=True`` to enforce immutability.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 from typing import Optional
 
 import numpy as np
@@ -79,6 +80,84 @@ def projected_area_m2(
         total_area += cos_angle * area
 
     return total_area
+
+
+# ---------------------------------------------------------------------------
+# Maneuver Frame Enumeration
+# ---------------------------------------------------------------------------
+
+
+class ManeuverFrame(Enum):
+    """Reference frame for specifying maneuver thrust direction.
+
+    VNB (Velocity-Normal-Binormal):
+        - V: Along the instantaneous velocity vector.
+        - N: Along the orbital angular momentum (R × V).
+        - B: Completes the right-handed triad (V × N).
+        Preferred for orbit-raising and lowering burns because the
+        thrust is aligned exactly with the velocity vector, even on
+        eccentric orbits.
+
+    RTN (Radial-Transverse-Normal) / RIC (Radial-Intrack-Crosstrack):
+        - R: Along the geocentric radial (position) vector.
+        - T: Perpendicular to R in the orbital plane, roughly along-track.
+        - N: Along the orbital angular momentum (R × V).
+        Preferred for station-keeping and relative navigation.
+    """
+
+    VNB = "VNB"
+    RTN = "RTN"
+
+
+# ---------------------------------------------------------------------------
+# FiniteBurn (Maneuver Definition)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class FiniteBurn:
+    """Finite-duration thrust maneuver for the 7-DOF Cowell propagator.
+
+    Models a continuous engine burn with dynamically steered thrust
+    (re-computed at every integration sub-step) and Tsiolkovsky-coupled
+    mass depletion.
+
+    All epochs are Julian Dates.  Thrust direction is given as a *unit
+    vector* in the chosen ``ManeuverFrame``; the engine magnitude is
+    set by ``thrust_N``.
+
+    Attributes:
+        epoch_ignition_jd: Julian Date of engine ignition.
+        duration_s:        Burn duration in seconds (> 0).
+        thrust_N:          Engine thrust magnitude in Newtons (> 0).
+        isp_s:             Specific impulse in seconds (> 0).
+        direction:         Unit-length thrust direction in ``frame``.
+                           Shape ``(3,)``, e.g. ``[1, 0, 0]`` for a pure
+                           V-axis burn in VNB.
+        frame:             Reference frame of ``direction``.
+    """
+
+    epoch_ignition_jd: float
+    duration_s: float
+    thrust_N: float
+    isp_s: float
+    direction: tuple[float, float, float]
+    frame: ManeuverFrame
+
+    @property
+    def epoch_cutoff_jd(self) -> float:
+        """Julian Date of engine cutoff."""
+        return self.epoch_ignition_jd + self.duration_s / 86400.0
+
+    @property
+    def mass_flow_rate_kg_s(self) -> float:
+        """Propellant mass flow rate dm/dt (kg/s, positive value).
+
+        Derived from the Tsiolkovsky relation:
+            dm/dt = F / (Isp * g₀)
+        """
+        G0 = 9.80665  # m/s², standard gravitational acceleration
+        return self.thrust_N / (self.isp_s * G0)
 
 
 # ---------------------------------------------------------------------------

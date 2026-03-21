@@ -33,12 +33,15 @@ from astra.errors import (
     CoordinateError,
     FilterError,
     InvalidTLEError,
+    ManeuverError,
     PropagationError,
 )
 from astra.models import (
     ConjunctionEvent,
     DebrisObject,
     FilterConfig,
+    FiniteBurn,
+    ManeuverFrame,
     Observer,
     OrbitalState,
     PassEvent,
@@ -56,6 +59,20 @@ from astra.propagator import (
     NumericalState,
     DragConfig,
     propagate_cowell,
+)
+from astra.maneuver import (
+    rotation_vnb_to_inertial,
+    rotation_rtn_to_inertial,
+    frame_to_inertial,
+    thrust_acceleration_inertial,
+    validate_burn,
+)
+from astra.data_pipeline import (
+    sun_position_de,
+    moon_position_de,
+    get_space_weather,
+    load_space_weather,
+    atmospheric_density_empirical,
 )
 from astra.plot import plot_trajectories
 from astra.time import convert_time
@@ -127,4 +144,18 @@ __all__ = [
     "projected_area_m2",
     "propagate_many_generator",
     "SpatialIndex",
+    # Maneuver & High-Fidelity Physics
+    "ManeuverFrame",
+    "FiniteBurn",
+    "ManeuverError",
+    "rotation_vnb_to_inertial",
+    "rotation_rtn_to_inertial",
+    "frame_to_inertial",
+    "thrust_acceleration_inertial",
+    "validate_burn",
+    "sun_position_de",
+    "moon_position_de",
+    "get_space_weather",
+    "load_space_weather",
+    "atmospheric_density_empirical",
 ]

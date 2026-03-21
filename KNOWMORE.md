@@ -35,3 +35,11 @@ A miss distance of 500 meters doesn't mean much on its own. We only have *statis
 - **6x6 State Propagation**: We integrate a 6x6 State Transition Matrix alongside the Cowell force model's numerical Jacobian. This correctly ties initial velocity variance into exploding positional uncertainty over time mathematically perfectly.
 - **6D Monte Carlo Encounter Sampling**: To calculate actual impact likelihood, we extract our localized 6D $C_0$ covariance. We generate tens of thousands of unique $N(\mu, \Sigma)$ 6D relative state vectors around the TCA. We project each localized error pair rectilinearly across the brief collision window to calculate exact structural minimum distances.
 - **Impact %**: The final ratio of structural intersections yields the true Probability of Collision ($P_c$), enabling mission control centers to definitively act on evasive maneuvers.
+
+## 6. Active Collision Avoidance Maneuvers & Operations-Grade Physics
+Static un-thrusting satellites are rarely the focus of highly critical events. When risk hits a certain threshold, operators must plot **Collision Avoidance (COLA) Maneuvers**, fundamentally altering the numerical propagation chain.
+
+ASTRA-Core uses a **7-DOF Variable Mass Cowell Integrator** for this step:
+1. **Attitude-Steered Burns**: Instead of a simple delta-V impulse, we define exact burn durations and engine thrust metrics. At every micro-step of propagation, the physics engine dynamically rotates the spacecraft vector (e.g. "burn along the current velocity axis") back into the absolute Space frame dynamically.
+2. **Tsiolkovsky Flow**: Mass depletes continuously over the engine burn based on standard Specific Impulse equations (dm/dt = -F / Isp). This directly decreases inertial mass mid-flight resulting in greater resulting accelerations.
+3. **Space Weather & Celestial Truth**: During precision COLA verification, approximations are dumped. The integration loop inherently scales its atmospheric density drag based on **Live F10.7 Solar Flux** fed automatically from the internet and replaces the position of the Sun/Moon with highly rigorous sub-arcsecond **NASA JPL Ephemerides (DE421)**.

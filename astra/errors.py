@@ -9,7 +9,8 @@ Hierarchy:
     ├── InvalidTLEError       — TLE parsing and validation failures
     ├── PropagationError      — SGP4 propagation failures
     ├── FilterError           — Invalid filter configuration
-    └── CoordinateError       — Coordinate frame conversion failures
+    ├── CoordinateError       — Coordinate frame conversion failures
+    └── ManeuverError         — Maneuver definition or execution failures
 """
 from __future__ import annotations
 
@@ -137,3 +138,27 @@ class CoordinateError(AstraError):
     ) -> None:
         super().__init__(message, frame=frame)
         self.frame: Optional[str] = frame
+
+
+class ManeuverError(AstraError):
+    """Raised when maneuver definition or execution fails.
+
+    Covers validation issues (non-unit direction vector, negative Isp,
+    mass depletion exceeding available propellant) and runtime failures
+    during the 7-DOF powered integration phase.
+
+    Args:
+        message: Human-readable error description.
+        parameter: Name of the offending parameter, if applicable.
+        value: The invalid value, if applicable.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        parameter: Optional[str] = None,
+        value: Optional[Any] = None,
+    ) -> None:
+        super().__init__(message, parameter=parameter, value=value)
+        self.parameter: Optional[str] = parameter
+        self.value: Optional[Any] = value
