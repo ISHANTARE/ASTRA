@@ -8,7 +8,8 @@ for coordinate frame conversions. No manual orbital equations allowed.
 from __future__ import annotations
 
 import numpy as np
-from sgp4.api import Satrec, WGS84
+from typing import Generator
+from sgp4.api import Satrec, WGS84, SatrecArray
 from skyfield.api import load, wgs84
 from skyfield.constants import AU_KM
 from skyfield.positionlib import Geocentric
@@ -50,14 +51,13 @@ def propagate_orbit(
 
 
 def propagate_many(
-    satellites: list[SatelliteTLE], time_steps: np.ndarray
+    satellites: list[SatelliteTLE], times_jd: np.ndarray
 ) -> TrajectoryMap:
     """Vectorized batch propagation of multiple satellites across a time array.
 
     Args:
         satellites: List of SatelliteTLE objects to propagate.
-        time_steps: 1D NumPy array of T time offsets in minutes since each
-            satellite's own epoch. (Shape: (T,), dtype: float64)
+        times_jd: 1D NumPy array of T absolute Julian Dates. (Shape: (T,), dtype: float64)
 
     Returns:
         TrajectoryMap: Dictionary mapping norad_id to np.ndarray shape (T, 3) 
@@ -65,24 +65,55 @@ def propagate_many(
             store np.nan at that timestep row.
     """
     results: TrajectoryMap = {}
+    N = len(satellites)
+    T = len(times_jd)
+    if N == 0 or T == 0:
+        return results
 
-    logger.info(f"Vector-propagating {len(satellites)} orbits across {len(time_steps)} discrete time steps using SGP4...")
+    logger.info(f"Vector-propagating {N} orbits across {T} discrete time steps using SatrecArray...")
 
-    for sat in satellites:
-        satrec = Satrec.twoline2rv(sat.line1, sat.line2)
-        
-        jd_array = sat.epoch_jd + (time_steps / 1440.0)
-        jd_fraction_array = np.zeros_like(jd_array)
-        
-        e, r, v = satrec.sgp4_array(jd_array, jd_fraction_array)
-        
-        # r is of shape (T, 3). e is of shape (T,) error codes.
-        # Set rows with error_codes > 0 to np.nan
-        r[e > 0] = np.nan
-        
-        results[sat.norad_id] = r
+    satrecs = [Satrec.twoline2rv(sat.line1, sat.line2) for sat in satellites]
+    satrec_array = SatrecArray(satrecs)
+    
+    jd_array = times_jd
+    jd_fraction_array = np.zeros_like(jd_array)
+    
+    e, r, _ = satrec_array.sgp4(jd_array, jd_fraction_array)
+    
+    r[e > 0] = np.nan
+    
+    for i, sat in enumerate(satellites):
+        results[sat.norad_id] = r[i]
 
     return results
+
+def propagate_many_generator(
+    satellites: list[SatelliteTLE], times_jd: np.ndarray, chunk_size: int = 1440
+) -> Generator[tuple[np.ndarray, TrajectoryMap], None, None]:
+    """Memory-efficient batch propagation yielding time-chunked results.
+    
+    Prevents Out-Of-Memory (OOM) fatal kills during massive all-vs-all STM queries
+    by yielding rolling spatial windows.
+    """
+    N = len(satellites)
+    T = len(times_jd)
+    if N == 0 or T == 0:
+        return
+
+    satrecs = [Satrec.twoline2rv(sat.line1, sat.line2) for sat in satellites]
+    satrec_array = SatrecArray(satrecs)
+    
+    for start_idx in range(0, T, chunk_size):
+        end_idx = min(start_idx + chunk_size, T)
+        
+        jd_chunk = times_jd[start_idx:end_idx]
+        frac_chunk = np.zeros_like(jd_chunk)
+        
+        e, r, _ = satrec_array.sgp4(jd_chunk, frac_chunk)
+        r[e > 0] = np.nan
+        
+        chunk_map = {sat.norad_id: r[i] for i, sat in enumerate(satellites)}
+        yield jd_chunk, chunk_map
 
 
 def propagate_trajectory(
@@ -108,11 +139,11 @@ def propagate_trajectory(
     
     # Adding a tiny epsilon to end_offset_mins to ensure inclusive bound if it aligns exactly
     time_steps = np.arange(start_offset_mins, end_offset_mins + 1e-9, step_minutes)
+    times_jd = satellite.epoch_jd + (time_steps / 1440.0)
     
-    trajectory_map = propagate_many([satellite], time_steps)
+    trajectory_map = propagate_many([satellite], times_jd)
     
     positions = trajectory_map[satellite.norad_id]
-    times_jd = satellite.epoch_jd + (time_steps / 1440.0)
     
     return times_jd, positions
 

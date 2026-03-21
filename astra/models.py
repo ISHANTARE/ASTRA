@@ -31,6 +31,56 @@ CandidatePairs = list[tuple[str, str]]
 TimeArray = np.ndarray  # shape (T,), dtype float64
 
 
+def _quat_rotate(q: tuple[float, float, float, float], v: np.ndarray) -> np.ndarray:
+    """Rotate vector v by quaternion q = (w, x, y, z)."""
+    w, qx, qy, qz = q
+    u = np.array([qx, qy, qz])
+    return v + 2.0 * np.cross(u, np.cross(u, v) + w * v)
+
+
+def projected_area_m2(
+    dimensions_m: tuple[float, float, float],
+    attitude_quaternion: tuple[float, float, float, float],
+    rel_vel_direction: np.ndarray,
+) -> float:
+    """Compute projected cross-sectional area of a box onto the B-plane.
+
+    Models the satellite as a rectangular cuboid with given dimensions,
+    rotated by the attitude quaternion. Projects the 3 face normals
+    onto the relative velocity direction and sums visible face areas.
+
+    This replaces the isotropic sphere assumption for collision geometry.
+
+    Args:
+        dimensions_m: (length, width, height) in meters.
+        attitude_quaternion: (w, x, y, z) unit quaternion.
+        rel_vel_direction: (3,) unit vector along relative velocity.
+
+    Returns:
+        Projected area in m².
+    """
+    l, w, h = dimensions_m
+    q = attitude_quaternion
+
+    # Body-frame face normals and their areas
+    faces = [
+        (np.array([1.0, 0.0, 0.0]), w * h),  # +X face
+        (np.array([0.0, 1.0, 0.0]), l * h),  # +Y face
+        (np.array([0.0, 0.0, 1.0]), l * w),  # +Z face
+    ]
+
+    total_area = 0.0
+    for normal_body, area in faces:
+        # Rotate face normal to ECI frame
+        normal_eci = _quat_rotate(q, normal_body)
+        # Projected area contribution = |n · v_hat| * face_area
+        # Factor of 2: both +/- faces can contribute
+        cos_angle = abs(float(np.dot(normal_eci, rel_vel_direction)))
+        total_area += cos_angle * area
+
+    return total_area
+
+
 # ---------------------------------------------------------------------------
 # SatelliteTLE
 # ---------------------------------------------------------------------------
@@ -59,6 +109,11 @@ class SatelliteTLE:
     line2: str
     epoch_jd: float
     object_type: str
+    rcs_m2: Optional[float] = None
+    radius_m: Optional[float] = None
+    dimensions_m: Optional[tuple[float, float, float]] = None  # (length, width, height)
+    attitude_quaternion: Optional[tuple[float, float, float, float]] = None  # (w, x, y, z)
+    attitude_mode: str = "TUMBLING"  # Options: "NADIR", "TUMBLING", "INERTIAL"
 
 
 # ---------------------------------------------------------------------------
@@ -119,6 +174,8 @@ class DebrisObject:
     apogee_km: float
     perigee_km: float
     object_class: str
+    rcs_m2: Optional[float] = None
+    radius_m: Optional[float] = None
 
 
 # ---------------------------------------------------------------------------

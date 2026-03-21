@@ -14,10 +14,10 @@ ASTRA-Core is the elite computational Python library powering the ASTRA ecosyste
 
 ## 🚀 Key Features
 
-* **Massively Vectorized SGP4 Propagation**: Propagate 15,000+ unclassified satellites across time arrays at 60Hz without bottlenecking the main thread.
-* **Algorithmic Conjunction Analysis**: Uses $O(n \log n)$ 1D Sweep-and-Prune spatial filters combined with 3D Axis-Aligned Bounding Boxes (AABBs) to prune 99.9% of non-threatening satellite pairs in milliseconds.
-* **Continuous Time of Closest Approach (TCA)**: Uses Hermite Spline Interpolation to find the exact millisecond of closest approach, rather than relying on discrete time steps.
-* **True Probability of Collision ($P_c$)**: Maps 3D covariance matrices (positional uncertainty) onto a 2D B-Plane encounter frame to calculate the mathematical true likelihood of impact (Mahalanobis Distance integration).
+* **High-Fidelity Cowell Method Propagation**: Integrate the exact equations of motion (DOP853) with an elite force model evaluating $J_2-J_4$ zonal harmonics, Atmospheric Drag, and Solar/Lunar third-body perturbations.
+* **Temporal Octree Conjunction Analysis**: Implements a highly optimized, persistent 3D $O(n \log n)$ Temporal Octree spatial index to uniquely isolate candidate colliding trajectories across massive time integrations.
+* **Continuous Time of Closest Approach (TCA)**: Uses interpolations to find the exact millisecond of closest approach, coupled with Dynamic LVLH Attitude Modes to project satellite cross-sections precisely at the impact geometry.
+* **True Probability of Collision ($P_c$)**: Executes a true 6D minimum-distance Monte Carlo probability distribution across colliding volumes, propagated physically via a full 6x6 State Transition Matrix built natively from numerical force Jacobians.
 * **Official Data Integration**: Directly parses active catalogs from CelesTrak and reads official U.S. Space Force CDM (Conjunction Data Message) XMLs.
 * **Pass Predictions**: Calculate topocentric geometry to find when a satellite will be visible from a specific ground station.
 

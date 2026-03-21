@@ -31,12 +31,14 @@ def test_propagate_error_code_zero(iss_tle):
     assert state.error_code == 0
 
 def test_propagate_many_output_shape(iss_tle, time_steps):
-    trajectories = propagate_many([iss_tle], time_steps)
+    times_jd = iss_tle.epoch_jd + (time_steps / 1440.0)
+    trajectories = propagate_many([iss_tle], times_jd)
     assert "25544" in trajectories
     assert trajectories["25544"].shape == (288, 3)
 
 def test_propagate_many_no_nan_for_valid(iss_tle, time_steps):
-    trajectories = propagate_many([iss_tle], time_steps)
+    times_jd = iss_tle.epoch_jd + (time_steps / 1440.0)
+    trajectories = propagate_many([iss_tle], times_jd)
     assert not np.isnan(trajectories["25544"]).any()
 
 def test_propagate_many_nan_for_decayed(time_steps):

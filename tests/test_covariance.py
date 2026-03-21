@@ -14,7 +14,7 @@ def test_compute_collision_probability_zero_miss():
     cov_a = np.eye(3) * 10.0
     cov_b = np.eye(3) * 5.0
     
-    p = compute_collision_probability(miss_vec, rel_vel, cov_a, cov_b, 0.010)
+    p = compute_collision_probability(miss_vec, rel_vel, cov_a, cov_b, radius_a_km=0.005, radius_b_km=0.005)
     assert p > 0.0
     assert p <= 1.0
 
@@ -24,7 +24,7 @@ def test_compute_collision_probability_far_miss():
     cov_a = np.eye(3) * 1.0
     cov_b = np.eye(3) * 1.0
     
-    p = compute_collision_probability(miss_vec, rel_vel, cov_a, cov_b, 0.010)
+    p = compute_collision_probability(miss_vec, rel_vel, cov_a, cov_b, radius_a_km=0.005, radius_b_km=0.005)
     assert p < 1e-10
 
 def test_compute_collision_probability_deterministic():
@@ -34,9 +34,9 @@ def test_compute_collision_probability_deterministic():
     cov_b = np.zeros((3, 3))
     
     # 0 variance, miss < 10m combined radius
-    p = compute_collision_probability(miss_vec, rel_vel, cov_a, cov_b, 0.010)
+    p = compute_collision_probability(miss_vec, rel_vel, cov_a, cov_b, radius_a_km=0.005, radius_b_km=0.005)
     assert p == 1.0
     
     miss_vec_far = np.array([0.015, 0.0, 0.0]) # 15 meters
-    p2 = compute_collision_probability(miss_vec_far, rel_vel, cov_a, cov_b, 0.010)
+    p2 = compute_collision_probability(miss_vec_far, rel_vel, cov_a, cov_b, radius_a_km=0.005, radius_b_km=0.005)
     assert p2 == 0.0

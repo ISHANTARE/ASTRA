@@ -26,16 +26,12 @@ Tracking a satellite requires rigorous conversion between reference frames. ASTR
 When you have 30,000 active objects in space, checking every pair for a collision at every single second over a week is computationally impossible ($O(n^2)$ complexity). 
 
 How ASTRA-Core solves this efficiently:
-1. **Sweep and Prune (Spatial Filtering)**: We project all satellite orbits onto a 1D axis and sort them. We instantly ignore pairs that are nowhere near each other. We then use 3D bounding boxes (Axis-Aligned Bounding Boxes or AABBs) to filter out 99.9% of pairs in milliseconds.
-2. **Hermite Spline Interpolation**: For the remaining "close calls" (Conjunctions), we don't just calculate positions frame-by-frame. Instead, we generate a continuous mathematical curve (a cubic spline) of the distance between the two satellites over time. We use calculus to find the mathematical root (minimum) of that curve to discover the exact **Time of Closest Approach (TCA)** down to the millisecond.
+1. **Temporal Octree Sweeping**: We build a recursive 3D spatial hierarchy (an Octree) containing the bounding boxes of satellite trajectories. By evaluating spatial overlap uniquely across discrete integration intervals, we instantly discard 99.9% of safely passing configurations in $O(N \log N)$ time.
+2. **Dynamic Attitude Cross-Sections**: For surviving "close calls", we compute the exact TCA (Time of Closest Approach). Based on the satellite's specific hardware pointing mode (e.g. Nadir Earth-pointing), we dynamically rotate its geometric faces to calculate the exact projected surface area slicing through the probability field.
 
-## 5. Probability of Collision ($P_c$)
-A miss distance of 500 meters doesn't mean much on its own, because radars aren't perfect. We only have *estimations* of a satellite's position, represented mathematically by a 3x3 **Covariance Matrix** (which forms a 3D error ellipsoid around the satellite).
+## 5. Covariance ($P_c$) & The 6x6 State Transition Matrix (STM)
+A miss distance of 500 meters doesn't mean much on its own. We only have *statistical estimations* of a satellite's state. ASTRA maps this uncertainty fundamentally:
 
-ASTRA-Core uses **Mahalanobis Distance** and **B-Plane Mapping** to find the truth:
-- We look at the exact moment of closest approach (TCA).
-- We project the 3D error ellipsoids of both the primary and secondary satellites onto a 2D plane perpendicular to their relative velocity (the B-Plane).
-- We combine their errors into a single 2D Gaussian probability distribution.
-- We integrate over the combined hard-body cross-sectional area of the satellites to answer a single question: *What is the statistical probability (%) that these two objects will physically intersect?*
-
-That final $P_c$ value is the true metric used by mission control centers globally to decide if an evasive orbital maneuver is necessary!
+- **6x6 State Propagation**: We integrate a 6x6 State Transition Matrix alongside the Cowell force model's numerical Jacobian. This correctly ties initial velocity variance into exploding positional uncertainty over time mathematically perfectly.
+- **6D Monte Carlo Encounter Sampling**: To calculate actual impact likelihood, we extract our localized 6D $C_0$ covariance. We generate tens of thousands of unique $N(\mu, \Sigma)$ 6D relative state vectors around the TCA. We project each localized error pair rectilinearly across the brief collision window to calculate exact structural minimum distances.
+- **Impact %**: The final ratio of structural intersections yields the true Probability of Collision ($P_c$), enabling mission control centers to definitively act on evasive maneuvers.

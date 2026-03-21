@@ -14,9 +14,10 @@ import numpy as np
 import scipy.interpolate
 
 from astra.errors import AstraError
-from astra.models import ConjunctionEvent, DebrisObject, TrajectoryMap
+from astra.models import ConjunctionEvent, DebrisObject, TrajectoryMap, projected_area_m2
 from astra.covariance import compute_collision_probability, estimate_covariance
 from astra.log import get_logger
+from astra.spatial_index import SpatialIndex
 
 logger = get_logger(__name__)
 
@@ -33,6 +34,57 @@ def _classify_risk(P_c: float) -> str:
     if P_c > 1e-5: return "HIGH"
     if P_c > 1e-6: return "MEDIUM"
     return "LOW"
+
+
+def _dynamic_radius_km(
+    obj: DebrisObject, 
+    rel_vel_hat: np.ndarray, 
+    pos_eci: np.ndarray, 
+    vel_eci: np.ndarray
+) -> float:
+    """Compute effective collision radius from dynamic attitude or fallback.
+    
+    Supports NADIR (Earth-pointing), TUMBLING (average area), and INERTIAL.
+    """
+    tle = obj.tle
+    if tle.dimensions_m is not None:
+        l, w, h = tle.dimensions_m
+        import math
+        
+        if tle.attitude_mode == "TUMBLING":
+            # Average projected area of a convex body is 1/4 of total surface area
+            area_m2 = 2.0 * (l*w + w*h + h*l) / 4.0
+            
+        elif tle.attitude_mode == "NADIR":
+            # LVLH Frame: Zenith (+Z), Orbit Normal (-Y), Velocity/Along-track (+X)
+            pos_hat = pos_eci / max(np.linalg.norm(pos_eci), 1e-12)
+            vel_hat = vel_eci / max(np.linalg.norm(vel_eci), 1e-12)
+            normal_hat = np.cross(pos_hat, vel_hat)
+            normal_hat /= max(np.linalg.norm(normal_hat), 1e-12)
+            x_hat = np.cross(normal_hat, pos_hat)
+            
+            # ECI face normals
+            faces = [
+                (x_hat, w * h),      # +X (length along-track)
+                (normal_hat, l * h), # +Y (cross-track)
+                (pos_hat, l * w),    # +Z (zenith/radial)
+            ]
+            area_m2 = sum(abs(float(np.dot(n, rel_vel_hat))) * a for n, a in faces)
+            
+        elif tle.attitude_mode == "INERTIAL" and tle.attitude_quaternion is not None:
+            area_m2 = projected_area_m2(tle.dimensions_m, tle.attitude_quaternion, rel_vel_hat)
+            
+        else:
+            # Fallback to bounding sphere
+            diag = math.sqrt(l**2 + w**2 + h**2)
+            return (diag / 2.0) / 1000.0
+            
+        return math.sqrt(area_m2 / math.pi) / 1000.0
+        
+    if obj.radius_m:
+        return obj.radius_m / 1000.0
+    return 0.005  # default 5m
+
 
 def closest_approach(
     trajectory_a: np.ndarray, trajectory_b: np.ndarray, times_jd: np.ndarray
@@ -79,56 +131,31 @@ def find_conjunctions(
     logger.info(f"Initiating Conjunction Analysis for {len(norad_ids)} objects over {T_len} time steps.")
 
     # ---------------------------------------------------------
-    # Phase 1: Radial Bounding Shells (Sweep-And-Prune)
+    # Phase 1 & 2: Temporal Octree Sweeping (O(N log N))
     # ---------------------------------------------------------
-    logger.debug("Running Phase 1: 1D Sweep-and-Prune Radial Bounding...")
-    intervals = []
-    for nid in norad_ids:
-        obj = elements_map.get(nid)
-        if obj is None:
-            raise AstraError(f"DebrisObject for NORAD {nid} missing in elements_map.")
-        
-        min_r = obj.perigee_km + 6371.0
-        max_r = obj.apogee_km + 6371.0
-        intervals.append((min_r, max_r, nid))
-        
-    intervals.sort(key=lambda x: x[0])
-    candidate_pairs_phase1 = []
-    active = []
-    margin = coarse_threshold_km
+    logger.debug(f"Running Phase 1 & 2: Temporal Octree Rebuilding over {T_len} timesteps...")
     
-    for min_r, max_r, nid in intervals:
-        active = [a for a in active if a[1] + margin >= min_r]
-        for a_min, a_max, a_nid in active:
-            candidate_pairs_phase1.append((a_nid, nid))
-        active.append((min_r, max_r, nid))
+    dt_s = (times_jd[1] - times_jd[0]) * 86400.0 if T_len > 1 else 0.0
+    # Add buffer: max relative movement during dt (LEO vs LEO max ~15 km/s)
+    search_radius_km = coarse_threshold_km + (15.0 * dt_s)
+    
+    idx = SpatialIndex(half_size_km=50000.0, max_objects_per_node=16)
+    candidate_pairs_phase2 = set()
+    
+    # Step skipping logic: if dt is small, we don't need to rebuild every step.
+    step = max(1, int(coarse_threshold_km / (15.0 * dt_s))) if dt_s > 0 else 1
+    
+    for t_idx in range(0, T_len, step):
+        pos_dict = {nid: traj[t_idx] for nid, traj in trajectories.items()}
+        idx.rebuild(pos_dict)
+        step_pairs = idx.query_pairs(threshold_km=search_radius_km)
+        candidate_pairs_phase2.update(step_pairs)
 
-    if not candidate_pairs_phase1:
-        logger.info("Sweep-and-Prune complete: 0 candidate pairs found.")
+    if not candidate_pairs_phase2:
+        logger.info("Octree Temporal Sweep complete: 0 candidate pairs found.")
         return []
 
-    logger.debug(f"Phase 1 Complete: Pruned to {len(candidate_pairs_phase1)} radial collision candidates.")
-
-    # ---------------------------------------------------------
-    # Phase 2: Trajectory Volume Cartesian AABB
-    # ---------------------------------------------------------
-    logger.debug("Running Phase 2: Cartesian Axis-Aligned Bounding Box Intersection...")
-    traj_bounds = {}
-    for nid in norad_ids:
-        traj = trajectories[nid]
-        min_xyz = np.nanmin(traj, axis=0) # shape (3,)
-        max_xyz = np.nanmax(traj, axis=0)
-        traj_bounds[nid] = (min_xyz, max_xyz)
-
-    candidate_pairs_phase2 = set()
-    for A, B in candidate_pairs_phase1:
-        minA, maxA = traj_bounds[A]
-        minB, maxB = traj_bounds[B]
-        
-        if np.all((minA - margin <= maxB) & (maxA + margin >= minB)):
-            candidate_pairs_phase2.add((min(A, B), max(A, B)))
-
-    logger.info(f"AABB Filter Complete: Analyzing precise geometry for {len(candidate_pairs_phase2)} pairs.")
+    logger.info(f"Octree Filter Complete: Analyzing precise geometry for {len(candidate_pairs_phase2)} pairs.")
 
     # ---------------------------------------------------------
     # Phase 3: Exact Curvilinear TCA Interpolation
@@ -197,8 +224,14 @@ def find_conjunctions(
         
         miss_vector = pos_A - pos_B
         
+        rel_vel_hat = rel_vel_vec / max(rel_vel, 1e-12)
+        
+        # Attitude-aware dynamic collision radius
+        rad_A_km = _dynamic_radius_km(obj_A, rel_vel_hat, pos_A, vel_A)
+        rad_B_km = _dynamic_radius_km(obj_B, rel_vel_hat, pos_B, vel_B)
+        
         P_c = compute_collision_probability(
-            miss_vector, rel_vel_vec, cov_A, cov_B, combined_radius_km=0.010
+            miss_vector, rel_vel_vec, cov_A, cov_B, radius_a_km=rad_A_km, radius_b_km=rad_B_km
         )
         
         risk = _classify_risk(P_c)

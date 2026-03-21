@@ -10,7 +10,9 @@ from astra.conjunction import (
 )
 from astra.covariance import (
     compute_collision_probability,
+    compute_collision_probability_mc,
     estimate_covariance,
+    propagate_covariance_stm,
 )
 from astra.cdm import parse_cdm_xml, ConjunctionDataMessage
 from astra.data import (
@@ -41,18 +43,26 @@ from astra.models import (
     OrbitalState,
     PassEvent,
     SatelliteTLE,
+    projected_area_m2,
 )
 from astra.orbit import (
     ground_track,
     propagate_many,
+    propagate_many_generator,
     propagate_orbit,
     propagate_trajectory,
+)
+from astra.propagator import (
+    NumericalState,
+    DragConfig,
+    propagate_cowell,
 )
 from astra.plot import plot_trajectories
 from astra.time import convert_time
 from astra.tle import load_tle_catalog, parse_tle, validate_tle
 from astra.utils import haversine_distance, orbit_period, orbital_elements
 from astra.visibility import passes_over_location, visible_from_location
+from astra.spatial_index import SpatialIndex
 
 __all__ = [
     # TLE
@@ -108,4 +118,13 @@ __all__ = [
     "PropagationError",
     "FilterError",
     "CoordinateError",
+    # Sterling Architecture
+    "compute_collision_probability_mc",
+    "propagate_covariance_stm",
+    "propagate_cowell",
+    "NumericalState",
+    "DragConfig",
+    "projected_area_m2",
+    "propagate_many_generator",
+    "SpatialIndex",
 ]

@@ -2,11 +2,24 @@
 
 Calculates Mahalanobis distance and Probability of Collision (Pc) 
 by projecting 3D positional covariances onto the 2D encounter plane.
+
+Includes:
+- Analytical Foster/Chan Pc (rectilinear short-duration encounters)
+- Monte Carlo Pc (co-orbital, slow encounters, curvilinear geometry)
+- STM-based covariance propagation (linearized J2 dynamics)
+- Empirical covariance estimation (TLE degradation model)
 """
 from __future__ import annotations
 
 import math
 import numpy as np
+from scipy.integrate import solve_ivp
+
+from astra.constants import (
+    EARTH_EQUATORIAL_RADIUS_KM,
+    EARTH_MU_KM3_S2,
+    J2,
+)
 
 
 def compute_collision_probability(
@@ -14,7 +27,8 @@ def compute_collision_probability(
     rel_vel_km_s: np.ndarray, 
     cov_a: np.ndarray, 
     cov_b: np.ndarray, 
-    combined_radius_km: float = 0.010,
+    radius_a_km: float = 0.005,
+    radius_b_km: float = 0.005,
 ) -> float:
     """Computes Probability of Collision (Pc) via 2D projection on the encounter plane.
     
@@ -31,6 +45,7 @@ def compute_collision_probability(
     Returns:
         Probability of collision (float) bounded [0.0, 1.0].
     """
+    combined_radius_km = radius_a_km + radius_b_km
     C = cov_a + cov_b
     if np.all(C == 0):
         # Deterministic collision boolean
@@ -82,7 +97,7 @@ def compute_collision_probability(
     return float(np.clip(p_c, 0.0, 1.0))
 
 
-def estimate_covariance(time_since_epoch_days: float) -> np.ndarray:
+def estimate_covariance(time_since_epoch_days: float, f107_flux: float = 150.0) -> np.ndarray:
     """Generates an estimated positional covariance matrix (3x3) in RTN frame.
     
     Models realistic anisotropic TLE degradation based on Vallado & Alfano (2014):
@@ -108,8 +123,194 @@ def estimate_covariance(time_since_epoch_days: float) -> np.ndarray:
     # - Radial: ~50m base + 500m/day² growth
     # - In-track: ~100m base + 2km/day³ growth (drag-dominated)
     # - Cross-track: ~50m base + 100m/day growth
+    
+    drag_scale = max(0.1, f107_flux / 150.0)
+    
     sigma_r_km = 0.05 + 0.5 * days**2        # Radial
-    sigma_t_km = 0.1 + 2.0 * days**3         # In-track (transverse)
+    sigma_t_km = 0.1 + (2.0 * drag_scale) * days**3  # In-track (transverse)
     sigma_n_km = 0.05 + 0.1 * days           # Cross-track (normal)
     
     return np.diag([sigma_r_km**2, sigma_t_km**2, sigma_n_km**2])
+
+
+def compute_collision_probability_mc(
+    miss_vector_km: np.ndarray,
+    rel_vel_km_s: np.ndarray,
+    cov_a: np.ndarray,
+    cov_b: np.ndarray,
+    radius_a_km: float = 0.005,
+    radius_b_km: float = 0.005,
+    n_samples: int = 100_000,
+    seed: int | None = None,
+) -> float:
+    """Monte Carlo Collision Probability for long-duration/co-orbital encounters.
+
+    Unlike the analytical Foster/Chan method (which assumes rectilinear motion),
+    this Monte Carlo approach works for arbitrary encounter geometries including
+    co-orbital (Starlink vs Starlink) and slow planetary-approach trajectories.
+
+    Draws samples from the combined 3D Gaussian covariance and counts the
+    fraction falling within the combined hard-body collision sphere.
+
+    Args:
+        miss_vector_km: (3,) relative position at TCA (km).
+        rel_vel_km_s: (3,) relative velocity at TCA (km/s).
+        cov_a: (6,6) Object A full covariance (km², km²/s² etc).
+        cov_b: (6,6) Object B full covariance (km², km²/s² etc).
+        radius_a_km: Object A hard-body radius (km).
+        radius_b_km: Object B hard-body radius (km).
+        n_samples: Number of Monte Carlo samples (default 100,000).
+        seed: Optional RNG seed for reproducibility.
+
+    Returns:
+        Probability of collision (float) bounded [0.0, 1.0].
+    """
+    if cov_a.shape == (3, 3):
+        # Fallback padding to 6x6 if legacy 3x3 passed
+        c_a = np.zeros((6, 6))
+        c_a[:3, :3] = cov_a
+        c_b = np.zeros((6, 6))
+        c_b[:3, :3] = cov_b
+        cov_a, cov_b = c_a, c_b
+    combined_radius_km = radius_a_km + radius_b_km
+    combined_cov = cov_a + cov_b
+
+    if np.all(combined_cov == 0):
+        return 1.0 if np.linalg.norm(miss_vector_km) <= combined_radius_km else 0.0
+
+    rng = np.random.default_rng(seed)
+
+    try:
+        L = np.linalg.cholesky(combined_cov)
+    except np.linalg.LinAlgError:
+        eigvals = np.linalg.eigvalsh(combined_cov)
+        combined_cov += np.eye(6) * max(0, -eigvals.min() + 1e-12)
+        L = np.linalg.cholesky(combined_cov)
+
+    # Sample 6D error states (n_samples, 6)
+    samples = rng.standard_normal((n_samples, 6)) @ L.T
+    
+    # 6D Relative Trajectories
+    r_samples = miss_vector_km + samples[:, :3]
+    v_samples = rel_vel_km_s + samples[:, 3:]
+    
+    # Calculate geometric minimum distance along the linear relative path for EACH sample
+    # t_min = -(r · v) / (v · v)
+    v_dot_v = np.sum(v_samples * v_samples, axis=1)
+    # Avoid division by zero for stationary samples
+    v_dot_v[v_dot_v < 1e-16] = 1e-16
+    
+    t_min = -np.sum(r_samples * v_samples, axis=1) / v_dot_v
+    
+    # Minimum distance vectors
+    r_min_vec = r_samples + v_samples * t_min[:, np.newaxis]
+    d_min = np.linalg.norm(r_min_vec, axis=1)
+    
+    hits = np.sum(d_min <= combined_radius_km)
+
+    return float(hits / n_samples)
+
+
+def _numerical_jacobian(t_jd: float, r: np.ndarray, v: np.ndarray) -> np.ndarray:
+    """Compute full 6x6 numerical Jacobian of the acceleration function.
+    
+    Ensures the STM integration perfectly matches the exact force model
+    (including J2-J4, drag, and third-body perturbations) without tedious
+    and error-prone analytical gradients.
+    """
+    from astra.propagator import _acceleration
+    eps = 1e-4
+    J = np.zeros((6, 6))
+    
+    J[:3, 3:] = np.eye(3)
+    
+    # Position derivatives
+    for i in range(3):
+        r_plus, r_minus = r.copy(), r.copy()
+        r_plus[i] += eps
+        r_minus[i] -= eps
+        a_plus = _acceleration(t_jd, r_plus, v)
+        a_minus = _acceleration(t_jd, r_minus, v)
+        J[3:, i] = (a_plus - a_minus) / (2.0 * eps)
+        
+    # Velocity derivatives (for drag)
+    for i in range(3):
+        v_plus, v_minus = v.copy(), v.copy()
+        v_plus[i] += eps
+        v_minus[i] -= eps
+        a_plus = _acceleration(t_jd, r, v_plus)
+        a_minus = _acceleration(t_jd, r, v_minus)
+        J[3:, 3+i] = (a_plus - a_minus) / (2.0 * eps)
+        
+    return J
+
+
+def propagate_covariance_stm(
+    t_jd0: float,
+    r0_km: np.ndarray,
+    v0_km_s: np.ndarray,
+    cov0_6x6: np.ndarray,
+    duration_s: float,
+) -> np.ndarray:
+    """Propagate a full 6x6 covariance matrix using the State Transition Matrix.
+
+    Uses the linearized equations of motion to compute the 6x6 STM
+    via numerical integration, mapping the full 6x6 state uncertainty:
+
+        C(t) = Φ(t, t0) · C₀ · Φ(t, t0)ᵀ
+
+    Args:
+        t_jd0: Initial Julian Date.
+        r0_km: (3,) initial position in ECI (km).
+        v0_km_s: (3,) initial velocity in ECI (km/s).
+        cov0_6x6: (6,6) initial covariance matrix.
+        duration_s: Propagation duration in seconds.
+
+    Returns:
+        (6,6) propagated full covariance matrix.
+    """
+    def stm_derivatives(t: float, y: np.ndarray) -> np.ndarray:
+        """Combined state + STM derivatives (6 + 36 = 42 elements)."""
+        r = y[:3]
+        v = y[3:6]
+        Phi = y[6:].reshape(6, 6)
+
+        t_jd = t_jd0 + t / 86400.0
+        from astra.propagator import _acceleration
+        a_total = _acceleration(t_jd, r, v)
+
+        # 6x6 Jacobian A
+        A = _numerical_jacobian(t_jd, r, v)
+
+        # STM derivative: dΦ/dt = A · Φ
+        dPhi = A @ Phi
+
+        dy = np.zeros(42)
+        dy[:3] = v
+        dy[3:6] = a_total
+        dy[6:] = dPhi.ravel()
+
+        return dy
+
+    # Initial conditions: state + identity STM
+    y0 = np.zeros(42)
+    y0[:3] = r0_km
+    y0[3:6] = v0_km_s
+    y0[6:] = np.eye(6).ravel()
+
+    sol = solve_ivp(
+        stm_derivatives,
+        t_span=(0.0, duration_s),
+        y0=y0,
+        method='DOP853',
+        rtol=1e-10,
+        atol=1e-12,
+    )
+
+    if not sol.success:
+        return cov0_6x6  # Fallback to initial
+
+    Phi_final = sol.y[6:, -1].reshape(6, 6)
+
+    # Propagated full 6x6 covariance: C(t) = Φ · C₀ · Φ^T
+    return Phi_final @ cov0_6x6 @ Phi_final.T

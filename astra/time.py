@@ -9,6 +9,7 @@ This module has ZERO imports from any other ``astra`` domain module.
 from __future__ import annotations
 
 from datetime import datetime, timezone, timedelta
+import threading
 from typing import Any, Optional, Union
 
 from skyfield.api import load as skyfield_load
@@ -31,6 +32,19 @@ def _get_timescale() -> Any:
     if _cached_ts is None:
         _cached_ts = skyfield_load.timescale(builtin=True)
     return _cached_ts
+
+
+def prefetch_iers_data_async() -> None:
+    """Pre-fetch and cache Skyfield IERS Earth Orientation Parameters asynchronously.
+    
+    Prevents blocking HTTP requests during sequential timescale conversions if the 
+    cache has expired, critical for massive-scale STM.
+    """
+    def _fetch():
+        _get_timescale()
+        
+    thread = threading.Thread(target=_fetch, daemon=True)
+    thread.start()
 
 
 def _iso_to_datetime(iso_str: str) -> datetime:
