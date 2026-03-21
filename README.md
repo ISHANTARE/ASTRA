@@ -1,4 +1,4 @@
-# ASTRA-Core v2.0.0 (Autonomous Space Traffic Risk Analyzer) 🛰️
+# ASTRA-Core v2.0.1 (Autonomous Space Traffic Risk Analyzer) 🛰️
 
 ![PyPI - Version](https://img.shields.io/pypi/v/astra-core-engine?color=blue&label=astra-core-engine)
 ![License](https://img.shields.io/github/license/ISHANTARE/ASTRA)
@@ -33,6 +33,7 @@ pip install astra-core-engine
 
 **For development & contribution:**
 If you want to modify the source code or run the test suite:
+
 ```bash
 git clone https://github.com/ISHANTARE/ASTRA.git
 cd ASTRA
@@ -98,7 +99,7 @@ ASTRA-Core is logically divided into highly specialized modules. We recommend re
 
 ## 🏛️ Project Architecture
 
-ASTRA has evolved! Previously, this repository contained both the core engine and an implicit frontend UI ("monolithic"). We have restructured to a much cleaner **microservice design**. 
+ASTRA has evolved! Previously, this repository contained both the core engine and an implicit frontend UI ("monolithic"). We have restructured to a much cleaner **microservice design**.
 
 This repository (`ISHANTARE/ASTRA`) is now **exclusively** the high-performance Python astrodynamics library (`ASTRA-Core`), enabling standard Python tooling, robust testing via GitHub Actions, and seamless PyPI distribution. The WebGL visualizer is maintained as a separate, decoupled frontend application.
 
@@ -107,6 +108,7 @@ This repository (`ISHANTARE/ASTRA`) is now **exclusively** the high-performance 
 ## 🚀 Examples
 
 Want to see the math in action? Check out the `examples/` directory included in the repository source code:
+
 * `examples/conjunction_demo.py` - Full collision prediction pipeline.
 * `examples/visibility_demo.py` - When will the ISS pass over your specific coordinates?
 * `examples/b_plane_demo.py` - Generating B-Plane probability analysis matrices.
@@ -116,6 +118,6 @@ Want to see the math in action? Check out the `examples/` directory included in 
 ## 👤 Author
 
 **ISHAN TARE**  
-*Astrodynamics & Computer Science*
+*Computer Science Student*
 
 © 2026 ASTRA Project
