@@ -163,7 +163,7 @@ def _download_space_weather(data_dir: Optional[str] = None) -> str:
 
 def _parse_sw_csv(text: str) -> None:
     """Parse the CelesTrak CSV into the in-memory cache."""
-    global _sw_cache, _sw_loaded
+    global _sw_loaded
     _sw_cache.clear()
 
     reader = csv.reader(io.StringIO(text))
@@ -214,7 +214,6 @@ def load_space_weather(data_dir: Optional[str] = None, force_download: bool = Fa
         data_dir: Override data directory.
         force_download: If True, re-download even if a cached file exists.
     """
-    global _sw_loaded
     if _sw_loaded and not force_download:
         return
 
