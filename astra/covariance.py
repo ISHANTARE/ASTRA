@@ -211,39 +211,86 @@ def compute_collision_probability_mc(
     return float(hits / n_samples)
 
 
-def _numerical_jacobian(t_jd: float, r: np.ndarray, v: np.ndarray) -> np.ndarray:
-    """Compute full 6x6 numerical Jacobian of the acceleration function.
+from numba import njit
+from astra.constants import J3, J4
+
+@njit(fastmath=True, cache=True)
+def _gravity_accel_njit(r: np.ndarray) -> np.ndarray:
+    x, y, z = r[0], r[1], r[2]
+    r_mag = np.linalg.norm(r)
+    r2 = r_mag**2
+    r3 = r2 * r_mag
     
-    Ensures the STM integration perfectly matches the exact force model
-    (including J2-J4, drag, and third-body perturbations) without tedious
-    and error-prone analytical gradients.
-    """
-    from astra.propagator import _acceleration
+    a_twobody = -EARTH_MU_KM3_S2 * r / r3
+    
+    z2 = z**2
+    r5 = r3 * r2
+    r7 = r5 * r2
+    r9 = r7 * r2
+    Re = EARTH_EQUATORIAL_RADIUS_KM
+    mu = EARTH_MU_KM3_S2
+
+    fJ2 = 1.5 * J2 * mu * Re**2 / r5
+    a_j2_x = fJ2 * x * (5.0 * z2 / r2 - 1.0)
+    a_j2_y = fJ2 * y * (5.0 * z2 / r2 - 1.0)
+    a_j2_z = fJ2 * z * (5.0 * z2 / r2 - 3.0)
+
+    fJ3 = 0.5 * J3 * mu * Re**3 / r7
+    a_j3_x = fJ3 * x * (35.0 * z2 * z / r2 - 15.0 * z)
+    a_j3_y = fJ3 * y * (35.0 * z2 * z / r2 - 15.0 * z)
+    a_j3_z = fJ3 * (35.0 * z2 * z2 / r2 - 30.0 * z2 + 3.0 * r2)
+
+    fJ4 = -0.625 * J4 * mu * Re**4 / r9
+    z4 = z2 * z2
+    a_j4_x = fJ4 * x * (63.0 * z4 / r2 - 42.0 * z2 + 3.0 * r2)
+    a_j4_y = fJ4 * y * (63.0 * z4 / r2 - 42.0 * z2 + 3.0 * r2)
+    a_j4_z = fJ4 * z * (63.0 * z4 / r2 - 70.0 * z2 + 15.0 * r2)
+
+    a = np.empty(3)
+    a[0] = a_twobody[0] + a_j2_x + a_j3_x + a_j4_x
+    a[1] = a_twobody[1] + a_j2_y + a_j3_y + a_j4_y
+    a[2] = a_twobody[2] + a_j2_z + a_j3_z + a_j4_z
+    return a
+
+@njit(fastmath=True, cache=True)
+def _stm_jacobian_njit(r: np.ndarray) -> np.ndarray:
     eps = 1e-4
     J = np.zeros((6, 6))
+    J[0, 3] = 1.0
+    J[1, 4] = 1.0
+    J[2, 5] = 1.0
     
-    J[:3, 3:] = np.eye(3)
-    
-    # Position derivatives
     for i in range(3):
-        r_plus, r_minus = r.copy(), r.copy()
+        r_plus = r.copy()
+        r_minus = r.copy()
         r_plus[i] += eps
         r_minus[i] -= eps
-        a_plus = _acceleration(t_jd, r_plus, v)
-        a_minus = _acceleration(t_jd, r_minus, v)
+        a_plus = _gravity_accel_njit(r_plus)
+        a_minus = _gravity_accel_njit(r_minus)
         J[3:, i] = (a_plus - a_minus) / (2.0 * eps)
-        
-    # Velocity derivatives (for drag)
-    for i in range(3):
-        v_plus, v_minus = v.copy(), v.copy()
-        v_plus[i] += eps
-        v_minus[i] -= eps
-        a_plus = _acceleration(t_jd, r, v_plus)
-        a_minus = _acceleration(t_jd, r, v_minus)
-        J[3:, 3+i] = (a_plus - a_minus) / (2.0 * eps)
         
     return J
 
+@njit(fastmath=True, cache=True)
+def _stm_derivatives_njit(t: float, y: np.ndarray) -> np.ndarray:
+    r = y[:3]
+    v = y[3:6]
+    Phi = y[6:].reshape((6, 6))
+    
+    a_total = _gravity_accel_njit(r)
+    A = _stm_jacobian_njit(r)
+    
+    dPhi = A @ Phi
+    
+    dy = np.empty(42)
+    dy[:3] = v
+    dy[3:6] = a_total
+    
+    dPhi_flat = dPhi.ravel()
+    for i in range(36):
+        dy[6+i] = dPhi_flat[i]
+        
+    return dy
 
 def propagate_covariance_stm(
     t_jd0: float,
@@ -258,48 +305,14 @@ def propagate_covariance_stm(
     via numerical integration, mapping the full 6x6 state uncertainty:
 
         C(t) = Φ(t, t0) · C₀ · Φ(t, t0)ᵀ
-
-    Args:
-        t_jd0: Initial Julian Date.
-        r0_km: (3,) initial position in ECI (km).
-        v0_km_s: (3,) initial velocity in ECI (km/s).
-        cov0_6x6: (6,6) initial covariance matrix.
-        duration_s: Propagation duration in seconds.
-
-    Returns:
-        (6,6) propagated full covariance matrix.
     """
-    def stm_derivatives(t: float, y: np.ndarray) -> np.ndarray:
-        """Combined state + STM derivatives (6 + 36 = 42 elements)."""
-        r = y[:3]
-        v = y[3:6]
-        Phi = y[6:].reshape(6, 6)
-
-        t_jd = t_jd0 + t / 86400.0
-        from astra.propagator import _acceleration
-        a_total = _acceleration(t_jd, r, v)
-
-        # 6x6 Jacobian A
-        A = _numerical_jacobian(t_jd, r, v)
-
-        # STM derivative: dΦ/dt = A · Φ
-        dPhi = A @ Phi
-
-        dy = np.zeros(42)
-        dy[:3] = v
-        dy[3:6] = a_total
-        dy[6:] = dPhi.ravel()
-
-        return dy
-
-    # Initial conditions: state + identity STM
     y0 = np.zeros(42)
     y0[:3] = r0_km
     y0[3:6] = v0_km_s
     y0[6:] = np.eye(6).ravel()
 
     sol = solve_ivp(
-        stm_derivatives,
+        _stm_derivatives_njit,
         t_span=(0.0, duration_s),
         y0=y0,
         method='DOP853',
@@ -311,6 +324,4 @@ def propagate_covariance_stm(
         return cov0_6x6  # Fallback to initial
 
     Phi_final = sol.y[6:, -1].reshape(6, 6)
-
-    # Propagated full 6x6 covariance: C(t) = Φ · C₀ · Φ^T
     return Phi_final @ cov0_6x6 @ Phi_final.T

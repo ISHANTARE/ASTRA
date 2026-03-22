@@ -131,6 +131,29 @@ def get_azimuths(
     return az_deg
 
 
+def _visible_from_location_cached(
+    positions_teme: np.ndarray, times_jd: np.ndarray, observer: Observer, ts, R_teme_to_gcrs: np.ndarray
+) -> np.ndarray:
+    """Compute topocentric elevation angles using cached timescale and TEME->GCRS rotation."""
+    t = ts.tt_jd(times_jd)
+    r_teme_au = positions_teme.T / AU_KM
+    
+    r_gcrs_au = R_teme_to_gcrs.dot(r_teme_au)
+
+    pos = Geocentric(r_gcrs_au, t=t)
+    r_itrs_km = pos.frame_xyz(itrs).au * AU_KM
+    
+    r_obs = _wgs84_observer_itrs(observer.latitude_deg, observer.longitude_deg, observer.elevation_m)
+    rho_itrs = r_itrs_km - r_obs[:, np.newaxis]
+    
+    R_enu = _itrs_to_enu_matrix(observer.latitude_deg, observer.longitude_deg)
+    rho_enu = R_enu @ rho_itrs
+    
+    rho_E, rho_N, rho_U = rho_enu[0], rho_enu[1], rho_enu[2]
+    rho_xy = np.sqrt(rho_E**2 + rho_N**2)
+    return np.degrees(np.arctan2(rho_U, rho_xy))
+
+
 def _find_exact_crossing(
     satellite: SatelliteTLE, 
     observer: Observer, 
@@ -141,6 +164,11 @@ def _find_exact_crossing(
 ) -> float:
     """Binary search bisection to find the exact sub-second crossing."""
     mask = observer.min_elevation_deg
+    
+    ts = load.timescale()
+    # Cache precession-nutation rotation matrix which changes <0.00001 deg over the pass
+    t_mid_initial = ts.tt_jd((t_low + t_high) / 2.0)
+    R_teme_to_gcrs_cached = np.transpose(TEME.rotation_at(t_mid_initial))
     
     tl = t_low
     th = t_high
@@ -153,7 +181,9 @@ def _find_exact_crossing(
         if state.error_code != 0:
             return t_mid 
             
-        elev = visible_from_location(np.array([state.position_km]), np.array([t_mid]), observer)[0]
+        elev = _visible_from_location_cached(
+            np.array([state.position_km]), np.array([t_mid]), observer, ts, R_teme_to_gcrs_cached
+        )[0]
         
         if ascending:
             if elev < mask:

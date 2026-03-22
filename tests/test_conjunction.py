@@ -101,3 +101,17 @@ def test_find_conjunctions_pair_ordering(conjunction_elements):
     events = find_conjunctions(trajs, times, conjunction_elements, threshold_km=5.0)
     assert len(events) == 1
     assert int(events[0].object_a_id) < int(events[0].object_b_id)
+
+
+def test_find_conjunctions_custom_threshold(conjunction_elements):
+    traj_a, traj_b = crossing_trajectories()
+    times = np.linspace(0.0, 0.2, 288)
+    trajs = {
+        "99999": traj_a,
+        "25544": traj_b,
+    }
+    events = find_conjunctions(
+        trajs, times, conjunction_elements, threshold_km=5.0, coarse_threshold_km=25.0
+    )
+    assert len(events) == 1
+    assert abs(events[0].miss_distance_km - 2.5) < 1e-3

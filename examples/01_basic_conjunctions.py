@@ -40,7 +40,8 @@ def main():
         trajectories, 
         times_jd, 
         elements_map, 
-        threshold_km=5.0
+        threshold_km=5.0,
+        coarse_threshold_km=50.0
     )
     
     # 6. Output the results

@@ -26,7 +26,7 @@ Tracking a satellite requires rigorous conversion between reference frames. ASTR
 When you have 30,000 active objects in space, checking every pair for a collision at every single second over a week is computationally impossible ($O(n^2)$ complexity). 
 
 How ASTRA-Core solves this efficiently:
-1. **Temporal Octree Sweeping**: We build a recursive 3D spatial hierarchy (an Octree) containing the bounding boxes of satellite trajectories. By evaluating spatial overlap uniquely across discrete integration intervals, we instantly discard 99.9% of safely passing configurations in $O(N \log N)$ time.
+1. **cKDTree Spatial Partitioning**: We map satellite trajectories into a highly-optimized C++ `scipy.spatial.cKDTree` structure. By querying spatial overlap across discrete integration intervals natively in C, we instantly discard 99.9% of safely passing configurations in $O(N \log N)$ time natively bypassing the Python Global Interpreter Lock (GIL).
 2. **Dynamic Attitude Cross-Sections**: For surviving "close calls", we compute the exact TCA (Time of Closest Approach). Based on the satellite's specific hardware pointing mode (e.g. Nadir Earth-pointing), we dynamically rotate its geometric faces to calculate the exact projected surface area slicing through the probability field.
 
 ## 5. Covariance ($P_c$) & The 6x6 State Transition Matrix (STM)
@@ -41,5 +41,6 @@ Static un-thrusting satellites are rarely the focus of highly critical events. W
 
 ASTRA-Core uses a **7-DOF Variable Mass Cowell Integrator** for this step:
 1. **Attitude-Steered Burns**: Instead of a simple delta-V impulse, we define exact burn durations and engine thrust metrics. At every micro-step of propagation, the physics engine dynamically rotates the spacecraft vector (e.g. "burn along the current velocity axis") back into the absolute Space frame dynamically.
-2. **Tsiolkovsky Flow**: Mass depletes continuously over the engine burn based on standard Specific Impulse equations (dm/dt = -F / Isp). This directly decreases inertial mass mid-flight resulting in greater resulting accelerations.
+2. **Numba JIT Accelerated Numerical Integration**: We JIT-compile the 7-DOF core Cowell differential equations (`@njit(fastmath=True)`) directly to machine code. This allows the integrator to dynamically resolve exact Lunar/Solar ephemerides interpolations and $J_2-J_4$ harmonics millions of times per orbit at near-C speeds.
+3. **Tsiolkovsky Flow**: Mass depletes continuously over the engine burn based on standard Specific Impulse equations (dm/dt = -F / Isp). This directly decreases inertial mass mid-flight resulting in greater resulting accelerations.
 3. **Space Weather & Celestial Truth**: During precision COLA verification, approximations are dumped. The integration loop inherently scales its atmospheric density drag based on **Live F10.7 Solar Flux** fed automatically from the internet and replaces the position of the Sun/Moon with highly rigorous sub-arcsecond **NASA JPL Ephemerides (DE421)**.

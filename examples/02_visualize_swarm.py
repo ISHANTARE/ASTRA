@@ -32,7 +32,8 @@ def main():
         trajectories, 
         times_jd, 
         elements_map, 
-        threshold_km=10.0
+        threshold_km=10.0,
+        coarse_threshold_km=100.0
     )
     
     print(f"Found {len(events)} close approaches. Opening 3D visualizer in your browser...")

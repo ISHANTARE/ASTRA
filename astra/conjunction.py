@@ -142,7 +142,7 @@ def find_conjunctions(
     idx = SpatialIndex(half_size_km=50000.0, max_objects_per_node=16)
     candidate_pairs_phase2 = set()
     
-    # Step skipping logic: if dt is small, we don't need to rebuild every step.
+    # Adaptive temporal subsampling: Prevent redundant KD-Tree generation when the delta-t step is exceptionally fine.
     step = max(1, int(coarse_threshold_km / (15.0 * dt_s))) if dt_s > 0 else 1
     
     for t_idx in range(0, T_len, step):

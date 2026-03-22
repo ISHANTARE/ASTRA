@@ -13,11 +13,12 @@ def main():
     
     # Example Location: Los Angeles, CA
     observer = astra.Observer(
-        lat_deg=34.0522, 
-        lon_deg=-118.2437, 
-        alt_m=71.0
+        name="Los Angeles Station",
+        latitude_deg=34.0522, 
+        longitude_deg=-118.2437, 
+        elevation_m=71.0
     )
-    print(f"Observer Location: Latitude {observer.lat_deg}, Longitude {observer.lon_deg}")
+    print(f"Observer Location: Latitude {observer.latitude_deg}, Longitude {observer.longitude_deg}")
 
     # Fetch ISS TLE
     print("Fetching active catalog to locate the ISS...")
@@ -34,21 +35,14 @@ def main():
     now = datetime.now(timezone.utc)
     target_start_jd = astra.convert_time(now).jd
     
-    # Check every minute for 24 hours
-    time_steps_min = np.arange(0, 1440, 1.0)
-    times_jd = target_start_jd + time_steps_min / 1440.0
-    
-    # Propagate the ISS
-    trajectory_map = astra.propagate_many([iss_tle], time_steps_min)
-    iss_positions_teme = trajectory_map[iss_tle.norad_id].positions_km
-    
     # Calculate passes
     print(f"Calculating overhead passes for the next 24 hours...")
     passes = astra.passes_over_location(
-        iss_positions_teme, 
-        times_jd, 
-        observer, 
-        min_elevation_deg=10.0 # Only consider passes > 10 degrees above horizon
+        satellite=iss_tle, 
+        observer=observer, 
+        t_start_jd=target_start_jd,
+        t_end_jd=target_start_jd + 1.0, # 1 day
+        step_minutes=1.0
     )
     
     print(f"\nThe ISS will pass overhead {len(passes)} time(s) in the next 24 hours:")
