@@ -2,7 +2,7 @@
 
 ![PyPI - Version](https://img.shields.io/pypi/v/astra-core-engine?color=blue&label=astra-core-engine)
 ![License](https://img.shields.io/github/license/ISHANTARE/ASTRA)
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.xxxxxxx.svg)](https://doi.org/10.5281/zenodo.xxxxxxx) <!-- Replace with actual Zenodo DOI once linked -->
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.19201702.svg)](https://doi.org/10.5281/zenodo.19201702)
 ![Maintenance](https://img.shields.io/badge/Maintained%3F-yes-green.svg)
 
 **The High-Performance Mathematical Foundation for Space Situational Awareness.**
