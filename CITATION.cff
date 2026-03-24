@@ -1,0 +1,9 @@
+cff-version: 1.2.0
+message: "If you use this software in your research or project, please cite it as below."
+authors:
+  - family-names: "Tare"
+    given-names: "Ishan"
+title: "ASTRA: Autonomous Space Traffic Risk Analyzer"
+version: 3.1.1
+date-released: 2026-03-24
+url: "https://github.com/ISHANTARE/ASTRA"

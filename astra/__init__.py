@@ -2,6 +2,14 @@
 
 A pure Python computation engine for orbital analysis, conjunctions, 
 and spatial filtering.
+
+==============================================================================
+ASTRA-Core Engine (astra-core-engine)
+Copyright (c) 2026 Ishan Tare. All Rights Reserved.
+
+This file is part of ASTRA. If you use or adapt this code, 
+please retain this copyright notice and provide attribution.
+==============================================================================
 """
 from astra.conjunction import (
     closest_approach,

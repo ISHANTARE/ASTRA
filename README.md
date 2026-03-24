@@ -1,7 +1,8 @@
-# ASTRA-Core v3.1.0 (Autonomous Space Traffic Risk Analyzer) 🛰️
+# ASTRA-Core v3.1.1 (Autonomous Space Traffic Risk Analyzer) 🛰️
 
 ![PyPI - Version](https://img.shields.io/pypi/v/astra-core-engine?color=blue&label=astra-core-engine)
 ![License](https://img.shields.io/github/license/ISHANTARE/ASTRA)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.xxxxxxx.svg)](https://doi.org/10.5281/zenodo.xxxxxxx) <!-- Replace with actual Zenodo DOI once linked -->
 ![Maintenance](https://img.shields.io/badge/Maintained%3F-yes-green.svg)
 
 **The High-Performance Mathematical Foundation for Space Situational Awareness.**
@@ -159,6 +160,24 @@ Want to see the math in action? Check out the `examples/` directory included in 
 * `examples/conjunction_demo.py` - Full collision prediction pipeline.
 * `examples/visibility_demo.py` - When will the ISS pass over your specific coordinates?
 * `examples/b_plane_demo.py` - Generating B-Plane probability analysis matrices.
+
+---
+
+## 📝 How to Cite ASTRA
+
+If you use ASTRA-Core in an academic paper, research project, or commercial product, please use the following BibTeX entry to provide attribution:
+
+```bibtex
+@software{Tare_ASTRA_2026,
+  author = {Tare, Ishan},
+  title = {ASTRA: Autonomous Space Traffic Risk Analyzer},
+  year = {2026},
+  publisher = {GitHub},
+  journal = {GitHub repository},
+  howpublished = {\url{https://github.com/ISHANTARE/ASTRA}},
+  version = {3.1.1}
+}
+```
 
 ---
 
