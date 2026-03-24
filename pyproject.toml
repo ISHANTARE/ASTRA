@@ -10,6 +10,26 @@ authors = [
 ]
 description = "Autonomous Space Traffic Risk Analyzer - Computation Engine"
 readme = "README.md"
+keywords = [
+    "astrodynamics", "orbital-mechanics", "space-situational-awareness", 
+    "satellite", "sgp4", "skyfield", "tle", "orbit-propagation", "space-debris", 
+    "cowell-method", "conjunction-analysis", "aerospace"
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Education",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Astronomy",
+    "Topic :: Scientific/Engineering :: Physics",
+    "Topic :: Scientific/Engineering :: Mathematics"
+]
 requires-python = ">=3.10"
 dependencies = [
     "numpy>=1.26.0",
