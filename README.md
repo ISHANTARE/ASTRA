@@ -1,4 +1,4 @@
-# ASTRA-Core v3.1.1 (Autonomous Space Traffic Risk Analyzer) 🛰️
+# ASTRA-Core v3.1.2 (Autonomous Space Traffic Risk Analyzer) 🛰️
 
 ![PyPI - Version](https://img.shields.io/pypi/v/astra-core-engine?color=blue&label=astra-core-engine)
 ![License](https://img.shields.io/github/license/ISHANTARE/ASTRA)
@@ -18,7 +18,7 @@ ASTRA-Core is the elite computational Python library powering the ASTRA ecosyste
 * **High-Fidelity Cowell Method Propagation**: Integrate the exact equations of motion (DOP853) with an elite force model evaluating $J_2-J_4$ zonal harmonics, Atmospheric Drag, and Solar/Lunar third-body perturbations.
 * **Maneuver Modeling & 7-DOF Flight Dynamics**: Formulate exact finite continuous burns using attitude-steered Dynamic VNB/RTN direction combinations with coupled mass expulsion tracking (Tsiolkovsky equation) directly in the integration loop.
 * **Operations-Grade Physical Truth Pipelines**: Ditch analytical physics approximations for real-world automated feeds: JPL DE421 (Sub-arcsecond Moon/Sun Ephemerides) and CelesTrak Space Weather (F10.7/Kp data scaling Jacchia-class empirical atmospheric density models).
-* **Temporal Octree Conjunction Analysis**: Implements a highly optimized, persistent 3D $O(n \log n)$ Temporal Octree spatial index to uniquely isolate candidate colliding trajectories across massive time integrations.
+* **Spatial KD-Tree Conjunction Analysis**: Implements a highly optimized, persistent 3D $O(n \log n)$ Spatial KD-Tree index to uniquely isolate candidate colliding trajectories across massive time integrations.
 * **Continuous Time of Closest Approach (TCA)**: Uses interpolations to find the exact millisecond of closest approach, coupled with Dynamic LVLH Attitude Modes to project satellite cross-sections precisely at the impact geometry.
 * **True Probability of Collision ($P_c$)**: Executes a true 6D minimum-distance Monte Carlo probability distribution across colliding volumes, propagated physically via a full 6x6 State Transition Matrix built natively from numerical force Jacobians.
 * **Official Data Integration**: Directly parses active catalogs from CelesTrak and reads official U.S. Space Force CDM (Conjunction Data Message) XMLs.
@@ -92,64 +92,72 @@ for event in events:
 ASTRA-Core natively exposes all top-level functions directly from `astra.__init__`. Here are all the callable functions with a syntax implementation example for each:
 
 ### Data Acquisition & Parsing
-- `fetch_celestrak_active()`: `catalog = astra.fetch_celestrak_active()`
-- `fetch_celestrak_comprehensive()`: `catalog = astra.fetch_celestrak_comprehensive()`
-- `fetch_celestrak_group(group)`: `gnss = astra.fetch_celestrak_group("gps-ops")`
-- `parse_cdm_xml(filepath)`: `cdm = astra.parse_cdm_xml("warning.xml")`
-- `load_tle_catalog(filepath)`: `tles = astra.load_tle_catalog("catalog.txt")`
-- `parse_tle(name, l1, l2)`: `tle = astra.parse_tle("ISS", "1 25544U...", "2 25544...")`
-- `validate_tle(l1, l2)`: `is_valid = astra.validate_tle(line1, line2)`
+
+* `fetch_celestrak_active()`: `catalog = astra.fetch_celestrak_active()`
+* `fetch_celestrak_comprehensive()`: `catalog = astra.fetch_celestrak_comprehensive()`
+* `fetch_celestrak_group(group)`: `gnss = astra.fetch_celestrak_group("gps-ops")`
+* `parse_cdm_xml(filepath)`: `cdm = astra.parse_cdm_xml("warning.xml")`
+* `load_tle_catalog(filepath)`: `tles = astra.load_tle_catalog("catalog.txt")`
+* `parse_tle(name, l1, l2)`: `tle = astra.parse_tle("ISS", "1 25544U...", "2 25544...")`
+* `validate_tle(l1, l2)`: `is_valid = astra.validate_tle(line1, line2)`
 
 ### Filtering & Debris Processing
-- `make_debris_object(tle)`: `obj = astra.make_debris_object(tle)`
-- `filter_altitude(objs, min, max)`: `leo = astra.filter_altitude(objects, 200, 2000)`
-- `filter_region(objs, lat, lon)`: `overhead = astra.filter_region(objects, lat_bounds, lon_bounds)`
-- `filter_time_window(objs, t1, t2)`: `visible = astra.filter_time_window(objects, start_jd, end_jd)`
-- `apply_filters(objs, config)`: `subset = astra.apply_filters(objects, filter_config)`
-- `catalog_statistics(objs)`: `stats_dict = astra.catalog_statistics(objects)`
+
+* `make_debris_object(tle)`: `obj = astra.make_debris_object(tle)`
+* `filter_altitude(objs, min, max)`: `leo = astra.filter_altitude(objects, 200, 2000)`
+* `filter_region(objs, lat, lon)`: `overhead = astra.filter_region(objects, lat_bounds, lon_bounds)`
+* `filter_time_window(objs, t1, t2)`: `visible = astra.filter_time_window(objects, start_jd, end_jd)`
+* `apply_filters(objs, config)`: `subset = astra.apply_filters(objects, filter_config)`
+* `catalog_statistics(objs)`: `stats_dict = astra.catalog_statistics(objects)`
 
 ### High-Performance Propagation & Orbit Math
-- `propagate_cowell(state, t, ...)`: `trajectory = astra.propagate_cowell(initial_state, times, drag_config)`
-- `propagate_many(tles, times)`: `traj_map = astra.propagate_many([tle1, tle2], times)`
-- `propagate_many_generator(tles, times)`: `for batch in astra.propagate_many_generator(tles, times): pass`
-- `propagate_orbit(tle, times)`: `positions = astra.propagate_orbit(tle, times_jd)`
-- `propagate_trajectory(tle, t1, t2, dt)`: `states = astra.propagate_trajectory(tle, start, end, step)`
-- `ground_track(positions, times)`: `lat_lon_alt = astra.ground_track(teme_pos, times_jd)`
-- `orbital_elements(pos, vel)`: `elements = astra.orbital_elements(r, v)`
-- `orbit_period(semi_major_axis)`: `period_s = astra.orbit_period(a_km)`
+
+* `propagate_cowell(state, t, ...)`: `trajectory = astra.propagate_cowell(initial_state, times, drag_config)`
+* `propagate_many(tles, times)`: `traj_map = astra.propagate_many([tle1, tle2], times)`
+* `propagate_many_generator(tles, times)`: `for batch in astra.propagate_many_generator(tles, times): pass`
+* `propagate_orbit(tle, times)`: `positions = astra.propagate_orbit(tle, times_jd)`
+* `propagate_trajectory(tle, t1, t2, dt)`: `states = astra.propagate_trajectory(tle, start, end, step)`
+* `ground_track(positions, times)`: `lat_lon_alt = astra.ground_track(teme_pos, times_jd)`
+* `orbital_elements(pos, vel)`: `elements = astra.orbital_elements(r, v)`
+* `orbit_period(semi_major_axis)`: `period_s = astra.orbit_period(a_km)`
 
 ### Conjunctions & Covariance (O(n log n) cKDTree)
-- `find_conjunctions(...)`: `events = astra.find_conjunctions(trajs, times, obj_map, 5.0, 50.0)`
-- `closest_approach(...)`: `tca, dist = astra.closest_approach(traj_a, traj_b, times)`
-- `distance_3d(pos1, pos2)`: `d = astra.distance_3d(r1, r2)`
-- `compute_collision_probability(...)`: `pc = astra.compute_collision_probability(r_rel, v_rel, cov)`
-- `compute_collision_probability_mc(...)`: `pc = astra.compute_collision_probability_mc(r_rel, v_rel, cov, 10000)`
-- `estimate_covariance(...)`: `cov = astra.estimate_covariance(tle, position, velocity)`
-- `propagate_covariance_stm(...)`: `cov_t = astra.propagate_covariance_stm(cov_0, initial_state, t_span)`
+
+* `find_conjunctions(...)`: `events = astra.find_conjunctions(trajs, times, obj_map, 5.0, 50.0)`
+* `closest_approach(...)`: `tca, dist = astra.closest_approach(traj_a, traj_b, times)`
+* `distance_3d(pos1, pos2)`: `d = astra.distance_3d(r1, r2)`
+* `compute_collision_probability(...)`: `pc = astra.compute_collision_probability(r_rel, v_rel, cov)`
+* `compute_collision_probability_mc(...)`: `pc = astra.compute_collision_probability_mc(r_rel, v_rel, cov, 10000)`
+* `estimate_covariance(...)`: `cov = astra.estimate_covariance(tle, position, velocity)`
+* `propagate_covariance_stm(...)`: `cov_t = astra.propagate_covariance_stm(cov_0, initial_state, t_span)`
 
 ### Visibility & Ground Stations
-- `visible_from_location(...)`: `elevations = astra.visible_from_location(pos, times, observer)`
-- `passes_over_location(...)`: `passes = astra.passes_over_location(tle, observer, t_start, t_end)`
+
+* `visible_from_location(...)`: `elevations = astra.visible_from_location(pos, times, observer)`
+* `passes_over_location(...)`: `passes = astra.passes_over_location(tle, observer, t_start, t_end)`
 
 ### High-Fidelity Physics & Maneuvers
-- `projected_area_m2(dim, quat, v_rel)`: `area = astra.projected_area_m2((1,2,3), q, v_dir)`
-- `thrust_acceleration_inertial(...)`: `acc = astra.thrust_acceleration_inertial(burn, mass, t, state)`
-- `rotation_vnb_to_inertial(pos, vel)`: `matrix = astra.rotation_vnb_to_inertial(r, v)`
-- `rotation_rtn_to_inertial(pos, vel)`: `matrix = astra.rotation_rtn_to_inertial(r, v)`
-- `frame_to_inertial(frame, pos, vel)`: `matrix = astra.frame_to_inertial(ManeuverFrame.VNB, r, v)`
-- `validate_burn(burn)`: `is_valid = astra.validate_burn(burn_dataclass)`
+
+* `projected_area_m2(dim, quat, v_rel)`: `area = astra.projected_area_m2((1,2,3), q, v_dir)`
+* `thrust_acceleration_inertial(...)`: `acc = astra.thrust_acceleration_inertial(burn, mass, t, state)`
+* `rotation_vnb_to_inertial(pos, vel)`: `matrix = astra.rotation_vnb_to_inertial(r, v)`
+* `rotation_rtn_to_inertial(pos, vel)`: `matrix = astra.rotation_rtn_to_inertial(r, v)`
+* `frame_to_inertial(frame, pos, vel)`: `matrix = astra.frame_to_inertial(ManeuverFrame.VNB, r, v)`
+* `validate_burn(burn)`: `is_valid = astra.validate_burn(burn_dataclass)`
 
 ### Space Weather & Data Pipelines
-- `get_space_weather(jd)`: `f107, f107a, ap = astra.get_space_weather(t_jd)`
-- `load_space_weather(filepath)`: `astra.load_space_weather("SW-All.csv")`
-- `atmospheric_density_empirical(...)`: `rho = astra.atmospheric_density_empirical(alt, f107, f107a, ap)`
-- `sun_position_de(jd)`: `r_sun = astra.sun_position_de(t_jd)`
-- `moon_position_de(jd)`: `r_moon = astra.moon_position_de(t_jd)`
+
+* `get_space_weather(jd)`: `f107, f107a, ap = astra.get_space_weather(t_jd)`
+* `load_space_weather(filepath)`: `astra.load_space_weather("SW-All.csv")`
+* `atmospheric_density_empirical(...)`: `rho = astra.atmospheric_density_empirical(alt, f107, f107a, ap)`
+* `sun_position_de(jd)`: `r_sun = astra.sun_position_de(t_jd)`
+* `moon_position_de(jd)`: `r_moon = astra.moon_position_de(t_jd)`
 
 ### Top-Level Utilities
-- `haversine_distance(l1, ln1, l2, ln2)`: `dist_km = astra.haversine_distance(34.0, -118.0, 40.0, -74.0)`
-- `convert_time(dt_obj)`: `skyfield_time = astra.convert_time(datetime.utcnow())`
-- `plot_trajectories(trajs, events)`: `fig = astra.plot_trajectories(trajectories, conjunction_events)`
+
+* `haversine_distance(l1, ln1, l2, ln2)`: `dist_km = astra.haversine_distance(34.0, -118.0, 40.0, -74.0)`
+* `convert_time(dt_obj)`: `skyfield_time = astra.convert_time(datetime.utcnow())`
+* `plot_trajectories(trajs, events)`: `fig = astra.plot_trajectories(trajectories, conjunction_events)`
 
 ---
 
@@ -175,7 +183,7 @@ If you use ASTRA-Core in an academic paper, research project, or commercial prod
   publisher = {GitHub},
   journal = {GitHub repository},
   howpublished = {\url{https://github.com/ISHANTARE/ASTRA}},
-  version = {3.1.1}
+  version = {3.1.2}
 }
 ```
 

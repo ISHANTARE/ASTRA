@@ -131,9 +131,9 @@ def find_conjunctions(
     logger.info(f"Initiating Conjunction Analysis for {len(norad_ids)} objects over {T_len} time steps.")
 
     # ---------------------------------------------------------
-    # Phase 1 & 2: Temporal Octree Sweeping (O(N log N))
+    # Phase 1 & 2: Spatial KD-Tree Sweeping (O(N log N))
     # ---------------------------------------------------------
-    logger.debug(f"Running Phase 1 & 2: Temporal Octree Rebuilding over {T_len} timesteps...")
+    logger.debug(f"Running Phase 1 & 2: KD-Tree Rebuilding over {T_len} timesteps...")
     
     dt_s = (times_jd[1] - times_jd[0]) * 86400.0 if T_len > 1 else 0.0
     # Add buffer: max relative movement during dt (LEO vs LEO max ~15 km/s)
@@ -152,10 +152,10 @@ def find_conjunctions(
         candidate_pairs_phase2.update(step_pairs)
 
     if not candidate_pairs_phase2:
-        logger.info("Octree Temporal Sweep complete: 0 candidate pairs found.")
+        logger.info("KD-Tree Temporal Sweep complete: 0 candidate pairs found.")
         return []
 
-    logger.info(f"Octree Filter Complete: Analyzing precise geometry for {len(candidate_pairs_phase2)} pairs.")
+    logger.info(f"KD-Tree Filter Complete: Analyzing precise geometry for {len(candidate_pairs_phase2)} pairs.")
 
     # ---------------------------------------------------------
     # Phase 3: Exact Curvilinear TCA Interpolation
