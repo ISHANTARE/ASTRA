@@ -20,7 +20,7 @@ bibliography: paper.bib
 
 # Summary
 
-Low Earth Orbit (LEO) is increasingly congested with satellites and debris, creating growing collision risk. ASTRA-Core (Autonomous Space Traffic Risk Analyzer) is an open-source Python library providing a complete, pip-installable computational pipeline for space traffic management. It ingests Two-Line Element (TLE) catalog data, propagates full orbital catalogs, detects conjunction events via a spatially indexed screening pass, computes Time of Closest Approach (TCA) to millisecond precision, derives a formal Probability of Collision ($P_c$), and supports finite-burn collision avoidance maneuver (CAM) simulation.
+The near-Earth space environment is increasingly congested with satellites and debris, creating growing collision risk. ASTRA-Core (Autonomous Space Traffic Risk Analyzer) is an open-source Python library providing a complete, pip-installable computational pipeline for space traffic management. It ingests Two-Line Element (TLE) catalog data, propagates full orbital catalogs, detects conjunction events via a spatially indexed screening pass, computes Time of Closest Approach (TCA) to millisecond precision, derives a formal Probability of Collision ($P_c$), and supports finite-burn collision avoidance maneuver (CAM) simulation.
 
 ASTRA-Core is available as `pip install astra-core-engine` with source code at [https://github.com/ISHANTARE/ASTRA](https://github.com/ISHANTARE/ASTRA).
 
@@ -48,7 +48,7 @@ ASTRA-Core's contribution is unifying high-fidelity numerical propagation, large
 
 # Research Impact Statement
 
-ASTRA-Core is published on PyPI (`astra-core-engine`) and archived with a permanent DOI via Zenodo [@tare2026astra], enabling formal academic citation. The library is actively used by its author for LEO Space Traffic Management research at VIT. Its self-contained dependency tree (NumPy, SciPy, Skyfield, Numba, Plotly) and fully reproducible example scripts allow direct adoption by university research groups without any proprietary installations. The repository's examples directory contains end-to-end conjunction analysis workflows executable against live CelesTrak catalog data within minutes.
+ASTRA-Core is published on PyPI (`astra-core-engine`) and archived with a permanent DOI via Zenodo [@tare2026astra], enabling formal academic citation. The library is actively used by its author for Space Traffic Management research at VIT. Its self-contained dependency tree (NumPy, SciPy, Skyfield, Numba, Plotly) and fully reproducible example scripts allow direct adoption by university research groups without any proprietary installations. The repository's examples directory contains end-to-end conjunction analysis workflows executable against live CelesTrak catalog data within minutes.
 
 # AI Usage Disclosure
 

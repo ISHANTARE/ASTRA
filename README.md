@@ -7,7 +7,7 @@
 
 **The High-Performance Mathematical Foundation for Space Situational Awareness.**
 
-ASTRA-Core is the elite computational Python library powering the ASTRA ecosystem. Designed for aerospace engineers, researchers, and developers, it solves the complex, heavy-lifting astrodynamics required to track thousands of orbital objects simultaneously, predict collisions, and monitor congestion in Low Earth Orbit (LEO).
+ASTRA-Core is the elite computational Python library powering the ASTRA ecosystem. Designed for aerospace engineers, researchers, and developers, it solves the complex, heavy-lifting astrodynamics required to track thousands of orbital objects simultaneously, predict collisions, and monitor congestion across all orbital regimes.
 
 > 🧠 **Want to learn how the math works?** Check out our educational guide: [KNOWMORE.md](./KNOWMORE.md) to understand TLEs, SGP4, Sweep-and-Prune, and Collision Probabilities!
 
