@@ -1,8 +1,9 @@
 # ASTRA-Core v3.2.0 (Autonomous Space Traffic Risk Analyzer) 🛰️
 
 ![PyPI - Version](https://img.shields.io/pypi/v/astra-core-engine?color=blue&label=astra-core-engine)
+[![Documentation Status](https://readthedocs.org/projects/astra-core/badge/?version=latest)](https://astra-core.readthedocs.io/en/latest/?badge=latest)
 ![License](https://img.shields.io/github/license/ISHANTARE/ASTRA)
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.19201702.svg)](https://doi.org/10.5281/zenodo.19201702)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.19201701.svg)](https://doi.org/10.5281/zenodo.19201701)
 ![Maintenance](https://img.shields.io/badge/Maintained%3F-yes-green.svg)
 
 **The High-Performance Mathematical Foundation for Space Situational Awareness.**
