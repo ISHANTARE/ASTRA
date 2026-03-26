@@ -33,7 +33,7 @@ def main():
 
     # Define prediction window: Now up to 24 hours in the future
     now = datetime.now(timezone.utc)
-    target_start_jd = astra.convert_time(now).jd
+    target_start_jd = float(astra.convert_time(now, "jd"))
     
     # Calculate passes
     print(f"Calculating overhead passes for the next 24 hours...")
@@ -48,9 +48,9 @@ def main():
     print(f"\nThe ISS will pass overhead {len(passes)} time(s) in the next 24 hours:")
     for i, p in enumerate(passes):
         print(f"\n[Pass {i+1}]")
-        print(f"  AOS (Rise Time): {p.aos_time.isoformat()}")
-        print(f"  TCA (Peak Time): {p.tca_time.isoformat()} at {p.max_elevation_deg:.1f}° elevation")
-        print(f"  LOS (Set Time):  {p.los_time.isoformat()}")
+        print(f"  AOS (Rise Time JD): {p.aos_jd:.5f}")
+        print(f"  TCA (Peak Time JD): {p.tca_jd:.5f} at {p.max_elevation_deg:.1f}° elevation")
+        print(f"  LOS (Set Time JD):  {p.los_jd:.5f}")
 
 if __name__ == "__main__":
     main()

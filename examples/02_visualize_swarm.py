@@ -24,7 +24,7 @@ def main():
     
     tles = [obj.tle for obj in starlinks]
     print("Propagating orbits...")
-    trajectories = astra.propagate_many(tles, time_steps_min)
+    trajectories = astra.propagate_many(tles, times_jd)
     
     elements_map = {obj.tle.norad_id: obj for obj in starlinks}
     print("Detecting close approaches (< 10km)...")

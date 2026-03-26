@@ -191,20 +191,26 @@ def validate_tle(name: str, line1: str, line2: str) -> bool:
 
 
 def _chunk_tle_lines(tle_lines: list[str]) -> list[tuple[str, str, str]]:
-    """Group a list of TLE lines into triplets (name, line1, line2)."""
-    # Filter out empty lines first
+    """Group a list of TLE lines into triplets (name, line1, line2).
+    
+    Supports both 3-line format (with name) and 2-line format (auto-generates 'Unknown').
+    Silently skips empty lines and invalid headers.
+    """
     lines = [L.strip() for L in tle_lines if L.strip()]
     
     triplets = []
     i = 0
-    while i + 2 < len(lines):
-        name = lines[i]
-        line1 = lines[i+1]
-        line2 = lines[i+2]
-        if line1.startswith("1 ") and line2.startswith("2 "):
-            triplets.append((name, line1, line2))
+    while i + 1 < len(lines):
+        # Check for 2-line format at current position
+        if lines[i].startswith("1 ") and lines[i+1].startswith("2 "):
+            triplets.append(("Unknown", lines[i], lines[i+1]))
+            i += 2
+        # Check for 3-line format
+        elif i + 2 < len(lines) and lines[i+1].startswith("1 ") and lines[i+2].startswith("2 "):
+            triplets.append((lines[i], lines[i+1], lines[i+2]))
             i += 3
         else:
+            # Skip invalid header or junk line
             i += 1
     return triplets
 

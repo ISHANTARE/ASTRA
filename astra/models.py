@@ -194,6 +194,22 @@ class SatelliteTLE:
     attitude_quaternion: Optional[tuple[float, float, float, float]] = None  # (w, x, y, z)
     attitude_mode: str = "TUMBLING"  # Options: "NADIR", "TUMBLING", "INERTIAL"
 
+    @classmethod
+    def from_strings(cls, line1: str, line2: str, name: str = "Unknown") -> SatelliteTLE:
+        """Create a SatelliteTLE directly from two raw lines, auto-calculating epoch.
+        
+        Args:
+            line1: Valid TLE line 1.
+            line2: Valid TLE line 2.
+            name: Optional name for the satellite.
+            
+        Returns:
+            A fully initialized SatelliteTLE object.
+        """
+        from astra.tle import parse_tle
+        return parse_tle(name, line1, line2)
+
+
 
 # ---------------------------------------------------------------------------
 # OrbitalState

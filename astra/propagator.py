@@ -444,6 +444,8 @@ def _powered_derivative(
 
     # Mass flow rate (negative because mass decreases)
     dm_dt = -burn.thrust_N / (burn.isp_s * _G0)
+    
+    return np.concatenate([v, a_total, [dm_dt]])
 
 # ---------------------------------------------------------------------------
 # Numba Compiled HPC Functions
@@ -731,7 +733,7 @@ def _compute_planetary_splines(t_jd0: float, duration_s: float, use_de: bool) ->
 def propagate_cowell(
     state0: NumericalState,
     duration_s: float,
-    dt_output_s: float = 60.0,
+    dt_out: float = 60.0,
     drag_config: Optional[DragConfig] = None,
     include_third_body: bool = True,
     rtol: Optional[float] = None,
@@ -762,7 +764,7 @@ def propagate_cowell(
     Args:
         state0: Initial state (position + velocity + optional mass).
         duration_s: Total propagation duration in seconds.
-        dt_output_s: Output time step in seconds (default 60 s).
+        dt_out: Output time step in seconds (default 60 s).
         drag_config: Optional atmospheric drag parameters.
         include_third_body: Include Sun/Moon gravity.
         rtol: Relative tolerance for adaptive step integrator.
@@ -874,12 +876,12 @@ def propagate_cowell(
         # Output times within this segment
         t_out = []
         # First output at the global grid time >= segment start
-        first_grid = math.ceil(global_t_start / dt_output_s) * dt_output_s
+        first_grid = math.ceil(global_t_start / dt_out) * dt_out
         t = first_grid
         while t <= global_t_end + 1e-9:
             if t >= global_t_start - 1e-9:
                 t_out.append(t - global_t_start)
-            t += dt_output_s
+            t += dt_out
 
         # Always include segment endpoints
         if not t_out or t_out[0] > 1e-9:

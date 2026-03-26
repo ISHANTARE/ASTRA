@@ -60,13 +60,14 @@ print("Downloading live active satellite catalog...")
 active_catalog = astra.fetch_celestrak_active()
 
 # 2. Filter for Low Earth Orbit (LEO) only
-objects = [astra.make_orbit_object(tle) for tle in active_catalog]
+objects = [astra.make_debris_object(tle) for tle in active_catalog]
 leo_only = astra.filter_altitude(objects, min_km=200, max_km=2000)
 
 # 3. Propagate 10,000+ objects simultaneously across the next 2 hours
 tles = [obj.tle for obj in leo_only]
-time_steps = np.arange(0, 120, 5.0) # Minutes since Epoch
-trajectories = astra.propagate_many(tles, time_steps)
+time_steps = np.arange(0, 120, 5.0) # Minutes
+times_jd = leo_only[0].tle.epoch_jd + (time_steps / 1440.0)
+trajectories = astra.propagate_many(tles, times_jd)
 ```
 
 ### 2. Detecting Conjunctions (Collisions)
@@ -75,8 +76,8 @@ trajectories = astra.propagate_many(tles, time_steps)
 # Scan for any satellites coming within 5km of each other
 events = astra.find_conjunctions(
     trajectories, 
-    time_points=leo_only[0].tle.epoch_jd + (time_steps / 1440.0), 
-    catalog_map={obj.tle.norad_id: obj for obj in leo_only}, 
+    times_jd=leo_only[0].tle.epoch_jd + (time_steps / 1440.0), 
+    elements_map={obj.tle.norad_id: obj for obj in leo_only}, 
     threshold_km=5.0
 )
 
@@ -98,7 +99,7 @@ ASTRA-Core natively exposes all top-level functions directly from `astra.__init_
 * `fetch_celestrak_group(group)`: `gnss = astra.fetch_celestrak_group("gps-ops")`
 * `parse_cdm_xml(filepath)`: `cdm = astra.parse_cdm_xml("warning.xml")`
 * `load_tle_catalog(filepath)`: `tles = astra.load_tle_catalog("catalog.txt")`
-* `parse_tle(name, l1, l2)`: `tle = astra.parse_tle("ISS", "1 25544U...", "2 25544...")`
+* `parse_tle(name, l1, l2)`: `tle = astra.SatelliteTLE.from_strings("1 255...", "2 255...", name="ISS")`
 * `validate_tle(l1, l2)`: `is_valid = astra.validate_tle(line1, line2)`
 
 ### Filtering & Debris Processing
@@ -112,18 +113,18 @@ ASTRA-Core natively exposes all top-level functions directly from `astra.__init_
 
 ### High-Performance Propagation & Orbit Math
 
-* `propagate_cowell(state, t, ...)`: `trajectory = astra.propagate_cowell(initial_state, times, drag_config)`
-* `propagate_many(tles, times)`: `traj_map = astra.propagate_many([tle1, tle2], times)`
-* `propagate_many_generator(tles, times)`: `for batch in astra.propagate_many_generator(tles, times): pass`
-* `propagate_orbit(tle, times)`: `positions = astra.propagate_orbit(tle, times_jd)`
-* `propagate_trajectory(tle, t1, t2, dt)`: `states = astra.propagate_trajectory(tle, start, end, step)`
+* `propagate_cowell(state, duration_s, ...)`: `trajectory = astra.propagate_cowell(initial_state, duration_s=7200, dt_out=60.0)`
+* `propagate_many(tles, times_jd)`: `traj_map = astra.propagate_many([tle1, tle2], times_jd)`
+* `propagate_many_generator(tles, times_jd)`: `for jd_chunk, traj_chunk in astra.propagate_many_generator(tles, times_jd): pass`
+* `propagate_orbit(tle, epoch, t_min)`: `state = astra.propagate_orbit(tle, tle.epoch_jd, 10.0)`
+* `propagate_trajectory(tle, t1, t2, step)`: `times_jd, pos = astra.propagate_trajectory(tle, start_jd, end_jd, step_minutes=5.0)`
 * `ground_track(positions, times)`: `lat_lon_alt = astra.ground_track(teme_pos, times_jd)`
 * `orbital_elements(pos, vel)`: `elements = astra.orbital_elements(r, v)`
 * `orbit_period(semi_major_axis)`: `period_s = astra.orbit_period(a_km)`
 
 ### Conjunctions & Covariance (O(n log n) cKDTree)
 
-* `find_conjunctions(...)`: `events = astra.find_conjunctions(trajs, times, obj_map, 5.0, 50.0)`
+* `find_conjunctions(...)`: `events = astra.find_conjunctions(trajs, times_jd, obj_map, 5.0, 50.0)`
 * `closest_approach(...)`: `tca, dist = astra.closest_approach(traj_a, traj_b, times)`
 * `distance_3d(pos1, pos2)`: `d = astra.distance_3d(r1, r2)`
 * `compute_collision_probability(...)`: `pc = astra.compute_collision_probability(r_rel, v_rel, cov)`
@@ -156,7 +157,7 @@ ASTRA-Core natively exposes all top-level functions directly from `astra.__init_
 ### Top-Level Utilities
 
 * `haversine_distance(l1, ln1, l2, ln2)`: `dist_km = astra.haversine_distance(34.0, -118.0, 40.0, -74.0)`
-* `convert_time(dt_obj)`: `skyfield_time = astra.convert_time(datetime.utcnow())`
+* `convert_time(time_val, to_format)`: `jd = astra.convert_time("2026-01-01T00:00:00Z", "jd")`
 * `plot_trajectories(trajs, events)`: `fig = astra.plot_trajectories(trajectories, conjunction_events)`
 
 ---
@@ -165,9 +166,9 @@ ASTRA-Core natively exposes all top-level functions directly from `astra.__init_
 
 Want to see the math in action? Check out the `examples/` directory included in the repository source code:
 
-* `examples/conjunction_demo.py` - Full collision prediction pipeline.
-* `examples/visibility_demo.py` - When will the ISS pass over your specific coordinates?
-* `examples/b_plane_demo.py` - Generating B-Plane probability analysis matrices.
+* `examples/01_basic_conjunctions.py` - Full collision prediction pipeline using cKDTree.
+* `examples/02_visualize_swarm.py` - 3D trajectory rendering of LEO satellite constellations.
+* `examples/03_ground_station_visibility.py` - Predict when satellites will pass over your coordinates.
 
 ---
 

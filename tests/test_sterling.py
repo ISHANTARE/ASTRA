@@ -25,13 +25,13 @@ class TestCowellPropagator:
         )
 
     def test_cowell_returns_states(self, iss_state):
-        states = propagate_cowell(iss_state, 5400.0, dt_output_s=60.0)
+        states = propagate_cowell(iss_state, 5400.0, dt_out=60.0)
         assert len(states) > 0
         assert all(isinstance(s, NumericalState) for s in states)
 
     def test_cowell_conserves_energy_approx(self, iss_state):
         """Keplerian energy should be approximately conserved over 1 orbit."""
-        states = propagate_cowell(iss_state, 5400.0, dt_output_s=60.0,
+        states = propagate_cowell(iss_state, 5400.0, dt_out=60.0,
                                   include_third_body=False)
         mu = 398600.4418
 
@@ -43,7 +43,7 @@ class TestCowellPropagator:
 
     def test_cowell_orbit_altitude_stability(self, iss_state):
         """Altitude should remain within LEO bounds over 1 orbit."""
-        states = propagate_cowell(iss_state, 5400.0, dt_output_s=60.0)
+        states = propagate_cowell(iss_state, 5400.0, dt_out=60.0)
         for s in states:
             alt = np.linalg.norm(s.position_km) - 6378.137
             assert 340.0 < alt < 500.0, f"Altitude {alt} km outside LEO bounds"
@@ -51,7 +51,7 @@ class TestCowellPropagator:
     def test_cowell_with_drag(self, iss_state):
         """Drag should cause slight altitude decrease."""
         drag = DragConfig(cd=2.2, area_m2=400.0, mass_kg=420000.0)
-        states = propagate_cowell(iss_state, 5400.0, dt_output_s=60.0,
+        states = propagate_cowell(iss_state, 5400.0, dt_out=60.0,
                                   drag_config=drag, include_third_body=False)
         assert len(states) > 0
 

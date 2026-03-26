@@ -31,7 +31,7 @@ def main():
     # 4. Propagate all orbits simultaneously using SGP4 arrays
     print(f"Propagating {len(leo_objects)} orbits over {len(time_steps_min)} time steps...")
     tles = [obj.tle for obj in leo_objects]
-    trajectories = astra.propagate_many(tles, time_steps_min)
+    trajectories = astra.propagate_many(tles, times_jd)
     
     # 5. Find conjunctions (miss distance < 5 km)
     print("Running Sweep-and-Prune spatial collision filter...")
@@ -50,7 +50,7 @@ def main():
         print(f"\n[Event {i+1}]")
         print(f"  Target A: NORAD {event.object_a_id}")
         print(f"  Target B: NORAD {event.object_b_id}")
-        print(f"  Time of Closest Approach (TCA): {event.tca_time.isoformat()}")
+        print(f"  Time of Closest Approach (TCA JD): {event.tca_jd:.5f}")
         print(f"  Miss Distance: {event.miss_distance_km:.2f} km")
         print(f"  Risk Level: {event.risk_level}")
         print(f"  Collision Probability (Pc): {event.collision_probability:.2e}")

@@ -68,8 +68,14 @@ class SpatialIndex:
         return len(self._positions)
 
     def rebuild(self, positions: dict[str, np.ndarray]) -> None:
-        """Rebuild the entire index from a fresh position dictionary."""
-        self._positions = {k: v.copy() for k, v in positions.items()}
+        """Rebuild the entire index from a fresh position dictionary.
+        
+        Silently drops any objects whose position contains NaN or Inf.
+        """
+        self._positions = {
+            k: v.copy() for k, v in positions.items() 
+            if np.all(np.isfinite(v))
+        }
         self._ensure_tree(force=True)
         
     def _ensure_tree(self, force: bool = False) -> None:
