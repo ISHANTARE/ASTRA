@@ -1,4 +1,4 @@
-# ASTRA-Core v3.1.2 (Autonomous Space Traffic Risk Analyzer) 🛰️
+# ASTRA-Core v3.2.0 (Autonomous Space Traffic Risk Analyzer) 🛰️
 
 ![PyPI - Version](https://img.shields.io/pypi/v/astra-core-engine?color=blue&label=astra-core-engine)
 ![License](https://img.shields.io/github/license/ISHANTARE/ASTRA)
@@ -184,7 +184,7 @@ If you use ASTRA-Core in an academic paper, research project, or commercial prod
   publisher = {GitHub},
   journal = {GitHub repository},
   howpublished = {\url{https://github.com/ISHANTARE/ASTRA}},
-  version = {3.1.2}
+  version = {3.2.0}
 }
 ```
 

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "astra-core-engine"
-version = "3.1.2"
+version = "3.2.0"
 authors = [
   { name="ASTRA Team - Ishan Tare" },
 ]
@@ -46,4 +46,4 @@ test = ["pytest>=8.0.0"]
 
 [tool.setuptools.packages.find]
 where = ["."]
-exclude = ["paper*"]
+exclude = ["paper*", "docs*"]

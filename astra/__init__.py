@@ -11,6 +11,9 @@ This file is part of ASTRA. If you use or adapt this code,
 please retain this copyright notice and provide attribution.
 ==============================================================================
 """
+
+__version__ = "3.2.0"
+
 from astra.conjunction import (
     closest_approach,
     distance_3d,

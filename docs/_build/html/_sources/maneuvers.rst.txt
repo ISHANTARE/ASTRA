@@ -1,0 +1,36 @@
+Orbital Maneuvers
+=================
+
+ASTRA-Core provides a physically rigorous engine for simulating Finite Burns and Collision Avoidance Maneuvers (CAMs).
+
+Mass Depletion (7-DOF)
+----------------------
+Unlike basic 6-DOF propagators (which solve $[x, y, z, v_x, v_y, v_z]$), the ASTRA powered integration arc solves a **7-DOF** state vector which strongly couples the vehicle's mass $[..., m]$. 
+
+During a thrusting arc, mass is continuously depleted according to the absolute Tsiolkovsky equation:
+
+$\dot{m} = \frac{-F}{I_{sp} \cdot g_0}$
+
+Attitude Steering
+-----------------
+Thrust direction is dynamically re-computed at every integration step. ASTRA currently supports:
+
+- **Velocity-Vector Aligned**: Prograde/Retrograde burns lock the thrust vector parallel to the instantaneous velocity vector.
+- **Custom VNB**: Users can specify constant offset angles within the Velocity-Normal-Binormal frames.
+
+Simulation Workflow
+-------------------
+
+.. code-block:: python
+
+    from astra.maneuver import FiniteBurn
+    
+    # A 500 N thruster with roughly 310s specific impulse
+    burn = FiniteBurn(
+        thrust_N=500.0,
+        isp_s=310.0,
+        direction_vnb=(1.0, 0.0, 0.0) # Pure Prograde
+    )
+    
+    # The integration engine automatically calculates the required
+    # mass depletion and attitude alignment across the specific burn duration.
