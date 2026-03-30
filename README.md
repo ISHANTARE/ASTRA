@@ -14,6 +14,8 @@ ASTRA-Core is a rigorous, C-accelerated Python astrodynamics engine powering the
 
 > 🧠 **Want to learn how the math works?** Check out our educational guide: [KNOWMORE.md](./KNOWMORE.md) to understand TLEs, SGP4, Sweep-and-Prune, and Collision Probabilities!
 
+currently working on optimization and irregularities of earth's surface.
+
 ---
 
 ## 🚀 Key Features
