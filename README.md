@@ -102,10 +102,10 @@ ASTRA-Core natively exposes all top-level functions directly from `astra.__init_
 * `fetch_celestrak_active()`: `catalog = astra.fetch_celestrak_active()`
 * `fetch_celestrak_comprehensive()`: `catalog = astra.fetch_celestrak_comprehensive()`
 * `fetch_celestrak_group(group)`: `gnss = astra.fetch_celestrak_group("gps-ops")`
-* `parse_cdm_xml(filepath)`: `cdm = astra.parse_cdm_xml("warning.xml")`
-* `load_tle_catalog(filepath)`: `tles = astra.load_tle_catalog("catalog.txt")`
+* `parse_cdm_xml(xml_string)`: `cdm = astra.parse_cdm_xml(xml_string)`
+* `load_tle_catalog(tle_lines)`: `tles = astra.load_tle_catalog(["name", "1...", "2..."])`
 * `parse_tle(name, l1, l2)`: `tle = astra.SatelliteTLE.from_strings("1 255...", "2 255...", name="ISS")`
-* `validate_tle(l1, l2)`: `is_valid = astra.validate_tle(line1, line2)`
+* `validate_tle(name, l1, l2)`: `is_valid = astra.validate_tle("ISS", line1, line2)`
 
 ### Filtering & Debris Processing
 
@@ -134,7 +134,7 @@ ASTRA-Core natively exposes all top-level functions directly from `astra.__init_
 * `distance_3d(pos1, pos2)`: `d = astra.distance_3d(r1, r2)`
 * `compute_collision_probability(...)`: `pc = astra.compute_collision_probability(r_rel, v_rel, cov)`
 * `compute_collision_probability_mc(...)`: `pc = astra.compute_collision_probability_mc(r_rel, v_rel, cov, 10000)`
-* `estimate_covariance(...)`: `cov = astra.estimate_covariance(tle, position, velocity)`
+* `estimate_covariance(days_since_epoch, f107_flux=150)`: `cov = astra.estimate_covariance(0.5, 120.0)`
 * `propagate_covariance_stm(...)`: `cov_t = astra.propagate_covariance_stm(cov_0, initial_state, t_span)`
 
 ### Visibility & Ground Stations
@@ -154,7 +154,7 @@ ASTRA-Core natively exposes all top-level functions directly from `astra.__init_
 ### Space Weather & Data Pipelines
 
 * `get_space_weather(jd)`: `f107, f107a, ap = astra.get_space_weather(t_jd)`
-* `load_space_weather(filepath)`: `astra.load_space_weather("SW-All.csv")`
+* `load_space_weather(data_dir, force_download)`: `astra.load_space_weather(data_dir=".", force_download=True)`
 * `atmospheric_density_empirical(...)`: `rho = astra.atmospheric_density_empirical(alt, f107, f107a, ap)`
 * `sun_position_de(jd)`: `r_sun = astra.sun_position_de(t_jd)`
 * `moon_position_de(jd)`: `r_moon = astra.moon_position_de(t_jd)`

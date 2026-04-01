@@ -25,7 +25,8 @@ def fetch_celestrak_active() -> list[SatelliteTLE]:
     """
     try:
         logger.info("Fetching active satellite catalog from CelesTrak...")
-        response = requests.get(CELESTRAK_ACTIVE_URL, timeout=20.0)
+        headers = {"User-Agent": "ASTRA-Core Engine/3.2.0 (https://github.com/ISHANTARE/ASTRA)"}
+        response = requests.get(CELESTRAK_ACTIVE_URL, headers=headers, timeout=20.0)
         response.raise_for_status()
     except requests.RequestException as e:
         raise AstraError(f"Failed to fetch Celestrak active catalog: {e}")
@@ -41,7 +42,8 @@ def fetch_celestrak_group(group: str) -> list[SatelliteTLE]:
     """
     url = f"https://celestrak.org/NORAD/elements/gp.php?GROUP={group}&FORMAT=tle"
     try:
-        response = requests.get(url, timeout=20.0)
+        headers = {"User-Agent": "ASTRA-Core Engine/3.2.0 (https://github.com/ISHANTARE/ASTRA)"}
+        response = requests.get(url, headers=headers, timeout=20.0)
         response.raise_for_status()
     except requests.RequestException as e:
         raise AstraError(f"Failed to fetch Celestrak group '{group}': {e}")

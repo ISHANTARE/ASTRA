@@ -150,7 +150,7 @@ def propagate_trajectory(
 
 def ground_track(
     positions_teme: np.ndarray, times_jd: np.ndarray
-) -> list[tuple[float, float]]:
+) -> list[tuple[float, float, float]]:
     """Convert TEME Cartesian positions into geodetic coordinates for ground track.
 
     Args:
@@ -158,7 +158,7 @@ def ground_track(
         times_jd: Corresponding Julian Date array. Shape: (T,)
 
     Returns:
-        List of (latitude_deg, longitude_deg) tuples, length T.
+        List of (latitude_deg, longitude_deg, altitude_km) tuples, length T.
     """
     if len(times_jd) == 0:
         return []
@@ -187,8 +187,9 @@ def ground_track(
     
     lat_deg = sub.latitude.degrees
     lon_deg = sub.longitude.degrees
+    alt_km = sub.elevation.km
     
     if np.isscalar(lat_deg):
-        return [(float(lat_deg), float(lon_deg))]
+        return [(float(lat_deg), float(lon_deg), float(alt_km))]
     
-    return list(zip(lat_deg, lon_deg))
+    return list(zip(lat_deg, lon_deg, alt_km))

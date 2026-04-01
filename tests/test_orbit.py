@@ -57,11 +57,11 @@ def test_ground_track_length(iss_tle):
 def test_ground_track_lat_range(iss_tle):
     times, positions = propagate_trajectory(iss_tle, iss_tle.epoch_jd, iss_tle.epoch_jd + 1.0, step_minutes=5.0)
     track = ground_track(positions, times)
-    for lat, lon in track:
+    for lat, lon, alt in track:
         assert -52.0 <= lat <= 52.0
 
 def test_ground_track_lon_range(iss_tle):
     times, positions = propagate_trajectory(iss_tle, iss_tle.epoch_jd, iss_tle.epoch_jd + 1.0, step_minutes=5.0)
     track = ground_track(positions, times)
-    for lat, lon in track:
+    for lat, lon, alt in track:
         assert -180.0 <= lon <= 180.0
