@@ -75,8 +75,8 @@ class TestMonteCarloPC:
         """MC should approximately match Chan for high-speed transverse encounters."""
         miss = np.array([0.001, 0.0, 0.0])
         vel = np.array([0.0, 14.0, 0.0])
-        cov_a = np.eye(3) * 0.01
-        cov_b = np.eye(3) * 0.01
+        cov_a = np.eye(6) * 0.01
+        cov_b = np.eye(6) * 0.01
 
         p_mc = compute_collision_probability_mc(
             miss, vel, cov_a, cov_b, radius_a_km=0.005, radius_b_km=0.005,
@@ -88,8 +88,8 @@ class TestMonteCarloPC:
         """Zero covariance, within radius -> Pc = 1.0."""
         miss = np.array([0.003, 0.0, 0.0])
         vel = np.array([0.0, 7.0, 0.0])
-        cov_a = np.zeros((3, 3))
-        cov_b = np.zeros((3, 3))
+        cov_a = np.zeros((6, 6))
+        cov_b = np.zeros((6, 6))
 
         p_mc = compute_collision_probability_mc(
             miss, vel, cov_a, cov_b, radius_a_km=0.005, radius_b_km=0.005
@@ -100,8 +100,8 @@ class TestMonteCarloPC:
         """Zero covariance, outside radius -> Pc = 0.0."""
         miss = np.array([0.02, 0.0, 0.0])
         vel = np.array([0.0, 7.0, 0.0])
-        cov_a = np.zeros((3, 3))
-        cov_b = np.zeros((3, 3))
+        cov_a = np.zeros((6, 6))
+        cov_b = np.zeros((6, 6))
 
         p_mc = compute_collision_probability_mc(
             miss, vel, cov_a, cov_b, radius_a_km=0.005, radius_b_km=0.005
@@ -111,7 +111,7 @@ class TestMonteCarloPC:
     def test_mc_reproducible_with_seed(self):
         miss = np.array([0.001, 0.0, 0.0])
         vel = np.array([0.0, 7.0, 0.0])
-        cov = np.eye(3) * 0.01
+        cov = np.eye(6) * 0.01
 
         p1 = compute_collision_probability_mc(miss, vel, cov, cov, seed=123)
         p2 = compute_collision_probability_mc(miss, vel, cov, cov, seed=123)

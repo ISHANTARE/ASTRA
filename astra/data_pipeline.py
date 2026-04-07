@@ -4,7 +4,8 @@
 Provides automated, cached access to the real-world physical data
 required by the operations-grade force model:
 
-    1. **JPL DE440 Ephemeris** — precise Sun and Moon positions via Skyfield.
+    1. **JPL DE421 Ephemeris** — precise Sun and Moon positions via Skyfield.
+       (DE421 covers 1900–2050 at ~17 MB. For 1549–2650, replace with DE440.)
     2. **IERS Earth-Orientation Parameters** — polar motion, UT1-UTC via
        Skyfield's ``finals2000A.all`` loader.
     3. **CelesTrak Space-Weather** — daily F10.7 solar flux and Kp/Ap
@@ -26,6 +27,7 @@ import io
 import math
 import os
 import pathlib
+import threading
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -62,28 +64,45 @@ _skyfield_loader: Optional[Loader] = None
 _skyfield_ts = None
 _skyfield_eph = None
 
+# RLock because _ensure_skyfield calls _get_skyfield_loader — must be re-entrant.
+_SKYFIELD_INIT_LOCK = threading.RLock()
+
 
 def _get_skyfield_loader(data_dir: Optional[str] = None) -> Loader:
     """Return a singleton Skyfield Loader pointed at the cache directory."""
     global _skyfield_loader
-    if _skyfield_loader is None:
-        path = data_dir or _DEFAULT_DATA_DIR
-        _skyfield_loader = Loader(path)
-        logger.info(f"Skyfield data directory: {path}")
+    with _SKYFIELD_INIT_LOCK:
+        if _skyfield_loader is None:
+            path = data_dir or _DEFAULT_DATA_DIR
+            _skyfield_loader = Loader(path)
+            logger.info(f"Skyfield data directory: {path}")
     return _skyfield_loader
 
 
 def _ensure_skyfield(data_dir: Optional[str] = None):
-    """Ensure the Skyfield timescale + ephemeris objects are initialised."""
+    """Ensure the Skyfield timescale + ephemeris objects are initialised (thread-safe)."""
     global _skyfield_ts, _skyfield_eph
-    if _skyfield_ts is None or _skyfield_eph is None:
-        load = _get_skyfield_loader(data_dir)
-        # Timescale includes IERS finals2000A for UT1-UTC & polar motion.
-        _skyfield_ts = load.timescale()
-        # DE421 is a compact (~17 MB) JPL ephemeris covering 1900–2050.
-        # DE440 (> 100 MB) covers 1549–2650 but is usually overkill for LEO ops.
-        _skyfield_eph = load("de421.bsp")
-        logger.info("Skyfield ephemeris (de421.bsp) and IERS timescale loaded.")
+    with _SKYFIELD_INIT_LOCK:
+        if _skyfield_ts is None or _skyfield_eph is None:
+            load = _get_skyfield_loader(data_dir)
+            # Timescale includes IERS finals2000A for UT1-UTC & polar motion.
+            _skyfield_ts = load.timescale()
+            # DE421 is a compact (~17 MB) JPL ephemeris covering 1900–2050 (AST-7).
+            # Missions or simulations beyond ~2050 should plan DE440 or another BSP;
+            # Skyfield may fail or rely on extrapolation outside the file span.
+            # DE440 (> 100 MB) covers 1549–2650 but is usually overkill for LEO ops.
+            _skyfield_eph = load("de421.bsp")
+            logger.info("Skyfield ephemeris (de421.bsp) and IERS timescale loaded.")
+
+
+def get_skyfield_timescale(data_dir: Optional[str] = None):
+    """Return the managed Skyfield ``Timescale`` (IERS finals2000A), after ensuring cache load.
+
+    Use this instead of ad-hoc ``load.timescale(builtin=True)`` so UT1-UTC and
+    conversions share one current-EOP source.
+    """
+    _ensure_skyfield(data_dir)
+    return _skyfield_ts
 
 
 def sun_position_de(t_jd: float, data_dir: Optional[str] = None) -> np.ndarray:
@@ -104,14 +123,42 @@ def sun_position_de(t_jd: float, data_dir: Optional[str] = None) -> np.ndarray:
         Shape (3,) numpy array  [x, y, z]  in km, GCRS frame.
     """
     _ensure_skyfield(data_dir)
-    t = _skyfield_ts.tt_jd(t_jd)
+    from astra.jdutil import jd_utc_to_datetime
+    dt = jd_utc_to_datetime(t_jd)
+    t = _skyfield_ts.utc(dt)
     earth = _skyfield_eph["earth"]
     sun = _skyfield_eph["sun"]
-    # Astrometric position of the Sun relative to Earth centre.
+    # Geometric / astrometric Sun vector from DE421 (light-time ~8.3 min; sub-km
+    # difference vs apparent Sun at this force-model fidelity).
     astrometric = earth.at(t).observe(sun)
     pos_au = astrometric.position.au
     # 1 AU = 149 597 870.7 km
     return np.array(pos_au) * 149597870.7
+
+
+def sun_position_teme(t_jd: float, data_dir: Optional[str] = None) -> np.ndarray:
+    """Geocentric Sun position in TEME frame (km). Used by the propagator.
+
+    Converts the DE421 GCRS output to TEME so the propagation kernel
+    can subtract satellite and body positions without a frame mismatch.
+    The rotation is TEME.rotation_at(t).T (transpose = inverse for orthogonal matrix).
+
+    Args:
+        t_jd: Julian Date.
+        data_dir: Optional override for the data cache directory.
+
+    Returns:
+        Shape (3,) numpy array  [x, y, z]  in km, TEME frame.
+    """
+    from skyfield.sgp4lib import TEME
+    _ensure_skyfield(data_dir)
+    from astra.jdutil import jd_utc_to_datetime
+    dt = jd_utc_to_datetime(t_jd)
+    t = _skyfield_ts.utc(dt)
+    pos_gcrs_km = sun_position_de(t_jd, data_dir)
+    # Rotate GCRS → TEME: R_teme_from_gcrs = TEME.rotation_at(t).T
+    R_teme_from_gcrs = TEME.rotation_at(t).T
+    return R_teme_from_gcrs @ pos_gcrs_km
 
 
 def moon_position_de(t_jd: float, data_dir: Optional[str] = None) -> np.ndarray:
@@ -131,12 +178,58 @@ def moon_position_de(t_jd: float, data_dir: Optional[str] = None) -> np.ndarray:
         Shape (3,) numpy array  [x, y, z]  in km, GCRS frame.
     """
     _ensure_skyfield(data_dir)
-    t = _skyfield_ts.tt_jd(t_jd)
+    from astra.jdutil import jd_utc_to_datetime
+    dt = jd_utc_to_datetime(t_jd)
+    t = _skyfield_ts.utc(dt)
     earth = _skyfield_eph["earth"]
     moon = _skyfield_eph["moon"]
     astrometric = earth.at(t).observe(moon)
     pos_au = astrometric.position.au
     return np.array(pos_au) * 149597870.7
+
+
+def moon_position_teme(t_jd: float, data_dir: Optional[str] = None) -> np.ndarray:
+    """Geocentric Moon position in TEME frame (km). Used by the propagator.
+
+    Converts the DE421 GCRS output to TEME so the propagation kernel
+    can subtract satellite and body positions without a frame mismatch.
+
+    Args:
+        t_jd: Julian Date.
+        data_dir: Optional override for the data cache directory.
+
+    Returns:
+        Shape (3,) numpy array  [x, y, z]  in km, TEME frame.
+    """
+    from skyfield.sgp4lib import TEME
+    _ensure_skyfield(data_dir)
+    from astra.jdutil import jd_utc_to_datetime
+    dt = jd_utc_to_datetime(t_jd)
+    t = _skyfield_ts.utc(dt)
+    pos_gcrs_km = moon_position_de(t_jd, data_dir)
+    R_teme_from_gcrs = TEME.rotation_at(t).T
+    return R_teme_from_gcrs @ pos_gcrs_km
+
+
+def get_ut1_utc_correction(t_jd_utc: float | np.ndarray) -> float | np.ndarray:
+    """Return UT1-UTC offset in seconds for given UTC Julian Date(s).
+
+    Interprets the input Julian Date as **UTC** (not TT). Builds Skyfield
+    ``Time`` via calendar UTC, then uses ``Time.dut1`` (UT1−UTC in seconds).
+
+    Args:
+        t_jd_utc: Julian Date in UTC (scalar or array).
+
+    Returns:
+        UT1-UTC time offset in seconds.
+    """
+    from astra.jdutil import jd_utc_to_datetime
+    _ensure_skyfield()
+    
+    t_jd_arr = np.asarray(t_jd_utc)
+    dt = jd_utc_to_datetime(t_jd_arr)
+    t = _skyfield_ts.utc(dt)
+    return t.dut1
 
 
 # ---------------------------------------------------------------------------
@@ -146,6 +239,12 @@ def moon_position_de(t_jd: float, data_dir: Optional[str] = None) -> np.ndarray:
 # In-memory cache:  {date_str "YYYY-MM-DD": (F10.7_obs, F10.7_adj, Ap_daily)}
 _sw_cache: dict[str, tuple[float, float, float]] = {}
 _sw_loaded: bool = False
+_sw_last_success: Optional[datetime] = None   # tracks last successful refresh time
+_SW_LOCK = threading.RLock()
+# Serialize download+parse so two threads that both see _sw_loaded=False
+# cannot trigger duplicate downloads.
+_SW_DOWNLOAD_LOCK = threading.Lock()
+_sw_fetch_thread: Optional[threading.Thread] = None
 
 
 def _download_space_weather(data_dir: Optional[str] = None) -> str:
@@ -164,8 +263,8 @@ def _download_space_weather(data_dir: Optional[str] = None) -> str:
 def _parse_sw_csv(text: str) -> None:
     """Parse the CelesTrak CSV into the in-memory cache."""
     global _sw_loaded
-    _sw_cache.clear()
-
+    
+    new_cache = {}
     reader = csv.reader(io.StringIO(text))
     header = None
     for row in reader:
@@ -196,44 +295,91 @@ def _parse_sw_csv(text: str) -> None:
             f107_adj = float(row[25]) if len(row) > 25 and row[25].strip() else f107_obs
             ap_daily = float(row[20]) if len(row) > 20 and row[20].strip() else 15.0
 
-            _sw_cache[date_str] = (f107_obs, f107_adj, ap_daily)
+            new_cache[date_str] = (f107_obs, f107_adj, ap_daily)
         except (ValueError, IndexError):
             continue   # skip malformed rows
 
-    _sw_loaded = True
+    with _SW_LOCK:
+        _sw_cache.clear()
+        _sw_cache.update(new_cache)
+        _sw_loaded = True
+
     logger.info(f"Space-weather cache loaded: {len(_sw_cache)} daily records.")
 
+
+def _background_sw_fetch(data_dir: Optional[str]) -> None:
+    """Daemon thread worker to download and parse space-weather cache."""
+    global _sw_fetch_thread, _sw_last_success
+    try:
+        text = _download_space_weather(data_dir)
+        _parse_sw_csv(text)
+        with _SW_LOCK:
+            _sw_last_success = datetime.now(timezone.utc)
+    except Exception as exc:
+        logger.warning(f"Background Space-Weather fetch failed: {exc}")
+    finally:
+        with _SW_LOCK:
+            _sw_fetch_thread = None
 
 def load_space_weather(data_dir: Optional[str] = None, force_download: bool = False) -> None:
     """Ensure space-weather data is available in memory.
 
     Downloads the CSV from CelesTrak on first call (or if the local
-    cache is older than 24 hours), then parses into memory.
+    cache is older than 24 hours), then parses into memory. If local file exists
+    but is stale, spins a background thread to update it without blocking physics loops.
+
+    Thread-safe via double-checked locking. A fast check under
+    ``_SW_LOCK`` provides the common O(1) exit.  The slow path acquires
+    ``_SW_DOWNLOAD_LOCK`` so only one thread downloads + parses; the rest
+    re-check under that lock and exit cleanly once the winner finishes.
 
     Args:
         data_dir: Override data directory.
         force_download: If True, re-download even if a cached file exists.
     """
-    if _sw_loaded and not force_download:
-        return
+    global _sw_fetch_thread
 
-    path = pathlib.Path(data_dir or _DEFAULT_DATA_DIR)
-    local_file = path / "SW-All.csv"
+    # Fast path — common case; already loaded.
+    with _SW_LOCK:
+        if _sw_loaded and not force_download:
+            return
 
-    need_download = force_download or not local_file.exists()
-    if not need_download:
-        # Re-download if cache is older than 24 hours.
-        mtime = datetime.fromtimestamp(local_file.stat().st_mtime, tz=timezone.utc)
-        age_hours = (datetime.now(timezone.utc) - mtime).total_seconds() / 3600.0
-        if age_hours > 24.0:
-            need_download = True
+    # Slow path — serialise so only one thread downloads + parses.
+    with _SW_DOWNLOAD_LOCK:
+        # Re-check inside the download lock (DCL "double-check").
+        with _SW_LOCK:
+            if _sw_loaded and not force_download:
+                return  # Another thread finished while we waited.
 
-    if need_download:
-        text = _download_space_weather(data_dir)
-    else:
-        text = local_file.read_text(encoding="utf-8")
+        path = pathlib.Path(data_dir or _DEFAULT_DATA_DIR)
+        local_file = path / "SW-All.csv"
 
-    _parse_sw_csv(text)
+        need_download = force_download or not local_file.exists()
+        stale_cache = False
+
+        if not need_download:
+            mtime = datetime.fromtimestamp(local_file.stat().st_mtime, tz=timezone.utc)
+            age_hours = (datetime.now(timezone.utc) - mtime).total_seconds() / 3600.0
+            if age_hours > 24.0:
+                stale_cache = True
+
+        if need_download:
+            text = _download_space_weather(data_dir)
+            _parse_sw_csv(text)
+        else:
+            text = local_file.read_text(encoding="utf-8")
+            _parse_sw_csv(text)
+
+            with _SW_LOCK:
+                if stale_cache and _sw_fetch_thread is None:
+                    logger.info("Space-weather cache stale. Spawning background refresh daemon...")
+                    _sw_fetch_thread = threading.Thread(
+                        target=_background_sw_fetch,
+                        args=(data_dir,),
+                        daemon=True,
+                    )
+                    _sw_fetch_thread.start()
+
 
 
 def get_space_weather(t_jd: float, data_dir: Optional[str] = None) -> tuple[float, float, float]:
@@ -254,19 +400,50 @@ def get_space_weather(t_jd: float, data_dir: Optional[str] = None) -> tuple[floa
     """
     load_space_weather(data_dir)
 
-    # Convert JD to calendar date.
+    # Stale cache: background refresh if > 48 h since last successful load
+    # global must be declared at function top, before any use of the name
+    global _sw_fetch_thread
+    with _SW_LOCK:
+        if _sw_last_success is not None:
+            age_h = (datetime.now(timezone.utc) - _sw_last_success).total_seconds() / 3600
+            if age_h > 48.0 and _sw_fetch_thread is None:
+                logger.warning("Space-weather cache >48 hours old. Triggering background refresh.")
+                _sw_fetch_thread = threading.Thread(
+                    target=_background_sw_fetch, args=(data_dir,), daemon=True
+                )
+                _sw_fetch_thread.start()
+
+    # JD → calendar date via integer-split day/fraction (stable vs float drift)
+    # Avoids floating-point rounding errors at midnight boundaries.
     # JD 2451545.0 = 2000-01-01T12:00:00 TT
-    jd_offset = t_jd - 2451545.0
-    dt = datetime(2000, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
     from datetime import timedelta
-    dt += timedelta(days=jd_offset)
+    days_offset = t_jd - 2451545.0
+    whole_days = int(days_offset)
+    frac_day = days_offset - whole_days
+    whole_sec = int(frac_day * 86400.0)
+    micro_sec = round((frac_day * 86400.0 - whole_sec) * 1e6)
+    dt = datetime(2000, 1, 1, 12, 0, 0, tzinfo=timezone.utc) + timedelta(
+        days=whole_days, seconds=whole_sec, microseconds=micro_sec
+    )
     date_str = dt.strftime("%Y-%m-%d")
 
-    if date_str in _sw_cache:
-        return _sw_cache[date_str]
+    with _SW_LOCK:
+        if date_str in _sw_cache:
+            return _sw_cache[date_str]
 
-    # Fallback: moderate solar activity
-    logger.debug(f"No space-weather data for {date_str}; using defaults.")
+    # Fallback: check STRICT_MODE before returning synthetic defaults
+    from astra import config
+    from astra.errors import SpaceWeatherError
+    if config.ASTRA_STRICT_MODE:
+        raise SpaceWeatherError(
+            f"[ASTRA STRICT] No space-weather data available for {date_str}. "
+            "Future epoch propagation requires an explicit solar flux forecast. "
+            "Run load_space_weather() to refresh data or set ASTRA_STRICT_MODE=False."
+        )
+    logger.warning(
+        f"No space-weather data for {date_str} — using moderate solar activity defaults "
+        "(F10.7=150 SFU, Ap=15). Atmospheric drag accuracy is compromised for this epoch."
+    )
     return (150.0, 150.0, 15.0)
 
 
@@ -301,7 +478,8 @@ def atmospheric_density_empirical(
     Returns:
         Atmospheric density in kg/m³.  Returns 0.0 above 1500 km.
     """
-    if altitude_km > 1500.0 or altitude_km < 100.0:
+    from astra.constants import DRAG_MIN_ALTITUDE_KM, DRAG_MAX_ALTITUDE_KM
+    if altitude_km > DRAG_MAX_ALTITUDE_KM or altitude_km < DRAG_MIN_ALTITUDE_KM:
         return 0.0
 
     # Exospheric temperature estimate (Jacchia-71 simplified)

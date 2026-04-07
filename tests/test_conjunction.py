@@ -1,9 +1,12 @@
+from dataclasses import replace
+
 import pytest
 import numpy as np
 
 from astra.conjunction import distance_3d, closest_approach, find_conjunctions
-from astra.models import ConjunctionEvent, DebrisObject, SatelliteTLE
+from astra.models import SatelliteTLE
 from astra.debris import make_debris_object
+from astra.spatial_index import SpatialIndex
 from astra.tle import parse_tle
 
 def crossing_trajectories():
@@ -51,14 +54,8 @@ def conjunction_elements():
     
     # Must override the derived parameters manually to ensure the artificial 
     # Z=6771 positions fall directly inside the bounding shell.
-    obj_a = make_debris_object(sat_a)
-    obj_b = make_debris_object(sat_b)
-    
-    # Forge bounding shells to encompass Z=6771
-    object.__setattr__(obj_a, 'perigee_km', 300.0)
-    object.__setattr__(obj_a, 'apogee_km', 500.0)
-    object.__setattr__(obj_b, 'perigee_km', 300.0)
-    object.__setattr__(obj_b, 'apogee_km', 500.0)
+    obj_a = replace(make_debris_object(sat_a), perigee_km=300.0, apogee_km=500.0)
+    obj_b = replace(make_debris_object(sat_b), perigee_km=300.0, apogee_km=500.0)
     
     return {
         "25544": obj_a,
@@ -101,6 +98,29 @@ def test_find_conjunctions_pair_ordering(conjunction_elements):
     events = find_conjunctions(trajs, times, conjunction_elements, threshold_km=5.0)
     assert len(events) == 1
     assert int(events[0].object_a_id) < int(events[0].object_b_id)
+
+
+def test_spatial_index_pairs_match_bruteforce():
+    """SpatialIndex pair set matches naive O(n²) distance threshold search."""
+    rng = np.random.default_rng(42)
+    ids = [f"id{i}" for i in range(12)]
+    pts = rng.uniform(low=-500.0, high=500.0, size=(12, 3))
+    thresh = 150.0
+
+    brute: set[tuple[str, str]] = set()
+    for i in range(len(ids)):
+        for j in range(i + 1, len(ids)):
+            d = float(np.linalg.norm(pts[i] - pts[j]))
+            if d <= thresh:
+                a, b = ids[i], ids[j]
+                brute.add((min(a, b), max(a, b)))
+
+    idx = SpatialIndex()
+    for k, oid in enumerate(ids):
+        idx.insert(oid, pts[k])
+    tree_pairs = set(idx.query_pairs(threshold_km=thresh))
+
+    assert tree_pairs == brute
 
 
 def test_find_conjunctions_custom_threshold(conjunction_elements):

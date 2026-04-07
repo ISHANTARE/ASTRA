@@ -36,13 +36,16 @@ SUN_MU_KM3_S2: float = 1.32712440018e11
 MOON_MU_KM3_S2: float = 4902.800066
 SUN_EARTH_DISTANCE_KM: float = 1.496e8  # ~1 AU
 MOON_EARTH_DISTANCE_KM: float = 384400.0
+SUN_RADIUS_KM: float = 695700.0
 
 # ---------------------------------------------------------------------------
 # Atmospheric drag model (exponential)
 # ---------------------------------------------------------------------------
 DRAG_REF_DENSITY_KG_M3: float = 3.725e-12  # reference at 400 km
 DRAG_REF_ALTITUDE_KM: float = 400.0
-DRAG_SCALE_HEIGHT_KM: float = 58.515  # scale height for ~400 km
+DRAG_SCALE_HEIGHT_KM: float = 58.515      # scale height for ~400 km
+DRAG_MIN_ALTITUDE_KM: float = 100.0       # below this, exponential model is undefined
+DRAG_MAX_ALTITUDE_KM: float = 1500.0      # above this, density is negligible
 
 # ---------------------------------------------------------------------------
 # Orbital regime boundaries (km altitude above Earth's surface)

@@ -5,31 +5,42 @@ Implements a mission-operations–grade numerical orbit propagator using
 Cowell's direct integration with a Dormand-Prince RK8(7) adaptive-step
 integrator.
 
-Features:
-    - **6-DOF Coast arcs**: Two-body + J2/J3/J4 + drag + 3rd-body gravity.
-    - **7-DOF Powered arcs**: Adds attitude-steered thrust with
-      Tsiolkovsky-coupled mass depletion.
-    - **Segmented Orchestrator**: Automatically slices propagation at
-      engine ignition/cutoff boundaries so the integrator never steps
-      across a force-model discontinuity.
-    - **High-Fidelity Data Sources**:
-      - JPL DE421 Sun/Moon positions (via Skyfield, replacing analytical
-        approximations).
-      - Empirical atmospheric density parameterised by F10.7 solar flux
-        and Ap geomagnetic index (replacing the static exponential model).
+**Features**
 
-Force model includes:
-    - Two-body Keplerian gravity
-    - J2, J3, J4 zonal harmonic perturbations (WGS84)
-    - Empirical atmospheric drag (Jacchia-class with space weather)
-    - Solar third-body point-mass perturbation (JPL DE421)
-    - Lunar third-body point-mass perturbation (JPL DE421)
-    - Finite continuous thrust (7-DOF powered arcs)
+- **6-DOF coast arcs:** Two-body + J2/J3/J4 + drag + 3rd-body gravity.
+- **7-DOF powered arcs:** Attitude-steered thrust with Tsiolkovsky-coupled mass depletion.
+- **Segmented orchestrator:** Slices propagation at engine ignition/cutoff boundaries so
+  the integrator never steps across a force-model discontinuity.
+- **High-fidelity data:** JPL DE421 Sun/Moon via Skyfield; empirical atmospheric density
+  from F10.7 and Ap (replacing a static exponential model).
 
-References:
-    Vallado, D. A. (2013). Fundamentals of Astrodynamics and Applications.
-    Montenbruck & Gill (2000). Satellite Orbits.
-    Park et al. (2021). JPL Planetary Ephemerides DE440/DE441.
+**Force model includes**
+
+- Two-body Keplerian gravity
+- J2, J3, J4 zonal harmonic perturbations (WGS84)
+- Empirical atmospheric drag (Jacchia-class with space weather)
+- Solar third-body point-mass perturbation (JPL DE421)
+- Lunar third-body point-mass perturbation (JPL DE421)
+- Finite continuous thrust (7-DOF powered arcs)
+
+**Numba / IEEE-754**
+
+JIT kernels use ``@njit(fastmath=True)`` (MTH-16), which allows reordering and
+fused operations that can differ slightly from the pure-Python
+``_acceleration`` path. For validation, compare integrated trajectories
+or segment-level energy, not bitwise-identical acceleration samples.
+
+**SRP / PHY-18**
+
+Cannonball SRP scales flux from 1 AU; optional **cylindrical Earth umbra**
+(no penumbra) zeros SRP when the satellite lies in the anti-sunward cylinder
+of radius ``EARTH_EQUATORIAL_RADIUS_KM`` — see ``DragConfig.srp_cylindrical_shadow``.
+
+**References**
+
+- Vallado, D. A. (2013). *Fundamentals of Astrodynamics and Applications.*
+- Montenbruck & Gill (2000). *Satellite Orbits.*
+- Park et al. (2021). JPL Planetary Ephemerides DE440/DE441.
 """
 from __future__ import annotations
 
@@ -39,7 +50,21 @@ from typing import Optional
 
 import numpy as np
 import numpy.polynomial.chebyshev as cheb
-from numba import njit
+try:
+    from numba import njit
+    _NUMBA_AVAILABLE = True
+except ImportError:
+    _NUMBA_AVAILABLE = False
+    def njit(*args, **kwargs):
+        """No-op decorator when Numba is unavailable."""
+        def decorator(f):
+            return f
+        return decorator if (args and callable(args[0])) else decorator
+    import logging as _logging
+    _logging.getLogger(__name__).warning(
+        "Numba not installed — JIT-compiled kernels will run in pure-Python mode. "
+        "Performance will be significantly reduced. Install numba for full speed."
+    )
 from scipy.integrate import solve_ivp
 
 from astra.constants import (
@@ -51,10 +76,113 @@ from astra.constants import (
     MOON_MU_KM3_S2,
 )
 from astra.log import get_logger
+from astra.frames import _build_vnb_matrix_njit, _build_rtn_matrix_njit
 from astra.models import FiniteBurn
 
 logger = get_logger(__name__)
 
+
+@njit(fastmath=True, cache=True)
+def _srp_illumination_factor_njit(
+    r_km: np.ndarray,
+    r_sun_km: np.ndarray,
+    earth_radius_km: float = 6378.137,
+    sun_radius_km: float = 695700.0,
+) -> float:
+    """Conical Earth umbra/penumbra factor ν for cannonball SRP.
+
+    Models the Sun and Earth as spherical disks as seen from the satellite.
+    Supports a continuous transition through the penumbra.
+
+    Args:
+        r_km: Geocentric satellite position (km).
+        r_sun_km: Geocentric Sun position (km).
+        earth_radius_km: Earth equatorial radius (km).
+        sun_radius_km: Solar radius (km).
+
+    Returns:
+        Fractional illumination in [0, 1].
+    """
+    # Relative vectors
+    d_sun_sat = r_sun_km - r_km
+    d_sun_sat_mag = np.linalg.norm(d_sun_sat)
+    r_mag = np.linalg.norm(r_km)
+
+    if r_mag < 1.0 or d_sun_sat_mag < 1.0:
+        return 1.0
+
+    # Apparent angular radii (radians)
+    # Using small-angle approximation sin(x) ≈ x is NOT used here to maintain fidelity.
+    alpha = math.asin(earth_radius_km / r_mag)
+    beta = math.asin(sun_radius_km / d_sun_sat_mag)
+
+    # Angular separation between Earth and Sun centers (radians)
+    # cos(gamma) = (-r_sat . d_sun_sat) / (|r_sat| * |d_sun_sat|)
+    cos_gamma = np.dot(-r_km, d_sun_sat) / (r_mag * d_sun_sat_mag)
+    # Clamp for numerical safety
+    if cos_gamma > 1.0: cos_gamma = 1.0
+    if cos_gamma < -1.0: cos_gamma = -1.0
+    gamma = math.acos(cos_gamma)
+
+    # Sunlight (no occultation)
+    if gamma >= alpha + beta:
+        return 1.0
+    # Umbra (Total eclipse)
+    if gamma <= alpha - beta:
+        return 0.0
+    # Penumbra (Partial eclipse) - Area of intersection of two circles
+    if gamma < alpha + beta:
+        # Standard circle-circle intersection area on a unit sphere (approximation using planar geometry)
+        # alpha = circle 1 radius, beta = circle 2 radius, gamma = distance between centers
+        x = (gamma*gamma + alpha*alpha - beta*beta) / (2.0 * gamma)
+        y = math.sqrt(max(0.0, alpha*alpha - x*x))
+        
+        area = (alpha*alpha * math.acos(x / alpha) + 
+                beta*beta * math.acos((gamma - x) / beta) - 
+                gamma * y)
+        
+        # Illumination factor = 1 - (Obscured Area / Total Solar Area)
+        nu = 1.0 - area / (math.pi * beta * beta)
+        if nu < 0.0: nu = 0.0
+        if nu > 1.0: nu = 1.0
+        return nu
+
+@njit(fastmath=True, cache=True)
+def srp_illumination_factor_njit(r_km, r_sun_km, earth_radius_km, sun_radius_km):
+    """Public NJIT wrapper for conical SRP illumination factor."""
+    return _srp_illumination_factor_njit(r_km, r_sun_km, earth_radius_km, sun_radius_km)
+
+def srp_illumination_factor(
+    r_km: np.ndarray,
+    r_sun_km: np.ndarray,
+    earth_radius_km: float = 6378.137,
+    sun_radius_km: float = 695700.0,
+) -> float:
+    """Public pure-Python wrapper for conical SRP illumination factor ν in [0, 1]."""
+    return _srp_illumination_factor_njit(r_km, r_sun_km, earth_radius_km, sun_radius_km)
+
+
+@njit(fastmath=True, cache=True)
+def srp_cylindrical_illumination_factor_njit(r_km, r_sun_km):
+    """Legacy cylindrical umbra model (ν=0 in-cylinder, ν=1 outside)."""
+    d_sun_sat = r_sun_km - r_km
+    d_mag = np.linalg.norm(d_sun_sat)
+    if d_mag < 1.0: return 1.0
+    
+    # cos(gamma) = (-r . d_sun_sat) / (|r|*|d_sun_sat|)
+    r_mag = np.linalg.norm(r_km)
+    cos_gamma = np.dot(-r_km, d_sun_sat) / (r_mag * d_mag)
+    if cos_gamma > 0.0:  # Satellite is on the night side
+        # Separation distance from shadow axis
+        sin_gamma = math.sqrt(max(0.0, 1.0 - cos_gamma*cos_gamma))
+        dist_axis = r_mag * sin_gamma
+        if dist_axis < 6378.137:
+            return 0.0
+    return 1.0
+
+def srp_cylindrical_illumination_factor(r_km, r_sun_km):
+    """Public pure-Python legacy cylindrical umbra model."""
+    return srp_cylindrical_illumination_factor_njit(r_km, r_sun_km)
 
 # ---------------------------------------------------------------------------
 # Data Structures
@@ -69,31 +197,36 @@ class NumericalState:
 
     In 7-DOF (powered) mode, mass_kg tracks propellant depletion via
     Tsiolkovsky coupling: dm/dt = −F / (Isp·g₀).
-
-    Attributes:
-        t_jd: Julian Date of this state.
-        position_km: Shape (3,) ECI position [x, y, z] in km.
-        velocity_km_s: Shape (3,) ECI velocity [vx, vy, vz] in km/s.
-        mass_kg: Spacecraft wet mass in kg. None for coast-only runs.
     """
     t_jd: float
     position_km: np.ndarray  # shape (3,)
     velocity_km_s: np.ndarray  # shape (3,)
     mass_kg: Optional[float] = None
 
+    def __post_init__(self):
+        """Basic range validation on state vectors."""
+        if self.position_km is not None:
+            r_mag = np.linalg.norm(self.position_km)
+            if 1.0 < r_mag < 6000.0:
+                logger.warning(f"NumericalState position radius {r_mag:.2f} km is inside Earth radius.")
+            elif r_mag < 0.1:
+                # Likely an unitialized or zeroed state
+                logger.debug("NumericalState initialized with nearly-zero position vector.")
 
-@dataclass
+
+@dataclass(frozen=True)
 class DragConfig:
-    """Atmospheric drag configuration for a specific object.
+    """Atmospheric drag and optional solar radiation pressure inputs.
 
-    Attributes:
-        cd: Drag coefficient (dimensionless, typically 2.0–2.5).
-        area_m2: Cross-sectional area in m².
-        mass_kg: Object mass in kg.
+    This dataclass is frozen (immutable) to prevent accidental mutation
+    after construction. Create a new instance to modify parameters.
     """
     cd: float = 2.2
     area_m2: float = 10.0
     mass_kg: float = 1000.0
+    cr: float = 1.5
+    include_srp: bool = True
+    srp_cylindrical_shadow: bool = True
 
 
 # ---------------------------------------------------------------------------
@@ -105,20 +238,44 @@ _USE_DE = True  # Will be set to False if Skyfield data unavailable
 
 
 def _sun_position_de(t_jd: float) -> np.ndarray:
-    """Geocentric Sun position from JPL DE421 (km, GCRS ≈ ECI)."""
+    """Geocentric Sun position from JPL DE421 in TEME frame (km)."""
+    from astra import config
     try:
-        from astra.data_pipeline import sun_position_de
-        return sun_position_de(t_jd)
-    except Exception:
+        from astra.data_pipeline import sun_position_teme
+        return sun_position_teme(t_jd)
+    except (ImportError, ValueError, OSError) as exc:
+        from astra.errors import EphemerisError
+        if config.ASTRA_STRICT_MODE:
+            raise EphemerisError(
+                "[ASTRA STRICT] JPL DE421 ephemeris unavailable. "
+                "Cannot compute precise Sun position. "
+                "Run astra.data_pipeline.load_ephemeris() or set ASTRA_STRICT_MODE=False."
+            ) from exc
+        logger.warning(
+            "DE421 ephemeris unavailable — degrading to low-fidelity sinusoidal Sun approximation. "
+            "Accuracy will be significantly reduced for HEO/GEO objects."
+        )
         return _sun_position_approx(t_jd)
 
 
 def _moon_position_de(t_jd: float) -> np.ndarray:
-    """Geocentric Moon position from JPL DE421 (km, GCRS ≈ ECI)."""
+    """Geocentric Moon position from JPL DE421 in TEME frame (km)."""
+    from astra import config
     try:
-        from astra.data_pipeline import moon_position_de
-        return moon_position_de(t_jd)
-    except Exception:
+        from astra.data_pipeline import moon_position_teme
+        return moon_position_teme(t_jd)
+    except (ImportError, ValueError, OSError) as exc:
+        from astra.errors import EphemerisError
+        if config.ASTRA_STRICT_MODE:
+            raise EphemerisError(
+                "[ASTRA STRICT] JPL DE421 ephemeris unavailable. "
+                "Cannot compute precise Moon position. "
+                "Run astra.data_pipeline.load_ephemeris() or set ASTRA_STRICT_MODE=False."
+            ) from exc
+        logger.warning(
+            "DE421 ephemeris unavailable — degrading to low-fidelity sinusoidal Moon approximation. "
+            "Luni-solar perturbations will be inaccurate for HEO/GEO propagations."
+        )
         return _moon_position_approx(t_jd)
 
 
@@ -227,6 +384,9 @@ def _atmospheric_density(alt_km: float, t_jd: float, use_empirical: bool = True)
     uses the Jacchia-class model from data_pipeline.  Otherwise falls
     back to the static exponential model.
 
+    In STRICT_MODE, if space-weather data is unavailable, a SpaceWeatherError
+    is raised instead of silently degrading to the static model.
+
     Args:
         alt_km: Altitude above surface in km.
         t_jd: Julian Date (needed for space weather lookup).
@@ -241,17 +401,38 @@ def _atmospheric_density(alt_km: float, t_jd: float, use_empirical: bool = True)
     if use_empirical:
         try:
             from astra.data_pipeline import get_space_weather, atmospheric_density_empirical
-            f107_obs, f107_adj, ap_daily = get_space_weather(t_jd)
-            return atmospheric_density_empirical(alt_km, f107_obs, f107_adj, ap_daily)
-        except Exception:
-            pass  # Fall through to static model
+            from astra.errors import SpaceWeatherError
+            try:
+                f107_obs, f107_adj, ap_daily = get_space_weather(t_jd)
+                return atmospheric_density_empirical(alt_km, f107_obs, f107_adj, ap_daily)
+            except SpaceWeatherError:
+                raise
+            except (ImportError, ValueError, OSError):
+                from astra import config
+                if config.ASTRA_STRICT_MODE:
+                    raise SpaceWeatherError(
+                        "[ASTRA STRICT] Empirical atmospheric density unavailable. "
+                        "Load space weather data or set ASTRA_STRICT_MODE=False."
+                    )
+                logger.warning("Empirical atmospheric model unavailable — using static exponential fallback.")
+        except SpaceWeatherError:
+            raise  # SpaceWeatherError must always propagate (STRICT_MODE gate)
 
-    # Static exponential fallback
     from astra.constants import (
         DRAG_REF_DENSITY_KG_M3,
         DRAG_REF_ALTITUDE_KM,
         DRAG_SCALE_HEIGHT_KM,
+        DRAG_MIN_ALTITUDE_KM,
+        DRAG_MAX_ALTITUDE_KM,
     )
+    if alt_km > DRAG_MAX_ALTITUDE_KM or alt_km < 0.0:
+        return 0.0
+    if alt_km < DRAG_MIN_ALTITUDE_KM:
+        logger.debug(
+            f"Altitude {alt_km:.1f} km below drag model minimum ({DRAG_MIN_ALTITUDE_KM} km). "
+            "Returning zero density — reentry simulations require a dedicated model (e.g. NRLMSISE-00)."
+        )
+        return 0.0
     return DRAG_REF_DENSITY_KG_M3 * math.exp(
         -(alt_km - DRAG_REF_ALTITUDE_KM) / DRAG_SCALE_HEIGHT_KM
     )
@@ -265,17 +446,28 @@ def _acceleration(
     t_jd: float,
     r: np.ndarray,
     v: np.ndarray,
-    drag_config: Optional[DragConfig] = None,
-    include_third_body: bool = True,
-    use_de: bool = True,
-    use_empirical_drag: bool = True,
+    use_drag: bool,
+    drag_cd: float,
+    drag_area_m2: float,
+    drag_mass_kg: float,
+    drag_rho: float,
+    drag_H_km: float,
+    include_third_body: bool,
+    t_jd0: float,
+    duration_d: float,
+    sun_coeffs: np.ndarray,
+    moon_coeffs: np.ndarray,
+    use_srp: bool,
+    srp_cr: float,
+    srp_use_shadow: bool,
 ) -> np.ndarray:
     """Compute total gravitational + drag acceleration in ECI (km/s²).
 
     Forces:
         1. Two-body + J2/J3/J4 zonal harmonics
-        2. Atmospheric drag (empirical or static exponential)
-        3. Solar/Lunar third-body point-mass gravity (DE421 or analytical)
+        2. Atmospheric drag (per-substep exponential sampling)
+        3. Solar/Lunar third-body gravity (Chebyshev splined)
+        4. SRP (cannonball with cylindrical shadow)
     """
     r_mag = np.linalg.norm(r)
     if r_mag < 1.0:
@@ -294,11 +486,11 @@ def _acceleration(
     z2 = z * z
 
     # --- Two-body ---
-    a_twobody = -mu / r3 * r
+    a_total = -mu / r3 * r
 
     # --- J2 Perturbation ---
     fJ2 = 1.5 * J2 * mu * Re**2 / r5
-    a_j2 = np.array([
+    a_total += np.array([
         fJ2 * x * (5.0 * z2 / r2 - 1.0),
         fJ2 * y * (5.0 * z2 / r2 - 1.0),
         fJ2 * z * (5.0 * z2 / r2 - 3.0),
@@ -306,66 +498,81 @@ def _acceleration(
 
     # --- J3 Perturbation ---
     fJ3 = 0.5 * J3 * mu * Re**3 / r7
-    a_j3 = np.array([
+    a_total += np.array([
         fJ3 * x * (35.0 * z2 * z / r2 - 15.0 * z),
         fJ3 * y * (35.0 * z2 * z / r2 - 15.0 * z),
         fJ3 * (35.0 * z2 * z2 / r2 - 30.0 * z2 + 3.0 * r2),
     ])
 
     # --- J4 Perturbation ---
-    fJ4 = -0.625 * J4 * mu * Re**4 / r9
+    fJ4 = 0.625 * J4 * mu * Re**4 / r9
     z4 = z2 * z2
-    a_j4 = np.array([
+    a_total += np.array([
         fJ4 * x * (63.0 * z4 / r2 - 42.0 * z2 + 3.0 * r2),
         fJ4 * y * (63.0 * z4 / r2 - 42.0 * z2 + 3.0 * r2),
         fJ4 * z * (63.0 * z4 / r2 - 70.0 * z2 + 15.0 * r2),
     ])
 
-    a_total = a_twobody + a_j2 + a_j3 + a_j4
+    # --- Atmospheric Drag (PHY-B Standardized) ---
+    alt_km = r_mag - Re
+    if use_drag and alt_km < 1500.0 and drag_rho > 0.0:
+        # Per-substep exponential density correction
+        rho_instant = drag_rho * math.exp(-(alt_km - 400.0) / drag_H_km)
+        
+        # Atmosphere co-rotates with Earth
+        omega_earth = np.array([0.0, 0.0, EARTH_OMEGA_RAD_S])
+        v_rel = v - np.cross(omega_earth, r)
+        v_rel_mag = np.linalg.norm(v_rel)
 
-    # --- Atmospheric Drag ---
-    if drag_config is not None:
-        alt_km = r_mag - EARTH_EQUATORIAL_RADIUS_KM
-        if alt_km < 1500.0:
-            rho = _atmospheric_density(alt_km, t_jd, use_empirical_drag)
+        if v_rel_mag > 1e-10:
+            Bc = drag_cd * drag_area_m2 / drag_mass_kg
+            # 1e-6 (m^2 to km^2) * 1e9 (kg/m^3 to kg/km^3) = 1e3
+            a_drag = -0.5 * rho_instant * 1e3 * Bc * v_rel_mag * v_rel
+            a_total += a_drag
 
-            # Atmosphere co-rotates with Earth
-            omega_earth = np.array([0.0, 0.0, EARTH_OMEGA_RAD_S])
-            v_rel = v - np.cross(omega_earth, r)
-            v_rel_mag = np.linalg.norm(v_rel)
-
-            if v_rel_mag > 1e-10:
-                Bc = drag_config.cd * drag_config.area_m2 / drag_config.mass_kg
-                # Convert area from m² to km² (factor 1e-6)
-                # Convert density from kg/m³ to kg/km³ (factor 1e9)
-                # Net factor: 1e-6 * 1e9 = 1e3
-                a_drag = -0.5 * rho * 1e3 * Bc * v_rel_mag * v_rel
-                a_total += a_drag
-
-    # --- Third-Body Perturbations (Sun & Moon) ---
+    # --- Third-Body (Sun & Moon) via Chebyshev Splines ---
     if include_third_body:
-        # Select ephemeris source
-        if use_de:
-            sun_fn = _sun_position_de
-            moon_fn = _moon_position_de
-        else:
-            sun_fn = _sun_position_approx
-            moon_fn = _moon_position_approx
+        t_norm = 2.0 * (t_jd - t_jd0) / duration_d - 1.0
+        t_norm = max(-1.0, min(1.0, t_norm))
+        
+        # Use Python-native evaluate for parity
+        from astra.propagator import _eval_cheb_3d_njit
+        sun_pos = _eval_cheb_3d_njit(t_norm, sun_coeffs)
+        moon_pos = _eval_cheb_3d_njit(t_norm, moon_coeffs)
+        
+        # Sun Gravity
+        d_sun = sun_pos - r
+        d_mag_sun = np.linalg.norm(d_sun)
+        r_mag_sun = np.linalg.norm(sun_pos)
+        if d_mag_sun > 1.0 and r_mag_sun > 1.0:
+            a_total += SUN_MU_KM3_S2 * (d_sun / (d_mag_sun**3) - sun_pos / (r_mag_sun**3))
+            
+        # Moon Gravity
+        d_moon = moon_pos - r
+        d_mag_moon = np.linalg.norm(d_moon)
+        r_mag_moon = np.linalg.norm(moon_pos)
+        if d_mag_moon > 1.0 and r_mag_moon > 1.0:
+            a_total += MOON_MU_KM3_S2 * (d_moon / (d_mag_moon**3) - moon_pos / (r_mag_moon**3))
 
-        for body_pos_fn, body_mu in [
-            (sun_fn, SUN_MU_KM3_S2),
-            (moon_fn, MOON_MU_KM3_S2),
-        ]:
-            r_body = body_pos_fn(t_jd)
-            d = r_body - r  # vector from satellite to body
-            d_mag = np.linalg.norm(d)
-            r_body_mag = np.linalg.norm(r_body)
-
-            if d_mag > 1.0 and r_body_mag > 1.0:
-                # Standard third-body perturbation formula
-                a_total += body_mu * (d / d_mag**3 - r_body / r_body_mag**3)
+        # --- Solar radiation pressure (cannonball; scale flux from 1 AU)
+        if use_srp and drag_area_m2 > 0.0 and drag_mass_kg > 0.0:
+            d_ss = r - sun_pos
+            d_mag_ss = float(np.linalg.norm(d_ss))
+            if d_mag_ss > 1.0:
+                P0 = 4.56e-6
+                AU_KM = 149597870.7
+                scale = (AU_KM / d_mag_ss) ** 2
+                amag = P0 * scale * srp_cr * (drag_area_m2 / drag_mass_kg) / 1000.0
+                
+                nu = 1.0
+                if srp_use_shadow:
+                    # Upgrade from cylindrical to conical shadow (PHY-D)
+                    from astra.constants import SUN_RADIUS_KM
+                    nu = _srp_illumination_factor_njit(r, sun_pos, EARTH_EQUATORIAL_RADIUS_KM, SUN_RADIUS_KM)
+                a_total += (nu * amag) * (d_ss / d_mag_ss)
 
     return a_total
+
 
 
 # ---------------------------------------------------------------------------
@@ -382,11 +589,21 @@ _G0 = 9.80665  # m/s²
 def _coast_derivative(
     t_sec: float,
     y: np.ndarray,
-    t_jd0: float,
-    drag_config: Optional[DragConfig],
+    t_jd0_segment: float,
+    use_drag: bool,
+    drag_cd: float,
+    drag_area_m2: float,
+    drag_mass_kg: float,
+    drag_rho: float,
+    drag_H_km: float,
     include_third_body: bool,
-    use_de: bool,
-    use_empirical_drag: bool,
+    global_t_jd0: float,
+    duration_d: float,
+    sun_coeffs: np.ndarray,
+    moon_coeffs: np.ndarray,
+    use_srp: bool,
+    srp_cr: float,
+    srp_use_shadow: bool,
 ) -> np.ndarray:
     """State derivative for unpowered (coast) arcs.
 
@@ -396,9 +613,12 @@ def _coast_derivative(
     """
     r = y[:3]
     v = y[3:6]
-    t_jd = t_jd0 + t_sec / 86400.0
-    a = _acceleration(t_jd, r, v, drag_config, include_third_body,
-                      use_de, use_empirical_drag)
+    t_jd = t_jd0_segment + t_sec / 86400.0
+    a = _acceleration(
+        t_jd, r, v, use_drag, drag_cd, drag_area_m2, drag_mass_kg, drag_rho, drag_H_km,
+        include_third_body, global_t_jd0, duration_d, sun_coeffs, moon_coeffs,
+        use_srp, srp_cr, srp_use_shadow,
+    )
     return np.concatenate([v, a])
 
 
@@ -409,12 +629,25 @@ def _coast_derivative(
 def _powered_derivative(
     t_sec: float,
     y: np.ndarray,
-    t_jd0: float,
-    drag_config: Optional[DragConfig],
+    t_jd0_segment: float,
+    use_drag: bool,
+    drag_cd: float,
+    drag_area_m2: float,
+    drag_mass_kg: float,
+    drag_rho: float,
+    drag_H_km: float,
     include_third_body: bool,
-    use_de: bool,
-    use_empirical_drag: bool,
-    burn: FiniteBurn,
+    global_t_jd0: float,
+    duration_d: float,
+    sun_coeffs: np.ndarray,
+    moon_coeffs: np.ndarray,
+    use_srp: bool,
+    srp_cr: float,
+    srp_use_shadow: bool,
+    burn_thrust_N: float,
+    burn_isp_s: float,
+    burn_dir: np.ndarray,
+    burn_frame_idx: int,
 ) -> np.ndarray:
     """State derivative for powered (thrusting) arcs.
 
@@ -430,26 +663,41 @@ def _powered_derivative(
     r = y[:3]
     v = y[3:6]
     m = y[6]
-    t_jd = t_jd0 + t_sec / 86400.0
+    t_jd = t_jd0_segment + t_sec / 86400.0
 
-    # Gravitational + drag acceleration (same as coast)
-    a_grav = _acceleration(t_jd, r, v, drag_config, include_third_body,
-                           use_de, use_empirical_drag)
+    # Gravitational + drag acceleration
+    a_grav = _acceleration(
+        t_jd, r, v, use_drag, drag_cd, drag_area_m2, drag_mass_kg, drag_rho, drag_H_km,
+        include_third_body, global_t_jd0, duration_d, sun_coeffs, moon_coeffs,
+        use_srp, srp_cr, srp_use_shadow,
+    )
 
-    # Thrust acceleration  (km/s²)
-    from astra.maneuver import thrust_acceleration_inertial
-    a_thrust = thrust_acceleration_inertial(r, v, m, burn)
+    # Thrust acceleration (km/s²)
+    # We use a manual reconstruction for parity with NJIT kernel
+    r_mag = max(1e-12, np.linalg.norm(r))
+    thrust_a_mag = (burn_thrust_N / 1000.0) / m
 
+    if burn_frame_idx == 0:  # VNB
+        from astra.frames import _build_vnb_matrix_njit
+        rot_matrix = _build_vnb_matrix_njit(r, v)
+    else:  # RTN
+        from astra.frames import _build_rtn_matrix_njit
+        rot_matrix = _build_rtn_matrix_njit(r, v)
+
+    a_thrust = np.dot(rot_matrix, burn_dir) * thrust_a_mag
     a_total = a_grav + a_thrust
 
-    # Mass flow rate (negative because mass decreases)
-    dm_dt = -burn.thrust_N / (burn.isp_s * _G0)
+    # Mass flow rate
+    dm_dt = -burn_thrust_N / (burn_isp_s * 9.80665)
     
     return np.concatenate([v, a_total, [dm_dt]])
 
 # ---------------------------------------------------------------------------
 # Numba Compiled HPC Functions
 # ---------------------------------------------------------------------------
+# Physical constants in ``_acceleration_njit`` / related kernels are inlined as
+# float literals because Numba cannot import ``astra.constants`` at compile time.
+# Keep μ, Re, J2, J3, J4, and third-body GM in sync with ``astra.constants``.
 
 @njit(fastmath=True, cache=True)
 def _eval_cheb_3d_njit(t_norm: float, coeffs: np.ndarray) -> np.ndarray:
@@ -485,11 +733,15 @@ def _acceleration_njit(
     drag_area_m2: float,
     drag_mass_kg: float,
     drag_rho: float,
+    drag_H_km: float,
     include_third_body: bool,
     t_jd0: float,
     duration_d: float,
     sun_coeffs: np.ndarray,
     moon_coeffs: np.ndarray,
+    use_srp: bool,
+    srp_cr: float,
+    srp_use_shadow: bool,
 ) -> np.ndarray:
     """Numba-compiled acceleration function with altitude-aware harmonic truncation."""
     r_mag = np.linalg.norm(r)
@@ -503,8 +755,9 @@ def _acceleration_njit(
     mu = 398600.4418
     J2 = 0.00108262668
     J3 = -0.00000253266
-    J4 = -0.00000161099
-    SUN_MU = 132712440041.9394
+    J4 = -0.00000161962  # WGS-84 zonal J4
+    # SUN_MU matches ``constants.SUN_MU_KM3_S2`` (IAU-style GM).
+    SUN_MU = 1.32712440018e11
     MOON_MU = 4902.800066
 
     r2 = r_mag * r_mag
@@ -515,44 +768,49 @@ def _acceleration_njit(
 
     alt_km = r_mag - Re
     
-    if alt_km < 2000.0:
-        r5 = r3 * r2
-        r7 = r5 * r2
-        r9 = r7 * r2
-        z2 = z * z
+    r5 = r3 * r2
+    r7 = r5 * r2
+    r9 = r7 * r2
+    z2 = z * z
 
-        # --- J2 Perturbation ---
-        fJ2 = 1.5 * J2 * mu * Re**2 / r5
-        a_j2_x = fJ2 * x * (5.0 * z2 / r2 - 1.0)
-        a_j2_y = fJ2 * y * (5.0 * z2 / r2 - 1.0)
-        a_j2_z = fJ2 * z * (5.0 * z2 / r2 - 3.0)
-        
-        # --- J3 Perturbation ---
-        fJ3 = 0.5 * J3 * mu * Re**3 / r7
-        a_j3_x = fJ3 * x * (35.0 * z2 * z / r2 - 15.0 * z)
-        a_j3_y = fJ3 * y * (35.0 * z2 * z / r2 - 15.0 * z)
-        a_j3_z = fJ3 * (35.0 * z2 * z2 / r2 - 30.0 * z2 + 3.0 * r2)
+    # --- J2 Perturbation ---
+    fJ2 = 1.5 * J2 * mu * Re**2 / r5
+    a_j2_x = fJ2 * x * (5.0 * z2 / r2 - 1.0)
+    a_j2_y = fJ2 * y * (5.0 * z2 / r2 - 1.0)
+    a_j2_z = fJ2 * z * (5.0 * z2 / r2 - 3.0)
+    
+    # --- J3 Perturbation ---
+    fJ3 = 0.5 * J3 * mu * Re**3 / r7
+    a_j3_x = fJ3 * x * (35.0 * z2 * z / r2 - 15.0 * z)
+    a_j3_y = fJ3 * y * (35.0 * z2 * z / r2 - 15.0 * z)
+    a_j3_z = fJ3 * (35.0 * z2 * z2 / r2 - 30.0 * z2 + 3.0 * r2)
 
-        # --- J4 Perturbation ---
-        fJ4 = -0.625 * J4 * mu * Re**4 / r9
-        z4 = z2 * z2
-        a_j4_x = fJ4 * x * (63.0 * z4 / r2 - 42.0 * z2 + 3.0 * r2)
-        a_j4_y = fJ4 * y * (63.0 * z4 / r2 - 42.0 * z2 + 3.0 * r2)
-        a_j4_z = fJ4 * z * (63.0 * z4 / r2 - 70.0 * z2 + 15.0 * r2)
+    # --- J4 Perturbation ---
+    # Vallado Eq. 8-31: coefficient +5/8 (0.625) times J4 (J4 < 0).
+    fJ4 = 0.625 * J4 * mu * Re**4 / r9
+    z4 = z2 * z2
+    a_j4_x = fJ4 * x * (63.0 * z4 / r2 - 42.0 * z2 + 3.0 * r2)
+    a_j4_y = fJ4 * y * (63.0 * z4 / r2 - 42.0 * z2 + 3.0 * r2)
+    a_j4_z = fJ4 * z * (63.0 * z4 / r2 - 70.0 * z2 + 15.0 * r2)
 
-        a_total[0] += a_j2_x + a_j3_x + a_j4_x
-        a_total[1] += a_j2_y + a_j3_y + a_j4_y
-        a_total[2] += a_j2_z + a_j3_z + a_j4_z
+    a_total[0] += a_j2_x + a_j3_x + a_j4_x
+    a_total[1] += a_j2_y + a_j3_y + a_j4_y
+    a_total[2] += a_j2_z + a_j3_z + a_j4_z
 
-    # --- Atmospheric Drag ---
+    # --- Atmospheric Drag (PHY-B) ---
+    # Performs per-substep altitude sampling of the density model.
+    # Density: drag_rho_ref * exp(-(alt - 400 km) / drag_H_km)
     if use_drag and alt_km < 1500.0 and drag_rho > 0.0:
+        # Exponential density correction for instantaneous altitude
+        rho_instant = drag_rho * math.exp(-(alt_km - 400.0) / drag_H_km)
+        
         omega_earth = np.array([0.0, 0.0, 7.292115146706979e-5])
         v_rel = v - np.cross(omega_earth, r)
         v_rel_mag = np.linalg.norm(v_rel)
         if v_rel_mag > 1e-10:
             Bc = drag_cd * drag_area_m2 / drag_mass_kg
             # 1e-6 (m^2 to km^2) * 1e9 (kg/m^3 to kg/km^3) = 1e3
-            a_drag = -0.5 * drag_rho * 1e3 * Bc * v_rel_mag * v_rel
+            a_drag = -0.5 * rho_instant * 1e3 * Bc * v_rel_mag * v_rel
             a_total += a_drag
 
     # --- Third-Body (Sun & Moon) via Chebyshev Splines ---
@@ -579,31 +837,50 @@ def _acceleration_njit(
         if d_mag_moon > 1.0 and r_mag_moon > 1.0:
             a_total += MOON_MU * (d_moon / (d_mag_moon * d_mag_moon * d_mag_moon) - moon_pos / (r_mag_moon * r_mag_moon * r_mag_moon))
 
+        if use_srp and drag_area_m2 > 0.0 and drag_mass_kg > 0.0:
+            d_ss = r - sun_pos
+            d_mag_ss = np.linalg.norm(d_ss)
+            if d_mag_ss > 1.0:
+                nu = 1.0
+                if srp_use_shadow:
+                    # High-fidelity conical shadow (PHY-D)
+                    nu = _srp_illumination_factor_njit(r, sun_pos, Re, 695700.0)
+                P0 = 4.56e-6
+                AU = 149597870.7
+                scale = (AU / d_mag_ss) * (AU / d_mag_ss)
+                amag = P0 * scale * srp_cr * (drag_area_m2 / drag_mass_kg) / 1000.0
+                a_total += (nu * amag) * (d_ss / d_mag_ss)
+
     return a_total
 
 @njit(fastmath=True, cache=True)
 def _coast_derivative_njit(
     t_sec: float,
     y: np.ndarray,
-    t_jd0: float,                     
+    t_jd0: float,
     use_drag: bool,
     drag_cd: float,
     drag_area_m2: float,
     drag_mass_kg: float,
     drag_rho: float,
+    drag_H_km: float,
     include_third_body: bool,
-    global_t_jd0: float,              
+    global_t_jd0: float,
     duration_d: float,
     sun_coeffs: np.ndarray,
     moon_coeffs: np.ndarray,
+    use_srp: bool,
+    srp_cr: float,
+    srp_use_shadow: bool,
 ) -> np.ndarray:
     """State derivative for unpowered (coast) arcs using Numba."""
     r = y[:3]
     v = y[3:6]
     t_jd = t_jd0 + t_sec / 86400.0
     a = _acceleration_njit(
-        t_jd, r, v, use_drag, drag_cd, drag_area_m2, drag_mass_kg, drag_rho,
-        include_third_body, global_t_jd0, duration_d, sun_coeffs, moon_coeffs
+        t_jd, r, v, use_drag, drag_cd, drag_area_m2, drag_mass_kg, drag_rho, drag_H_km,
+        include_third_body, global_t_jd0, duration_d, sun_coeffs, moon_coeffs,
+        use_srp, srp_cr, srp_use_shadow,
     )
     dy = np.empty(6)
     dy[0:3] = v
@@ -620,11 +897,15 @@ def _powered_derivative_njit(
     drag_area_m2: float,
     drag_mass_kg: float,
     drag_rho: float,
+    drag_H_km: float,
     include_third_body: bool,
-    global_t_jd0: float,              
+    global_t_jd0: float,
     duration_d: float,
     sun_coeffs: np.ndarray,
     moon_coeffs: np.ndarray,
+    use_srp: bool,
+    srp_cr: float,
+    srp_use_shadow: bool,
     burn_thrust_N: float,
     burn_isp_s: float,
     burn_dir: np.ndarray,
@@ -637,50 +918,19 @@ def _powered_derivative_njit(
     t_jd = t_jd0 + t_sec / 86400.0
 
     a_grav = _acceleration_njit(
-        t_jd, r, v, use_drag, drag_cd, drag_area_m2, drag_mass_kg, drag_rho,
-        include_third_body, global_t_jd0, duration_d, sun_coeffs, moon_coeffs
+        t_jd, r, v, use_drag, drag_cd, drag_area_m2, drag_mass_kg, drag_rho, drag_H_km,
+        include_third_body, global_t_jd0, duration_d, sun_coeffs, moon_coeffs,
+        use_srp, srp_cr, srp_use_shadow,
     )
 
-    # Thrust acceleration (km/s^2)
-    r_mag = np.linalg.norm(r)
-    v_mag = np.linalg.norm(v)
+    r_mag = max(1e-12, np.linalg.norm(r))
+    v_mag = max(1e-12, np.linalg.norm(v))
     thrust_a_mag = (burn_thrust_N / 1000.0) / m
 
-    rot_matrix = np.empty((3, 3))
     if burn_frame_idx == 0:  # VNB
-        v_hat = v / v_mag
-        h = np.empty(3)
-        h[0] = r[1]*v[2] - r[2]*v[1]
-        h[1] = r[2]*v[0] - r[0]*v[2]
-        h[2] = r[0]*v[1] - r[1]*v[0]
-        h_mag = np.linalg.norm(h)
-        n_hat = h / h_mag
-        
-        b_hat = np.empty(3)
-        b_hat[0] = v_hat[1]*n_hat[2] - v_hat[2]*n_hat[1]
-        b_hat[1] = v_hat[2]*n_hat[0] - v_hat[0]*n_hat[2]
-        b_hat[2] = v_hat[0]*n_hat[1] - v_hat[1]*n_hat[0]
-
-        rot_matrix[:, 0] = v_hat
-        rot_matrix[:, 1] = n_hat
-        rot_matrix[:, 2] = b_hat
+        rot_matrix = _build_vnb_matrix_njit(r, v)
     else:  # RTN
-        r_hat = r / r_mag
-        h = np.empty(3)
-        h[0] = r[1]*v[2] - r[2]*v[1]
-        h[1] = r[2]*v[0] - r[0]*v[2]
-        h[2] = r[0]*v[1] - r[1]*v[0]
-        h_mag = np.linalg.norm(h)
-        n_hat = h / h_mag
-        
-        t_hat = np.empty(3)
-        t_hat[0] = n_hat[1]*r_hat[2] - n_hat[2]*r_hat[1]
-        t_hat[1] = n_hat[2]*r_hat[0] - n_hat[0]*r_hat[2]
-        t_hat[2] = n_hat[0]*r_hat[1] - n_hat[1]*r_hat[0]
-        
-        rot_matrix[:, 0] = r_hat
-        rot_matrix[:, 1] = t_hat
-        rot_matrix[:, 2] = n_hat
+        rot_matrix = _build_rtn_matrix_njit(r, v)
 
     for i in range(3):
         a_thrust_i = 0.0
@@ -696,19 +946,55 @@ def _powered_derivative_njit(
     dy[6] = dm_dt
     return dy
 
+def _compute_scale_height(f107_obs: float, f107_adj: float, ap_daily: float) -> float:
+    """Compute empirical atmospheric scale height (km) at 400 km reference altitude.
+
+    Uses the same Jacchia-71 simplified model as ``atmospheric_density_empirical``
+    to derive the local scale height that is passed to the Numba integration kernel
+    for per-step exponential density evaluation.
+
+    Both f107_obs and f107_adj are required to match the solar flux contribution
+    formula used in ``atmospheric_density_empirical()``.
+
+    Args:
+        f107_obs: Observed F10.7 solar flux [SFU].
+        f107_adj: 81-day centred average F10.7 solar flux [SFU].
+        ap_daily: Daily Ap geomagnetic index.
+
+    Returns:
+        Scale height H in km at ~400 km altitude.
+    """
+    T_c = 379.0
+    delta_T_solar = 3.24 * f107_adj + 1.3 * (f107_obs - f107_adj)  # consistent with empirical model
+    delta_T_geo = 28.0 * max(ap_daily, 0.0) ** 0.4
+    T_inf = max(500.0, min(T_c + delta_T_solar + delta_T_geo, 2500.0))
+
+    k_boltzmann = 1.380649e-23  # J/K
+    amu = 1.66054e-27            # kg
+    m_eff = 16.0 * amu           # atomic oxygen at 400 km
+    g_400 = 9.80665 * (6378.137 / (6378.137 + 400.0)) ** 2  # m/s²
+    H_km = (k_boltzmann * T_inf) / (m_eff * g_400) / 1000.0
+    return max(H_km, 20.0)  # physical floor
+
+
 def _compute_planetary_splines(t_jd0: float, duration_s: float, use_de: bool) -> tuple[np.ndarray, np.ndarray, float]:
     duration_d = duration_s / 86400.0
     if duration_d < 1e-9:
         duration_d = 0.1  # fallback to avoid division by zero
     
-    # Evaluate at 25 Chebyshev nodes for smooth orbit over [t_jd0, t_jd0 + duration_d]
-    deg = 25
-    nodes_norm = np.cos(np.pi * (2 * np.arange(deg + 1) + 1) / (2 * (deg + 1))) # -1 to 1 array
+    # Scale Chebyshev degree with arc duration to resolve lunar period (~27.3 d).
+    # 25 nodes minimum; 5 nodes/day for longer arcs (> 10 days) captures the 27.3-day lunar period.
+    deg = max(25, int(duration_d * 5))
+    # Chebyshev nodes of the first kind on [-1, 1]; ``cheb.chebfit``
+    # fits T_n in a least-squares sense on these points. Gauss–Lobatto (endpoints
+    # included) is an alternative if endpoint errors dominate.
+    nodes_norm = np.cos(np.pi * (2 * np.arange(deg + 1) + 1) / (2 * (deg + 1)))
     t_nodes = t_jd0 + 0.5 * duration_d * (nodes_norm + 1.0)
     
     sun_pos = np.zeros((deg + 1, 3))
     moon_pos = np.zeros((deg + 1, 3))
     
+    # TEME-frame samples so the Numba kernel matches the SGP4 propagator frame.
     sun_fn = _sun_position_de if use_de else _sun_position_approx
     moon_fn = _moon_position_de if use_de else _moon_position_approx
     
@@ -761,6 +1047,15 @@ def propagate_cowell(
     a force-model discontinuity, eliminating truncation error at burn
     edges.
 
+    Known Limitations:
+        - Geopotential truncated at J4. J5/J6 contribute ~0.1 km/day at GEO.
+          For ultra-high-fidelity MEO/GEO, use a gravity model with more harmonics.
+        - Atmospheric scale height uses single-layer exponential profile;
+          multi-altitude molecular mass variation is a third-order effect.
+        - Powered-arc default mass absolute tolerance is 10⁻⁵ kg (0.01 g), which
+          is loose for micro-thrusters on small spacecraft; pass ``atol`` for
+          tighter mass conservation.
+
     Args:
         state0: Initial state (position + velocity + optional mass).
         duration_s: Total propagation duration in seconds.
@@ -786,15 +1081,24 @@ def propagate_cowell(
     # Validate and sort maneuvers by ignition time
     burns: list[FiniteBurn] = []
     if maneuvers:
-        from astra.maneuver import validate_burn
+        from astra.maneuver import validate_burn, validate_burn_sequence
         if mass_kg is None:
+            from astra import config
+            if config.ASTRA_STRICT_MODE:
+                from astra.errors import ManeuverError
+                raise ManeuverError(
+                    "[ASTRA STRICT] Spacecraft mass_kg is required for powered maneuver propagation. "
+                    "Set NumericalState.mass_kg or disable strict mode via astra.config.ASTRA_STRICT_MODE=False."
+                )
             logger.warning(
                 "Maneuvers specified but initial mass_kg is None. "
-                "Defaulting to 1000.0 kg."
+                "Defaulting to 1000.0 kg — drag and Tsiolkovsky accuracy are compromised. "
+                "Provide mass_kg in NumericalState for physical accuracy."
             )
             mass_kg = 1000.0
 
         burns = sorted(maneuvers, key=lambda b: b.epoch_ignition_jd)
+        validate_burn_sequence(burns)
 
         # Validate each burn
         running_mass = mass_kg
@@ -815,39 +1119,39 @@ def propagate_cowell(
         moon_coeffs = np.zeros((1, 3))
         duration_d = duration_s / 86400.0
 
-    # Retrieve Space Weather once for empirical drag
+    # Space weather once per propagation for empirical drag (rho_ref, scale height).
     use_drag = (drag_config is not None)
     drag_cd = drag_config.cd if drag_config else 0.0
     drag_area_m2 = drag_config.area_m2 if drag_config else 0.0
     drag_mass_kg = drag_config.mass_kg if drag_config else 1.0
     drag_rho = 0.0
-    
+    drag_H_km = 58.515  # default static scale height (fallback)
+
     if use_drag:
         from astra.data_pipeline import get_space_weather, atmospheric_density_empirical
         if use_empirical_drag:
             try:
-                # Evaluate a static baseline altitude approximation for initialization of empirical density models.
-                # However, for Numba, doing empirical model requires T_inf logic which we wrote in Python.
-                # Since Numba doesn't have the T_inf logic, we can look up f107_obs, f107_adj, ap_daily
-                # and compute the T_inf once here. Altitude is the only variable!
                 f107_obs, f107_adj, ap_daily = get_space_weather(t_jd0)
-                
-                # The Numba-accelerated integration core cannot natively process external Python functions
-                # or evaluate the full object-oriented empirical atmospheric density model per micro-step.
-                # To maximize performance without halting computation, we evaluate the baseline initial
-                # atmospheric density from the empirical bounds (e.g. NRLMSISE-00 / Harris-Priester) 
-                # and treat it as a constant parameter scaling the ballistic coefficient over short arcs.
-                # This formulation perfectly balances 100x computational speedups with 99% accuracy for <7 day LEO propagations.
-                r_mag = np.linalg.norm(state0.position_km)
-                alt_km_0 = r_mag - 6378.137
-                drag_rho = atmospheric_density_empirical(max(100.0, alt_km_0), f107_obs, f107_adj, ap_daily)
-            except Exception:
+                # Reference density at 400 km for scale-height interpolation
+                drag_rho = atmospheric_density_empirical(400.0, f107_obs, f107_adj, ap_daily)
+                drag_H_km = _compute_scale_height(f107_obs, f107_adj, ap_daily)
+            except (ImportError, ValueError, OSError):
                 drag_rho = 0.0
         if drag_rho == 0.0:
-            from astra.constants import DRAG_REF_DENSITY_KG_M3, DRAG_REF_ALTITUDE_KM, DRAG_SCALE_HEIGHT_KM
-            r_mag = np.linalg.norm(state0.position_km)
-            alt_km_0 = r_mag - 6378.137
-            drag_rho = DRAG_REF_DENSITY_KG_M3 * math.exp(-(alt_km_0 - DRAG_REF_ALTITUDE_KM) / DRAG_SCALE_HEIGHT_KM)
+            from astra.constants import DRAG_REF_DENSITY_KG_M3, DRAG_SCALE_HEIGHT_KM
+            drag_rho = DRAG_REF_DENSITY_KG_M3  # reference density at 400 km
+            drag_H_km = DRAG_SCALE_HEIGHT_KM
+
+    use_srp = bool(
+        drag_config is not None
+        and getattr(drag_config, "include_srp", True)
+        and include_third_body
+    )
+    srp_cr = float(drag_config.cr) if drag_config is not None else 1.5
+    srp_use_shadow = bool(
+        drag_config is not None
+        and getattr(drag_config, "srp_cylindrical_shadow", True)
+    )
 
     logger.info(
         f"Segmented Cowell propagation: {duration_s:.0f}s, "
@@ -904,10 +1208,20 @@ def propagate_cowell(
             def powered_deriv(t_sec, y):
                 return _powered_derivative_njit(
                     t_sec, y, t_jd0 + seg_start_s / 86400.0,
-                    use_drag, drag_cd, drag_area_m2, drag_mass_kg, drag_rho,
+                    use_drag, drag_cd, drag_area_m2, drag_mass_kg, drag_rho, drag_H_km,
                     include_third_body, t_jd0_global, duration_d, sun_coeffs, moon_coeffs,
-                    b_thrust, b_isp, b_dir, b_idx
+                    use_srp, srp_cr, srp_use_shadow,
+                    b_thrust, b_isp, b_dir, b_idx,
                 )
+
+            # Per-dimension absolute tolerances for 7-DOF powered arc
+            # Position (km), velocity (km/s), mass (kg) — different physical scales
+            powered_atol_vec = np.array([
+                1e-11, 1e-11, 1e-11,   # position x, y, z (km) — sub-cm accuracy
+                1e-13, 1e-13, 1e-13,   # velocity vx, vy, vz (km/s) — sub-μm/s accuracy
+                # 1e-5 kg suits ton-class vehicles; pass rtol/atol for micro-thrust vehicles.
+                1e-5,
+            ])
 
             sol = solve_ivp(
                 powered_deriv,
@@ -916,11 +1230,19 @@ def propagate_cowell(
                 method='DOP853',
                 t_eval=t_eval,
                 rtol=rtol if rtol is not None else powered_rtol,
-                atol=atol if atol is not None else powered_atol,
+                atol=atol if atol is not None else powered_atol_vec,
             )
 
             if not sol.success:
                 logger.error(f"Powered integration failed: {sol.message}")
+                from astra import config
+                from astra.errors import PropagationError
+
+                if config.ASTRA_STRICT_MODE:
+                    raise PropagationError(
+                        f"Cowell powered integration failed: {sol.message}",
+                        t_jd=t_jd0 + seg_start_s / 86400.0,
+                    )
                 break
 
             for i in range(len(sol.t)):
@@ -943,8 +1265,9 @@ def propagate_cowell(
             def coast_deriv(t_sec, y):
                 return _coast_derivative_njit(
                     t_sec, y, t_jd0 + seg_start_s / 86400.0,
-                    use_drag, drag_cd, drag_area_m2, drag_mass_kg, drag_rho,
-                    include_third_body, t_jd0_global, duration_d, sun_coeffs, moon_coeffs
+                    use_drag, drag_cd, drag_area_m2, drag_mass_kg, drag_rho, drag_H_km,
+                    include_third_body, t_jd0_global, duration_d, sun_coeffs, moon_coeffs,
+                    use_srp, srp_cr, srp_use_shadow,
                 )
 
             sol = solve_ivp(
@@ -959,6 +1282,14 @@ def propagate_cowell(
 
             if not sol.success:
                 logger.error(f"Coast integration failed: {sol.message}")
+                from astra import config
+                from astra.errors import PropagationError
+
+                if config.ASTRA_STRICT_MODE:
+                    raise PropagationError(
+                        f"Cowell coast integration failed: {sol.message}",
+                        t_jd=t_jd0 + seg_start_s / 86400.0,
+                    )
                 break
 
             for i in range(len(sol.t)):
@@ -973,7 +1304,9 @@ def propagate_cowell(
             current_r = sol.y[:3, -1].copy()
             current_v = sol.y[3:6, -1].copy()
 
-    # Deduplicate states at segment boundaries (same t_jd)
+    # Deduplicate states exactly at segment boundaries (same t_jd)
+    # The 1e-12 JD threshold (~86 microseconds) is chosen to catch repeated 
+    # solve_ivp t_eval endpoints without filtering distinct adjacent steps.
     if all_states:
         deduped = [all_states[0]]
         for s in all_states[1:]:
@@ -1011,6 +1344,22 @@ def _build_segments(
     segments: list[tuple[float, float, Optional[FiniteBurn]]] = []
     cursor_s = 0.0
     end_s = duration_s
+
+    # 1. Robust overlap detection (SE-G)
+    for i in range(len(burns) - 1):
+        b1, b2 = burns[i], burns[i+1]
+        if b2.epoch_ignition_jd < b1.epoch_cutoff_jd - 1e-12:
+            from astra import config
+            from astra.errors import ManeuverError
+            msg = (
+                f"Maneuver overlap detected: Burn at {b2.epoch_ignition_jd} "
+                f"ignites before previous Burn cutoff at {b1.epoch_cutoff_jd}."
+            )
+            if config.ASTRA_STRICT_MODE:
+                raise ManeuverError(msg)
+            else:
+                import logging
+                logging.getLogger(__name__).warning(f"{msg} Skipping overlapping burn.")
 
     for burn in burns:
         # Convert burn epochs to seconds relative to t_jd0

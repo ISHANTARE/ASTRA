@@ -7,6 +7,15 @@ This script demonstrates the core workflow of ASTRA-Core:
 4. Detecting potential collisions using the Sweep-and-Prune algorithm.
 """
 
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 import astra
 import numpy as np
 

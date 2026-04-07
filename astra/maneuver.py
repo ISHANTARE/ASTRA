@@ -5,7 +5,7 @@ Implements the mathematics required to convert spacecraft-centric thrust
 vectors (VNB / RTN) into the inertial frame and to validate maneuver
 definitions before integration.
 
-Frame Definitions (all right-handed orthonormal triads):
+Frame definitions (all right-handed orthonormal triads)::
 
     VNB (Velocity, Normal, Binormal):
         V̂ = v / |v|
@@ -17,9 +17,10 @@ Frame Definitions (all right-handed orthonormal triads):
         N̂ = (r × v) / |r × v|
         T̂ = N̂ × R̂
 
-References:
-    Vallado, D. A. (2013). Fundamentals of Astrodynamics and Applications, §4.7.
-    Schaub & Junkins (2018). Analytical Mechanics of Space Systems, §14.2.
+References
+
+- Vallado, D. A. (2013). *Fundamentals of Astrodynamics and Applications*, §4.7.
+- Schaub & Junkins (2018). *Analytical Mechanics of Space Systems*, §14.2.
 """
 from __future__ import annotations
 
@@ -71,16 +72,14 @@ def rotation_vnb_to_inertial(
     h_mag = np.linalg.norm(h)
     if h_mag < 1e-12:
         raise ManeuverError(
-            "Cannot construct VNB frame: angular momentum is near-zero "
-            "(collinear r and v — degenerate orbit).",
+            "Cannot construct VNB frame: position and velocity are nearly parallel "
+            "(r ∥ v), so the orbital plane — and VNB normal — is undefined. "
+            "Use a state with finite transverse velocity or a different frame.",
             parameter="h_mag", value=float(h_mag),
         )
 
-    v_hat = v_eci / v_mag          # Velocity axis
-    n_hat = h / h_mag              # Normal axis  (orbit-normal)
-    b_hat = np.cross(v_hat, n_hat) # Binormal axis
-
-    return np.column_stack((v_hat, n_hat, b_hat))
+    from astra.frames import _build_vnb_matrix_njit
+    return _build_vnb_matrix_njit(r_eci, v_eci)
 
 
 def rotation_rtn_to_inertial(
@@ -118,16 +117,14 @@ def rotation_rtn_to_inertial(
     h_mag = np.linalg.norm(h)
     if h_mag < 1e-12:
         raise ManeuverError(
-            "Cannot construct RTN frame: angular momentum is near-zero "
-            "(collinear r and v — degenerate orbit).",
+            "Cannot construct RTN frame: position and velocity are nearly parallel "
+            "(r ∥ v), so the orbital plane — and RTN normal — is undefined. "
+            "Use a state with finite transverse velocity or a different frame.",
             parameter="h_mag", value=float(h_mag),
         )
 
-    r_hat = r_eci / r_mag           # Radial axis
-    n_hat = h / h_mag               # Normal axis  (orbit-normal)
-    t_hat = np.cross(n_hat, r_hat)  # Transverse axis
-
-    return np.column_stack((r_hat, t_hat, n_hat))
+    from astra.frames import _build_rtn_matrix_njit
+    return _build_rtn_matrix_njit(r_eci, v_eci)
 
 
 def frame_to_inertial(
@@ -265,7 +262,7 @@ def validate_burn(burn: FiniteBurn, initial_mass_kg: float) -> None:
 
     # Tsiolkovsky mass check
     propellant_consumed_kg = burn.mass_flow_rate_kg_s * burn.duration_s
-    if propellant_consumed_kg >= initial_mass_kg:
+    if propellant_consumed_kg > initial_mass_kg:
         raise ManeuverError(
             f"Burn consumes {propellant_consumed_kg:.2f} kg of propellant, "
             f"but spacecraft only has {initial_mass_kg:.2f} kg at ignition.",
@@ -279,3 +276,28 @@ def validate_burn(burn: FiniteBurn, initial_mass_kg: float) -> None:
         f"propellant={propellant_consumed_kg:.2f} kg, "
         f"frame={burn.frame.value}"
     )
+
+
+def validate_burn_sequence(burns: list[FiniteBurn]) -> None:
+    """Ensure that a list of FiniteBurn objects does not contain temporal overlaps.
+
+    This function detects unphysical "dual-thrust" arcs (remediates PHY-F/SE-G).
+    It assumes the burns list is already sorted by ignition time.
+
+    Args:
+        burns: Sorted list of ``FiniteBurn`` objects.
+
+    Raises:
+        ManeuverError: If an overlap is detected between any two burns.
+    """
+    for i in range(len(burns) - 1):
+        b1 = burns[i]
+        b2 = burns[i+1]
+        if b1.epoch_cutoff_jd > b2.epoch_ignition_jd + 1e-12:
+            raise ManeuverError(
+                f"Temporal overlap detected between maneuver {i} and {i+1}. "
+                f"Maneuver {i} cutoff: {b1.epoch_cutoff_jd:.8f} JD, "
+                f"Maneuver {i+1} ignition: {b2.epoch_ignition_jd:.8f} JD.",
+                parameter="maneuvers",
+                value=len(burns),
+            )

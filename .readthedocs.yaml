@@ -4,6 +4,10 @@ build:
   os: ubuntu-22.04
   tools:
     python: "3.11"
+  jobs:
+    post_install:
+      # Regenerate docs/apidoc/*.rst so API tracks the package on every RTD build
+      - python docs/generate_api.py
 
 sphinx:
   configuration: docs/conf.py

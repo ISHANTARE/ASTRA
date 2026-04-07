@@ -4,16 +4,16 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "astra-core-engine"
-version = "3.2.0"
+version = "3.3.0"
 authors = [
   { name="ASTRA Team - Ishan Tare" },
 ]
-description = "Autonomous Space Traffic Risk Analyzer - Computation Engine"
+description = "Autonomous Space Traffic Risk Analyzer - Computation Engine with native TLE, OMM, and Space-Track support"
 readme = "README.md"
 keywords = [
     "astrodynamics", "orbital-mechanics", "space-situational-awareness", 
-    "satellite", "sgp4", "skyfield", "tle", "orbit-propagation", "space-debris", 
-    "cowell-method", "conjunction-analysis", "aerospace"
+    "satellite", "sgp4", "skyfield", "tle", "omm", "ccsds", "space-track",
+    "orbit-propagation", "space-debris", "cowell-method", "conjunction-analysis", "aerospace"
 ]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
@@ -26,6 +26,7 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Astronomy",
     "Topic :: Scientific/Engineering :: Physics",
     "Topic :: Scientific/Engineering :: Mathematics"
@@ -36,14 +37,18 @@ dependencies = [
     "scipy>=1.11.0",
     "skyfield>=1.46",
     "sgp4>=2.23",
-    "plotly>=5.18.0",
     "requests>=2.31.0",
-    "numba>=0.59.0"
+    "numba>=0.59.0",
+    "defusedxml>=0.7.1",
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=8.0.0"]
+viz = ["plotly>=5.18.0"]
+test = ["pytest>=8.0.0", "plotly>=5.18.0"]
 
 [tool.setuptools.packages.find]
 where = ["."]
 exclude = ["paper*", "docs*"]
+
+[tool.setuptools.package-data]
+astra = ["py.typed"]

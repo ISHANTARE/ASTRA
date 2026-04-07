@@ -4,18 +4,24 @@ Detects close-approach events between pairs of orbital objects. Implements an
 advanced 3-phase optimization algorithm including:
 1. Sweep-and-Prune Radial Bounding Shell filter
 2. Trajectory AABB volume filter
-3. Cubicpline Curvilinear Interpolation for exact sub-second TCA
+3. Cubicspline Curvilinear Interpolation for exact sub-second TCA
 4. Realistic Encounter-Plane Covariance Probability
 """
 from __future__ import annotations
 
 import concurrent.futures
+import os
+from typing import Optional
 import numpy as np
 import scipy.interpolate
 
-from astra.errors import AstraError
+from astra.errors import AstraError, PropagationError
 from astra.models import ConjunctionEvent, DebrisObject, TrajectoryMap, projected_area_m2
-from astra.covariance import compute_collision_probability, estimate_covariance
+from astra.covariance import (
+    compute_collision_probability,
+    estimate_covariance,
+    rotate_covariance_rtn_to_eci,
+)
 from astra.log import get_logger
 from astra.spatial_index import SpatialIndex
 
@@ -28,8 +34,9 @@ def distance_3d(pos_a: np.ndarray, pos_b: np.ndarray) -> np.ndarray:
     return np.linalg.norm(pos_a - pos_b, axis=-1)
 
 
-def _classify_risk(P_c: float) -> str:
+def _classify_risk(P_c: Optional[float]) -> str:
     """Classify risk level based on collision probability."""
+    if P_c is None: return "UNKNOWN"
     if P_c > 1e-4: return "CRITICAL"
     if P_c > 1e-5: return "HIGH"
     if P_c > 1e-6: return "MEDIUM"
@@ -43,47 +50,76 @@ def _dynamic_radius_km(
     vel_eci: np.ndarray
 ) -> float:
     """Compute effective collision radius from dynamic attitude or fallback.
-    
-    Supports NADIR (Earth-pointing), TUMBLING (average area), and INERTIAL.
+
+    Supports both ``SatelliteTLE`` (with dimensions_m / attitude fields) and
+    ``SatelliteOMM`` (which carries authoritative ``rcs_m2``). Uses safe
+    ``getattr`` fallbacks so neither format raises an ``AttributeError``.
+
+    Priority order:
+        1. TLE with explicit dimensions + attitude model   → exact projected area
+        2. OMM or TLE with ``rcs_m2``                     → sqrt(RCS / π) equivalent sphere
+        3. DebrisObject-level ``radius_m``                 → direct radius
+        4. Hard fallback                                   → 5 m sphere
     """
-    tle = obj.tle
-    if tle.dimensions_m is not None:
-        l, w, h = tle.dimensions_m
-        import math
-        
-        if tle.attitude_mode == "TUMBLING":
-            # Average projected area of a convex body is 1/4 of total surface area
+    source = obj.source
+    import math
+
+    # ------------------------------------------------------------------
+    # Path 1: detailed geometry from SatelliteTLE dimensions
+    # ------------------------------------------------------------------
+    dimensions_m = getattr(source, "dimensions_m", None)
+    if dimensions_m is not None:
+        l, w, h = dimensions_m
+        attitude_mode = getattr(source, "attitude_mode", "TUMBLING")
+
+        if attitude_mode == "TUMBLING":
             area_m2 = 2.0 * (l*w + w*h + h*l) / 4.0
-            
-        elif tle.attitude_mode == "NADIR":
-            # LVLH Frame: Zenith (+Z), Orbit Normal (-Y), Velocity/Along-track (+X)
+
+        elif attitude_mode == "NADIR":
             pos_hat = pos_eci / max(np.linalg.norm(pos_eci), 1e-12)
             vel_hat = vel_eci / max(np.linalg.norm(vel_eci), 1e-12)
             normal_hat = np.cross(pos_hat, vel_hat)
             normal_hat /= max(np.linalg.norm(normal_hat), 1e-12)
             x_hat = np.cross(normal_hat, pos_hat)
-            
-            # ECI face normals
             faces = [
-                (x_hat, w * h),      # +X (length along-track)
-                (normal_hat, l * h), # +Y (cross-track)
-                (pos_hat, l * w),    # +Z (zenith/radial)
+                (x_hat, w * h),
+                (normal_hat, l * h),
+                (pos_hat, l * w),
             ]
             area_m2 = sum(abs(float(np.dot(n, rel_vel_hat))) * a for n, a in faces)
-            
-        elif tle.attitude_mode == "INERTIAL" and tle.attitude_quaternion is not None:
-            area_m2 = projected_area_m2(tle.dimensions_m, tle.attitude_quaternion, rel_vel_hat)
-            
+
+        elif attitude_mode == "INERTIAL":
+            attitude_quaternion = getattr(source, "attitude_quaternion", None)
+            if attitude_quaternion is not None:
+                area_m2 = projected_area_m2(dimensions_m, attitude_quaternion, rel_vel_hat)
+            else:
+                diag = math.sqrt(l**2 + w**2 + h**2)
+                return (diag / 2.0) / 1000.0
         else:
-            # Fallback to bounding sphere
             diag = math.sqrt(l**2 + w**2 + h**2)
             return (diag / 2.0) / 1000.0
-            
+
         return math.sqrt(area_m2 / math.pi) / 1000.0
-        
+
+    # ------------------------------------------------------------------
+    # Path 2: RCS from OMM metadata (or TLE rcs_m2 if populated)
+    # ------------------------------------------------------------------
+    rcs_m2 = obj.rcs_m2 or getattr(source, "rcs_m2", None)
+    if rcs_m2 and rcs_m2 > 0:
+        # Equivalent sphere radius: A = π r²  →  r = sqrt(A / π)
+        return math.sqrt(rcs_m2 / math.pi) / 1000.0
+
+    # ------------------------------------------------------------------
+    # Path 3: explicit radius on DebrisObject
+    # ------------------------------------------------------------------
     if obj.radius_m:
         return obj.radius_m / 1000.0
-    return 0.005  # default 5m
+
+    # ------------------------------------------------------------------
+    # Path 4: hard fallback — 5 m sphere
+    # ------------------------------------------------------------------
+    return 0.005
+
 
 
 def closest_approach(
@@ -118,8 +154,33 @@ def find_conjunctions(
     elements_map: dict[str, DebrisObject],
     threshold_km: float = 5.0,
     coarse_threshold_km: float = 50.0,
+    cov_map: Optional[dict[str, np.ndarray]] = None,
+    vel_map: Optional[dict[str, np.ndarray]] = None,
 ) -> list[ConjunctionEvent]:
-    """Find highly precise conjunction events using cubic spline interpolation."""
+    """Find highly precise conjunction events using cubic spline interpolation.
+
+    Data formats: ✓ SatelliteTLE  ✓ SatelliteOMM
+
+    Args:
+        trajectories: TrajectoryMap of NORAD-ID → (T, 3) position array (km, TEME).
+        times_jd: 1-D array of T Julian Dates matching the trajectory rows.
+        elements_map: NORAD-ID → DebrisObject (used for epoch, radius, covariance).
+        threshold_km: Fine-filter miss-distance threshold (km).
+        coarse_threshold_km: KD-tree pre-filter radius (km).
+        cov_map: Optional NORAD-ID → (3, 3) or (6, 6) ECI covariance in km².
+        vel_map: Optional NORAD-ID → (T, 3) SGP4 velocity array (km/s, TEME).
+            When supplied the SGP4 velocities are interpolated at TCA, which is
+            significantly more accurate than the position-spline derivative for
+            eccentric orbits near perigee.
+
+    Returns:
+        List of ConjunctionEvent objects, sorted by miss_distance_km.
+
+    Note:
+        TCA refinement uses a fixed-density scan bracket plus cubic splines.
+        A Brent-style minimization on the spline could reduce samples for
+        marginal geometries; the present scheme prioritizes robustness.
+    """
     norad_ids = list(trajectories.keys())
     if not norad_ids:
         return []
@@ -131,31 +192,50 @@ def find_conjunctions(
     logger.info(f"Initiating Conjunction Analysis for {len(norad_ids)} objects over {T_len} time steps.")
 
     # ---------------------------------------------------------
-    # Phase 1 & 2: Spatial KD-Tree Sweeping (O(N log N))
+    # Drop NaN trajectories before spatial screening.
     # ---------------------------------------------------------
-    logger.debug(f"Running Phase 1 & 2: KD-Tree Rebuilding over {T_len} timesteps...")
-    
-    dt_s = (times_jd[1] - times_jd[0]) * 86400.0 if T_len > 1 else 0.0
-    # Add buffer: max relative movement during dt (LEO vs LEO max ~15 km/s)
-    search_radius_km = coarse_threshold_km + (15.0 * dt_s)
-    
-    idx = SpatialIndex(half_size_km=50000.0, max_objects_per_node=16)
-    candidate_pairs_phase2 = set()
-    
-    # Adaptive temporal subsampling: Prevent redundant KD-Tree generation when the delta-t step is exceptionally fine.
-    step = max(1, int(coarse_threshold_km / (15.0 * dt_s))) if dt_s > 0 else 1
-    
-    for t_idx in range(0, T_len, step):
-        pos_dict = {nid: traj[t_idx] for nid, traj in trajectories.items()}
-        idx.rebuild(pos_dict)
-        step_pairs = idx.query_pairs(threshold_km=search_radius_km)
-        candidate_pairs_phase2.update(step_pairs)
+    valid_trajectories: TrajectoryMap = {}
+    nan_ids: list[str] = []
+    for nid, traj in trajectories.items():
+        if np.any(~np.isfinite(traj)):
+            nan_ids.append(nid)
+        else:
+            valid_trajectories[nid] = traj
 
-    if not candidate_pairs_phase2:
-        logger.info("KD-Tree Temporal Sweep complete: 0 candidate pairs found.")
+    if nan_ids:
+        from astra import config
+        if config.ASTRA_STRICT_MODE:
+            raise PropagationError(
+                f"[ASTRA STRICT] {len(nan_ids)} satellites have invalid trajectories: "
+                f"{nan_ids[:5]}{'...' if len(nan_ids) > 5 else ''}. "
+                "Conjunction analysis cannot proceed.",
+                norad_id=str(nan_ids[0])
+            )
+        logger.warning(f"{len(nan_ids)} satellites excluded (NaN trajectories): {nan_ids[:10]}")
+
+    trajectories = valid_trajectories
+    norad_ids = list(trajectories.keys())
+    if not norad_ids:
+        logger.info("All satellites had NaN trajectories. No conjunctions to evaluate.")
         return []
 
-    logger.info(f"KD-Tree Filter Complete: Analyzing precise geometry for {len(candidate_pairs_phase2)} pairs.")
+    # ---------------------------------------------------------
+    # Phase 1 & 2: Unified Trajectory-AABB SpatialIndex screening
+    # ---------------------------------------------------------
+    logger.debug(f"Running Phase 1 & 2: Unified Trajectory-AABB SpatialIndex screening over {T_len} timesteps...")
+
+    idx = SpatialIndex()
+    # Build a single tree for the entire propagation window (SE-C optimization)
+    idx.rebuild_for_trajectories(trajectories)
+    
+    # Query all candidate pairs once. The index accounts for trajectory excursions.
+    candidate_pairs_phase2 = set(idx.query_pairs(threshold_km=coarse_threshold_km))
+
+    if not candidate_pairs_phase2:
+        logger.info("Macro AABB Sweep complete: 0 candidate pairs found.")
+        return []
+
+    logger.info(f"Macro AABB Filter Complete: Analyzing precise geometry for {len(candidate_pairs_phase2)} pairs.")
 
     # ---------------------------------------------------------
     # Phase 3: Exact Curvilinear TCA Interpolation
@@ -180,10 +260,23 @@ def find_conjunctions(
         # 2. Build Cubic Splines for exact curvilinear motion mapping
         spline_A = scipy.interpolate.CubicSpline(times_jd, traj_A, bc_type='natural')
         spline_B = scipy.interpolate.CubicSpline(times_jd, traj_B, bc_type='natural')
+
+        # Velocity splines from SGP4 vel_map when available (more accurate than
+        # differentiating position splines), especially near perigee on eccentric orbits.
+        vel_spline_A = (
+            scipy.interpolate.CubicSpline(times_jd, vel_map[A], bc_type='natural')
+            if (vel_map and A in vel_map) else None
+        )
+        vel_spline_B = (
+            scipy.interpolate.CubicSpline(times_jd, vel_map[B], bc_type='natural')
+            if (vel_map and B in vel_map) else None
+        )
         
         # 3. Dense 1-second resolution evaluation across the local min bracket
-        idx_low = max(0, t_idx - 1)
-        idx_high = min(T_len - 1, t_idx + 1)
+        is_edge = (t_idx == 0 or t_idx == T_len - 1)
+        bracket_width = 2 if is_edge else 1
+        idx_low = max(0, t_idx - bracket_width)
+        idx_high = min(T_len - 1, t_idx + bracket_width)
         
         seconds_in_bracket = int((times_jd[idx_high] - times_jd[idx_low]) * 86400.0)
         if seconds_in_bracket < 2:
@@ -207,8 +300,16 @@ def find_conjunctions(
         pos_A = rA_dense[tca_dense_idx]
         pos_B = rB_dense[tca_dense_idx]
         
-        vel_A = spline_A(tca_jd, nu=1) / 86400.0
-        vel_B = spline_B(tca_jd, nu=1) / 86400.0
+        # Prefer SGP4 velocity spline at TCA; else spline derivative (km/JD → km/s).
+        if vel_spline_A is not None:
+            vel_A = vel_spline_A(tca_jd)
+        else:
+            vel_A = spline_A(tca_jd, nu=1) / 86400.0  # km/JD → km/s
+
+        if vel_spline_B is not None:
+            vel_B = vel_spline_B(tca_jd)
+        else:
+            vel_B = spline_B(tca_jd, nu=1) / 86400.0  # km/JD → km/s
         
         rel_vel_vec = vel_A - vel_B
         rel_vel = float(np.linalg.norm(rel_vel_vec))
@@ -216,11 +317,26 @@ def find_conjunctions(
         obj_A = elements_map[A]
         obj_B = elements_map[B]
         
-        days_since_epoch_A = tca_jd - obj_A.tle.epoch_jd
-        days_since_epoch_B = tca_jd - obj_B.tle.epoch_jd
+        days_since_epoch_A = tca_jd - obj_A.source.epoch_jd
+        days_since_epoch_B = tca_jd - obj_B.source.epoch_jd
         
-        cov_A = estimate_covariance(days_since_epoch_A)
-        cov_B = estimate_covariance(days_since_epoch_B)
+        if cov_map and A in cov_map:
+            cov_A = cov_map[A]
+        else:
+            try:
+                cov_rtn_A = estimate_covariance(days_since_epoch_A)
+                cov_A = rotate_covariance_rtn_to_eci(cov_rtn_A, pos_A, vel_A)
+            except Exception:
+                cov_A = None
+
+        if cov_map and B in cov_map:
+            cov_B = cov_map[B]
+        else:
+            try:
+                cov_rtn_B = estimate_covariance(days_since_epoch_B)
+                cov_B = rotate_covariance_rtn_to_eci(cov_rtn_B, pos_B, vel_B)
+            except Exception:
+                cov_B = None
         
         miss_vector = pos_A - pos_B
         
@@ -230,11 +346,21 @@ def find_conjunctions(
         rad_A_km = _dynamic_radius_km(obj_A, rel_vel_hat, pos_A, vel_A)
         rad_B_km = _dynamic_radius_km(obj_B, rel_vel_hat, pos_B, vel_B)
         
-        P_c = compute_collision_probability(
-            miss_vector, rel_vel_vec, cov_A, cov_B, radius_a_km=rad_A_km, radius_b_km=rad_B_km
-        )
+        if cov_A is not None and cov_B is not None:
+            P_c = compute_collision_probability(
+                miss_vector, rel_vel_vec, cov_A, cov_B, radius_a_km=rad_A_km, radius_b_km=rad_B_km
+            )
+        else:
+            P_c = None
+            logger.warning(
+                f"Pair ({A},{B}): No covariance available — Pc set to None. "
+                "Supply cov_map with CDM covariances or use Relaxed mode."
+            )
         
-        risk = _classify_risk(P_c)
+        risk = _classify_risk(P_c) if P_c is not None else "UNKNOWN"
+        covariance_src = "CDM" if (cov_map and A in cov_map and B in cov_map) else (
+            "SYNTHETIC" if cov_A is not None else "UNAVAILABLE"
+        )
         
         return ConjunctionEvent(
             object_a_id=A,
@@ -245,20 +371,42 @@ def find_conjunctions(
             collision_probability=P_c,
             risk_level=risk,
             position_a_km=pos_A,
-            position_b_km=pos_B
+            position_b_km=pos_B,
+            covariance_source=covariance_src
         )
 
     # Execute geometric evaluations concurrently across all CPU threads
-    with concurrent.futures.ThreadPoolExecutor() as executor:
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=os.cpu_count())
+    try:
         futures = {executor.submit(evaluate_pair, pair): pair for pair in candidate_pairs_phase2}
-        
+        skipped = 0
+        strict_error = None
         for future in concurrent.futures.as_completed(futures):
+            pair = futures[future]
             try:
                 result = future.result()
                 if result is not None:
                     events.append(result)
             except Exception as e:
-                logger.error(f"Error evaluating conjunction pair: {e}")
+                skipped += 1
+                from astra import config
+                if config.ASTRA_STRICT_MODE:
+                    strict_error = AstraError(
+                        f"[ASTRA STRICT] Conjunction pair {pair} evaluation failed: {e!r}. "
+                        "In strict mode, all pairs must evaluate cleanly."
+                    )
+                    for f in futures:
+                        f.cancel()
+                    break
+                logger.warning(f"Conjunction pair {pair} skipped: {e!r}")
+
+        if strict_error:
+            raise strict_error from None
+
+        if skipped > 0:
+            logger.warning(f"{skipped} conjunction pairs skipped due to errors. Results may be incomplete.")
+    finally:
+        executor.shutdown(wait=True, cancel_futures=True)
 
     events.sort(key=lambda x: x.miss_distance_km)
     logger.info(f"Conjunction Sweep Complete: {len(events)} events detected.")

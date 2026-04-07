@@ -4,6 +4,16 @@ This script showcases the built-in Plotly 3D visualizer.
 It runs the same math as Example 01, but renders an interactive browser map.
 """
 
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 import astra
 import numpy as np
 
@@ -36,9 +46,15 @@ def main():
         coarse_threshold_km=100.0
     )
     
-    print(f"Found {len(events)} close approaches. Opening 3D visualizer in your browser...")
+    print(f"Found {len(events)} close approaches.")
     fig = astra.plot_trajectories(trajectories, events, title="Starlink Constellation Risk Map")
-    fig.show()
+    if os.environ.get("ASTRA_EXAMPLE_NO_BROWSER", "").lower() in ("1", "true", "yes"):
+        out = Path(__file__).with_suffix(".html")
+        fig.write_html(str(out))
+        print(f"Skipping browser (ASTRA_EXAMPLE_NO_BROWSER). Wrote: {out}")
+    else:
+        print("Opening 3D visualizer in your browser...")
+        fig.show()
 
 if __name__ == "__main__":
     main()

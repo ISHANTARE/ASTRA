@@ -4,7 +4,8 @@ Calculates topocentric elevation/azimuth of satellites relative to ground
 observers and detects pass events (AOS, TCA, LOS).
 
 Features:
-1. Custom fully-vectorized WGS84 ENU rotation matrix yielding 100x 
+
+1. Custom fully-vectorized WGS84 ENU rotation matrix yielding 100x
    performance over standard object-oriented Skyfield graph transversals.
 2. Sub-second Binary Search Bisection root-finding for precise AOS/LOS.
 3. Automatically synchronized IERS EOPs via timescale loading.
@@ -13,19 +14,19 @@ from __future__ import annotations
 
 import math
 import numpy as np
-from skyfield.api import load
 from skyfield.constants import AU_KM
-from skyfield.positionlib import Geocentric
 from skyfield.sgp4lib import TEME
 from skyfield.framelib import itrs
+from astra import data_pipeline as _dp
 
-from astra.models import Observer, PassEvent, SatelliteTLE
+from astra.constants import EARTH_EQUATORIAL_RADIUS_KM
+from astra.models import Observer, PassEvent, SatelliteState
 from astra.orbit import propagate_trajectory, propagate_orbit
 
 
 def _wgs84_observer_itrs(lat_deg: float, lon_deg: float, elev_m: float) -> np.ndarray:
     """Calculate the ITRS static Earth-fixed Cartesian coordinates of an observer."""
-    a = 6378.137
+    a = EARTH_EQUATORIAL_RADIUS_KM
     f = 1.0 / 298.257223563
     e2 = 2*f - f**2
     
@@ -71,7 +72,8 @@ def visible_from_location(
     if len(times_jd) == 0:
         return np.array([])
 
-    ts = load.timescale()
+    _dp._ensure_skyfield()
+    ts = _dp._skyfield_ts
     t = ts.tt_jd(times_jd)
 
     r_teme_au = positions_teme.T / AU_KM
@@ -83,9 +85,13 @@ def visible_from_location(
     else:
         r_gcrs_au = R_teme_to_gcrs.dot(r_teme_au)
 
-    # 2. GCRS to ITRS via Skyfield exactly (handles UT1, EOPs, polar motion rigidly)
-    pos = Geocentric(r_gcrs_au, t=t)
-    r_itrs_km = pos.frame_xyz(itrs).au * AU_KM  # shape (3, T)
+    # 2. GCRS to ITRS natively via rotation matrix mapping
+    R_gcrs_to_itrs = np.transpose(itrs.rotation_at(t), axes=(1, 0, 2)) if hasattr(t, 'shape') else np.transpose(itrs.rotation_at(t))
+    if hasattr(t, 'shape'):
+        r_itrs_au = np.einsum('ij...,j...->i...', R_gcrs_to_itrs, r_gcrs_au)
+    else:
+        r_itrs_au = R_gcrs_to_itrs.dot(r_gcrs_au)
+    r_itrs_km = r_itrs_au * AU_KM
     
     # 3. WGS84 observer position
     r_obs = _wgs84_observer_itrs(observer.latitude_deg, observer.longitude_deg, observer.elevation_m)
@@ -107,7 +113,8 @@ def get_azimuths(
     positions_teme: np.ndarray, times_jd: np.ndarray, observer: Observer
 ) -> np.ndarray:
     """Companion function for azimuth processing using the same fast matrix algebra."""
-    ts = load.timescale()
+    _dp._ensure_skyfield()
+    ts = _dp._skyfield_ts
     t = ts.tt_jd(times_jd)
 
     r_teme_au = positions_teme.T / AU_KM
@@ -117,8 +124,12 @@ def get_azimuths(
     else:
         r_gcrs_au = R_teme_to_gcrs.dot(r_teme_au)
 
-    pos = Geocentric(r_gcrs_au, t=t)
-    r_itrs_km = pos.frame_xyz(itrs).au * AU_KM
+    R_gcrs_to_itrs = np.transpose(itrs.rotation_at(t), axes=(1, 0, 2)) if hasattr(t, 'shape') else np.transpose(itrs.rotation_at(t))
+    if hasattr(t, 'shape'):
+        r_itrs_au = np.einsum('ij...,j...->i...', R_gcrs_to_itrs, r_gcrs_au)
+    else:
+        r_itrs_au = R_gcrs_to_itrs.dot(r_gcrs_au)
+    r_itrs_km = r_itrs_au * AU_KM
     
     r_obs = _wgs84_observer_itrs(observer.latitude_deg, observer.longitude_deg, observer.elevation_m)
     rho_itrs = r_itrs_km - r_obs[:, np.newaxis]
@@ -140,8 +151,12 @@ def _visible_from_location_cached(
     
     r_gcrs_au = R_teme_to_gcrs.dot(r_teme_au)
 
-    pos = Geocentric(r_gcrs_au, t=t)
-    r_itrs_km = pos.frame_xyz(itrs).au * AU_KM
+    R_gcrs_to_itrs = np.transpose(itrs.rotation_at(t), axes=(1, 0, 2)) if hasattr(t, 'shape') else np.transpose(itrs.rotation_at(t))
+    if hasattr(t, 'shape'):
+        r_itrs_au = np.einsum('ij...,j...->i...', R_gcrs_to_itrs, r_gcrs_au)
+    else:
+        r_itrs_au = R_gcrs_to_itrs.dot(r_gcrs_au)
+    r_itrs_km = r_itrs_au * AU_KM
     
     r_obs = _wgs84_observer_itrs(observer.latitude_deg, observer.longitude_deg, observer.elevation_m)
     rho_itrs = r_itrs_km - r_obs[:, np.newaxis]
@@ -155,17 +170,18 @@ def _visible_from_location_cached(
 
 
 def _find_exact_crossing(
-    satellite: SatelliteTLE, 
-    observer: Observer, 
-    t_low: float, 
-    t_high: float, 
-    ascending: bool, 
+    satellite: SatelliteState,
+    observer: Observer,
+    t_low: float,
+    t_high: float,
+    ascending: bool,
     iterations: int = 15
 ) -> float:
     """Binary search bisection to find the exact sub-second crossing."""
     mask = observer.min_elevation_deg
     
-    ts = load.timescale()
+    _dp._ensure_skyfield()
+    ts = _dp._skyfield_ts
     # Cache precession-nutation rotation matrix which changes <0.00001 deg over the pass
     t_mid_initial = ts.tt_jd((t_low + t_high) / 2.0)
     R_teme_to_gcrs_cached = np.transpose(TEME.rotation_at(t_mid_initial))
@@ -200,13 +216,13 @@ def _find_exact_crossing(
 
 
 def passes_over_location(
-    satellite: SatelliteTLE,
+    satellite: SatelliteState,
     observer: Observer,
     t_start_jd: float,
     t_end_jd: float,
     step_minutes: float = 1.0,
 ) -> list[PassEvent]:
-    times_jd, positions_teme = propagate_trajectory(
+    times_jd, positions_teme, _velocities = propagate_trajectory(
         satellite, t_start_jd, t_end_jd, step_minutes=step_minutes
     )
 

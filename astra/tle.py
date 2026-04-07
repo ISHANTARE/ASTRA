@@ -38,7 +38,16 @@ def _compute_checksum(line: str) -> int:
 def _parse_epoch_to_jd(epoch_str: str) -> float:
     """Convert TLE epoch string (YYDDD.FFFFFFFF) to Julian Date.
 
-    Years >= 57 are 1900s, years < 57 are 2000s.
+    Uses integer-split arithmetic to avoid floating-point rounding errors
+    at the day/fraction boundary. The fractional day is accumulated
+    via timedelta microseconds rather than floating-point multiplication.
+
+    Years >= 57 are interpreted as 19YY, years < 57 as 20YY (standard TLE
+    two-digit year convention).
+
+    From calendar year 2057 onward, YY ≥ 57 maps to 19YY and collides with
+    early-spacecraft epochs; for archival or long-horizon data prefer CCSDS OMM
+    (full UTC epoch) over TLEs.
     """
     try:
         y = int(epoch_str[:2])
@@ -48,9 +57,49 @@ def _parse_epoch_to_jd(epoch_str: str) -> float:
 
     year = 2000 + y if y < 57 else 1900 + y
 
-    dt = datetime(year, 1, 1, tzinfo=timezone.utc) + timedelta(days=day_of_year - 1.0)
+    # Integer day + fractional-day both accumulated through timedelta
+    day_whole = int(day_of_year)        # e.g. 123
+    day_frac = day_of_year - day_whole  # e.g. 0.45678
+    # Convert fractional day to integer microseconds for precise accumulation
+    frac_us = round(day_frac * 86400 * 1_000_000)
+    dt = (
+        datetime(year, 1, 1, tzinfo=timezone.utc)
+        + timedelta(days=day_whole - 1, microseconds=frac_us)
+    )
     delta = dt - _J2000_EPOCH
     return _J2000_JD + delta.total_seconds() / 86400.0
+
+
+def check_tle_staleness(satellite: SatelliteState, target_jd: float | np.ndarray) -> None:
+    """Verify that the propagation time is within 30 days of the satellite epoch.
+
+    SGP4 accuracy degrades exponentially over time. For mission-critical analysis,
+    using TLEs older than 30 days is discouraged and blocked in STRICT mode.
+
+    Args:
+        satellite: The SatelliteTLE or SatelliteOMM object being propagated.
+        target_jd: The target Julian Date(s) for propagation.
+
+    Raises:
+        PropagationError: If delta > 30 days and ASTRA_STRICT_MODE is True.
+    """
+    import numpy as np
+    from astra import config
+    from astra.errors import PropagationError
+
+    delta_days = np.abs(np.asanyarray(target_jd) - satellite.epoch_jd)
+    max_delta = np.max(delta_days)
+
+    if max_delta > 30.0:
+        msg = (
+            f"TLE/OMM for {satellite.name} (NORAD {satellite.norad_id}) is stale "
+            f"({max_delta:.2f} days from epoch). Max recommended SGP4 horizon is 30 days."
+        )
+        if config.ASTRA_STRICT_MODE:
+            raise PropagationError(
+                msg, norad_id=satellite.norad_id, t_jd=float(np.max(target_jd))
+            )
+        logger.warning(msg)
 
 
 def parse_tle(name: str, line1: str, line2: str) -> SatelliteTLE:
@@ -148,20 +197,15 @@ def parse_tle(name: str, line1: str, line2: str) -> SatelliteTLE:
             reason="EPOCH_PARSE_ERROR",
         )
 
-    # 7. Extract object_type from classification character
-    classification = line1[7]
-    if classification == "U":
-        object_type = "UNKNOWN"
-    elif classification == "C":
-        object_type = "PAYLOAD"
-    elif classification == "D":
-        object_type = "DEBRIS"
-    elif classification == "R":
-        object_type = "ROCKET_BODY"
-    else:
-        object_type = "UNKNOWN"
+    # 7. Extract classification character (U=Unclassified, C=Classified, S=Secret)
+    # NOTE: This is a SECURITY classification, not an object type.
+    # Object type (PAYLOAD/DEBRIS/ROCKET_BODY) requires SATCAT lookup.
+    classification_flag = line1[7]
 
-    # 8. Instantiate and return
+    # 8. Default object_type to UNKNOWN — to be overridden by SATCAT enrichment
+    object_type = "UNKNOWN"
+
+    # 9. Instantiate and return
     return SatelliteTLE(
         norad_id=norad_id,
         name=name,
@@ -169,6 +213,7 @@ def parse_tle(name: str, line1: str, line2: str) -> SatelliteTLE:
         line2=line2,
         epoch_jd=epoch_jd,
         object_type=object_type,
+        classification_flag=classification_flag,
     )
 
 
@@ -200,17 +245,22 @@ def _chunk_tle_lines(tle_lines: list[str]) -> list[tuple[str, str, str]]:
     
     triplets = []
     i = 0
-    while i + 1 < len(lines):
-        # Check for 2-line format at current position
-        if lines[i].startswith("1 ") and lines[i+1].startswith("2 "):
-            triplets.append(("Unknown", lines[i], lines[i+1]))
+    n = len(lines)
+    while i < n:
+        if not lines[i].startswith("1 "):
+            if i + 1 < n and lines[i + 1].startswith("1 ") and i + 2 < n and lines[i + 2].startswith("2 "):
+                triplets.append((lines[i], lines[i + 1], lines[i + 2]))
+                i += 3
+            else:
+                i += 1
+            continue
+
+        if i + 1 < n and lines[i + 1].startswith("2 "):
+            norad_id = lines[i][2:7].strip()
+            synthetic_name = f"NORAD-{norad_id}" if norad_id else "Unknown"
+            triplets.append((synthetic_name, lines[i], lines[i + 1]))
             i += 2
-        # Check for 3-line format
-        elif i + 2 < len(lines) and lines[i+1].startswith("1 ") and lines[i+2].startswith("2 "):
-            triplets.append((lines[i], lines[i+1], lines[i+2]))
-            i += 3
         else:
-            # Skip invalid header or junk line
             i += 1
     return triplets
 
@@ -239,6 +289,7 @@ def load_tle_catalog(tle_lines: list[str]) -> list[SatelliteTLE]:
     if not triplets and any(L.strip() for L in tle_lines):
         raise AstraError("Failed to parse any TLE triplets from input lines.")
 
+    from astra.config import ASTRA_STRICT_MODE
     results: list[SatelliteTLE] = []
     
     for name, line1, line2 in triplets:
@@ -246,12 +297,19 @@ def load_tle_catalog(tle_lines: list[str]) -> list[SatelliteTLE]:
             sat = parse_tle(name, line1, line2)
             results.append(sat)
         except InvalidTLEError as e:
+            if ASTRA_STRICT_MODE:
+                # In strict mode, a single invalid TLE fails the entire load (SE-I).
+                raise
             norad_id = e.norad_id or "UNKNOWN"
             logger.warning(
                 f"Skipping invalid TLE for {name} (NORAD {norad_id}): {e.message}"
             )
 
     if not results and any(L.strip() for L in tle_lines):
-        raise AstraError("Total parse failure: no valid TLEs found in non-empty catalog input.")
+        raise InvalidTLEError(
+            "Total parse failure: no valid TLEs found in non-empty catalog input. "
+            "Verify that input lines follow 3-line (name + L1 + L2) or 2-line (L1 + L2) format.",
+            reason="TOTAL_PARSE_FAILURE",
+        )
 
     return results

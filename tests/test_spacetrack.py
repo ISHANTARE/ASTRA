@@ -1,0 +1,398 @@
+# tests/test_spacetrack.py
+"""Test suite for the Space-Track.org authenticated data ingestion module.
+
+All tests use mocked network sessions — no real Space-Track credentials
+or network connections are required to run this suite.
+"""
+import json
+import os
+import pytest
+from unittest.mock import patch, Mock, MagicMock
+
+from astra.spacetrack import (
+    fetch_spacetrack_group,
+    fetch_spacetrack_active,
+    _get_credentials,
+    _create_session,
+)
+from astra.errors import AstraError
+from astra.models import SatelliteOMM, SatelliteTLE
+
+@pytest.fixture(autouse=True)
+def clear_session_cache():
+    from astra.spacetrack import _SESSION_CACHE
+    _SESSION_CACHE.clear()
+    yield
+
+
+
+# ---------------------------------------------------------------------------
+# Fixture: realistic OMM JSON payload
+# ---------------------------------------------------------------------------
+
+_MOCK_OMM_PAYLOAD = json.dumps([
+    {
+        "OBJECT_NAME": "ISS (ZARYA)",
+        "OBJECT_ID": "1998-067A",
+        "NORAD_CAT_ID": "25544",
+        "OBJECT_TYPE": "PAYLOAD",
+        "EPOCH": "2021-01-01T00:00:00.000000",
+        "MEAN_MOTION": "15.48922536",
+        "ECCENTRICITY": ".0001364",
+        "INCLINATION": "51.6442",
+        "RA_OF_ASC_NODE": "284.1199",
+        "ARG_OF_PERICENTER": "338.5498",
+        "MEAN_ANOMALY": "21.5664",
+        "BSTAR": ".34282E-4",
+        "RCS_SIZE": "LARGE",
+    }
+])
+
+_MOCK_TLE_PAYLOAD = (
+    "ISS (ZARYA)\n"
+    "1 25544U 98067A   21001.00000000  .00001480  00000-0  34282-4 0  9990\n"
+    "2 25544  51.6442 284.1199 0001364 338.5498  21.5664 15.48922536 12341\n"
+)
+
+
+# ---------------------------------------------------------------------------
+# 1. Credential Handling
+# ---------------------------------------------------------------------------
+
+class TestCredentials:
+
+    def test_raises_when_both_env_vars_missing(self):
+        with patch.dict(os.environ, {}, clear=True):
+            # Ensure neither variable is set
+            os.environ.pop("SPACETRACK_USER", None)
+            os.environ.pop("SPACETRACK_PASS", None)
+            with pytest.raises(AstraError) as exc_info:
+                _get_credentials()
+            # Error message must include instructions
+            assert "SPACETRACK_USER" in str(exc_info.value)
+            assert "SPACETRACK_PASS" in str(exc_info.value)
+
+    def test_raises_when_only_user_missing(self):
+        with patch.dict(os.environ, {"SPACETRACK_PASS": "secret"}, clear=False):
+            os.environ.pop("SPACETRACK_USER", None)
+            with pytest.raises(AstraError):
+                _get_credentials()
+
+    def test_raises_when_only_pass_missing(self):
+        with patch.dict(os.environ, {"SPACETRACK_USER": "test@test.com"}, clear=False):
+            os.environ.pop("SPACETRACK_PASS", None)
+            with pytest.raises(AstraError):
+                _get_credentials()
+
+    def test_returns_credentials_when_both_set(self):
+        env = {"SPACETRACK_USER": "test@example.com", "SPACETRACK_PASS": "mypassword"}
+        with patch.dict(os.environ, env):
+            user, password = _get_credentials()
+            assert user == "test@example.com"
+            assert password == "mypassword"
+
+    def test_error_message_contains_setx_instructions(self):
+        with patch.dict(os.environ, {}, clear=True):
+            os.environ.pop("SPACETRACK_USER", None)
+            os.environ.pop("SPACETRACK_PASS", None)
+            with pytest.raises(AstraError) as exc_info:
+                _get_credentials()
+            msg = str(exc_info.value)
+            assert "setx" in msg or "export" in msg
+
+
+# ---------------------------------------------------------------------------
+# 2. Authentication
+# ---------------------------------------------------------------------------
+
+class TestAuthentication:
+
+    @patch("astra.spacetrack.requests.Session")
+    def test_successful_auth_creates_session(self, mock_session_cls):
+        mock_session = MagicMock()
+        mock_session_cls.return_value = mock_session
+        mock_login_resp = Mock()
+        mock_login_resp.status_code = 200
+        mock_login_resp.ok = True
+        mock_login_resp.text = "Login Successful"
+        mock_session.post.return_value = mock_login_resp
+
+        session = _create_session("user@test.com", "pass")
+        assert session is mock_session
+        mock_session.post.assert_called_once()
+
+    @patch("astra.spacetrack.requests.Session")
+    def test_bad_credentials_raises_astra_error(self, mock_session_cls):
+        mock_session = MagicMock()
+        mock_session_cls.return_value = mock_session
+        mock_session.post.return_value = Mock(
+            status_code=401, ok=False, text="Failed Login"
+        )
+        with pytest.raises(AstraError) as exc_info:
+            _create_session("bad@user.com", "wrongpass")
+        assert "authentication failed" in str(exc_info.value).lower()
+
+    @patch("astra.spacetrack.requests.Session")
+    def test_network_error_raises_astra_error(self, mock_session_cls):
+        import requests as req_lib
+        mock_session = MagicMock()
+        mock_session_cls.return_value = mock_session
+        mock_session.post.side_effect = req_lib.RequestException("Connection timeout")
+        with pytest.raises(AstraError) as exc_info:
+            _create_session("user@test.com", "pass")
+        assert "connect" in str(exc_info.value).lower()
+
+
+# ---------------------------------------------------------------------------
+# 3. Data Fetching — OMM format (default)
+# ---------------------------------------------------------------------------
+
+class TestFetchSpacetrackOMM:
+
+    @patch("astra.spacetrack.requests.Session")
+    def test_fetch_group_returns_omm_list(self, mock_session_cls):
+        mock_session = MagicMock()
+        mock_session_cls.return_value = mock_session
+        # Login succeeds
+        mock_session.post.return_value = Mock(status_code=200, ok=True, text="OK")
+        # Data query succeeds
+        mock_session.get.return_value = Mock(
+            status_code=200, ok=True, text=_MOCK_OMM_PAYLOAD,
+            raise_for_status=Mock(), headers={}
+        )
+
+        env = {"SPACETRACK_USER": "u@test.com", "SPACETRACK_PASS": "pw"}
+        with patch.dict(os.environ, env):
+            results = fetch_spacetrack_group("active")
+
+        assert len(results) == 1
+        assert isinstance(results[0], SatelliteOMM)
+        assert results[0].norad_id == "25544"
+
+    @patch("astra.spacetrack.requests.Session")
+    def test_fetch_active_returns_omm_list(self, mock_session_cls):
+        mock_session = MagicMock()
+        mock_session_cls.return_value = mock_session
+        mock_session.post.return_value = Mock(status_code=200, ok=True, text="OK")
+        mock_session.get.return_value = Mock(
+            status_code=200, ok=True, text=_MOCK_OMM_PAYLOAD,
+            raise_for_status=Mock(), headers={}
+        )
+
+        env = {"SPACETRACK_USER": "u@test.com", "SPACETRACK_PASS": "pw"}
+        with patch.dict(os.environ, env):
+            results = fetch_spacetrack_active()
+
+        assert isinstance(results[0], SatelliteOMM)
+
+
+# ---------------------------------------------------------------------------
+# 4. Data Fetching — TLE format
+# ---------------------------------------------------------------------------
+
+class TestFetchSpacetrackTLE:
+
+    @patch("astra.spacetrack.requests.Session")
+    def test_fetch_group_tle_returns_satellite_tle_list(self, mock_session_cls):
+        mock_session = MagicMock()
+        mock_session_cls.return_value = mock_session
+        mock_session.post.return_value = Mock(status_code=200, ok=True, text="OK")
+        mock_session.get.return_value = Mock(
+            status_code=200, ok=True, text=_MOCK_TLE_PAYLOAD,
+            raise_for_status=Mock(), headers={}
+        )
+
+        env = {"SPACETRACK_USER": "u@test.com", "SPACETRACK_PASS": "pw"}
+        with patch.dict(os.environ, env):
+            results = fetch_spacetrack_group("active", format="tle")
+
+        assert len(results) >= 1
+        assert isinstance(results[0], SatelliteTLE)
+
+
+# ---------------------------------------------------------------------------
+# 5. Error Handling — Fetch failures
+# ---------------------------------------------------------------------------
+
+class TestFetchSpacetrackErrors:
+
+    def test_fetch_without_credentials_raises(self):
+        with patch.dict(os.environ, {}, clear=True):
+            os.environ.pop("SPACETRACK_USER", None)
+            os.environ.pop("SPACETRACK_PASS", None)
+            with pytest.raises(AstraError) as exc_info:
+                fetch_spacetrack_group("active")
+            assert "SPACETRACK_USER" in str(exc_info.value)
+
+    @patch("astra.spacetrack.requests.Session")
+    def test_empty_response_raises_astra_error(self, mock_session_cls):
+        mock_session = MagicMock()
+        mock_session_cls.return_value = mock_session
+        mock_session.post.return_value = Mock(status_code=200, ok=True, text="OK")
+        mock_session.get.return_value = Mock(
+            status_code=200, ok=True, text="   ",
+            raise_for_status=Mock(), headers={}
+        )
+
+        env = {"SPACETRACK_USER": "u@test.com", "SPACETRACK_PASS": "pw"}
+        with patch.dict(os.environ, env):
+            with pytest.raises(AstraError) as exc_info:
+                fetch_spacetrack_group("nonexistent_group")
+            assert "empty" in str(exc_info.value).lower()
+
+    @patch("astra.spacetrack.requests.Session")
+    def test_http_error_on_data_fetch_raises(self, mock_session_cls):
+        import requests as req_lib
+        mock_session = MagicMock()
+        mock_session_cls.return_value = mock_session
+        mock_session.post.return_value = Mock(status_code=200, ok=True, text="OK")
+        mock_session.get.return_value = Mock(
+            raise_for_status=Mock(side_effect=req_lib.HTTPError("503"))
+        )
+
+        env = {"SPACETRACK_USER": "u@test.com", "SPACETRACK_PASS": "pw"}
+        with patch.dict(os.environ, env):
+            with pytest.raises(AstraError):
+                fetch_spacetrack_group("active")
+
+
+# ---------------------------------------------------------------------------
+# 6. Top-level namespace exports
+# ---------------------------------------------------------------------------
+
+class TestNamespaceExports:
+
+    def test_spacetrack_functions_exported_from_astra(self):
+        import astra
+        assert hasattr(astra, "fetch_spacetrack_group")
+        assert hasattr(astra, "fetch_spacetrack_active")
+
+    def test_celestrak_omm_siblings_exported(self):
+        import astra
+        assert hasattr(astra, "fetch_celestrak_group_omm")
+        assert hasattr(astra, "fetch_celestrak_active_omm")
+        assert hasattr(astra, "fetch_celestrak_comprehensive_omm")
+
+# ---------------------------------------------------------------------------
+# 7. Session Cache & Logout
+# ---------------------------------------------------------------------------
+
+class TestSessionCacheAndLogout:
+
+    @patch("astra.spacetrack.requests.Session")
+    def test_session_caching(self, mock_session_cls):
+        from astra.spacetrack import _SESSION_CACHE, _create_session
+        _SESSION_CACHE.clear()
+
+        mock_session = MagicMock()
+        mock_session_cls.return_value = mock_session
+        mock_login_resp = Mock(status_code=200, ok=True, text="Login Successful")
+        mock_session.post.return_value = mock_login_resp
+
+        # First call should hit the network
+        session1 = _create_session("cache_user@test.com", "pass")
+        mock_session.post.assert_called_once()
+
+        # Second call should use cache
+        mock_session.post.reset_mock()
+        session2 = _create_session("cache_user@test.com", "pass")
+        mock_session.post.assert_not_called()
+        
+        assert session1 is session2
+        assert "cache_user@test.com" in _SESSION_CACHE
+        _SESSION_CACHE.clear()
+
+    @patch("astra.spacetrack.requests.Session")
+    def test_spacetrack_logout(self, mock_session_cls):
+        from astra.spacetrack import spacetrack_logout, _SESSION_CACHE
+        _SESSION_CACHE.clear()
+        
+        mock_session = MagicMock()
+        _SESSION_CACHE["dummy@test.com"] = mock_session
+
+        env = {"SPACETRACK_USER": "dummy@test.com", "SPACETRACK_PASS": "pw"}
+        with patch.dict(os.environ, env):
+            spacetrack_logout()
+
+        # Session should be removed from cache
+        assert "dummy@test.com" not in _SESSION_CACHE
+        mock_session.get.assert_called_once() # Should call logout URL
+
+        # Logout when no session should not crash
+        with patch.dict(os.environ, env):
+            spacetrack_logout() # safe to call
+
+
+# ---------------------------------------------------------------------------
+# 8. SATCAT
+# ---------------------------------------------------------------------------
+
+class TestSATCAT:
+
+    @patch("astra.spacetrack.requests.Session")
+    def test_fetch_satcat_success(self, mock_session_cls):
+        from astra.spacetrack import fetch_spacetrack_satcat
+        
+        mock_session = MagicMock()
+        mock_session_cls.return_value = mock_session
+        mock_session.post.return_value = Mock(status_code=200, ok=True, text="OK")
+        
+        mock_resp = Mock(status_code=200, ok=True, text='[{"SATNAME": "ISS", "NORAD_CAT_ID": "25544"}]')
+        mock_resp.headers = {}
+        mock_session.get.return_value = mock_resp
+
+        env = {"SPACETRACK_USER": "u@test.com", "SPACETRACK_PASS": "pw"}
+        with patch.dict(os.environ, env):
+            results = fetch_spacetrack_satcat(["25544"])
+
+        assert len(results) == 1
+        assert results[0]["SATNAME"] == "ISS"
+        mock_session.get.assert_called_once()
+        assert "NORAD_CAT_ID/25544" in mock_session.get.call_args[0][0]
+
+
+# ---------------------------------------------------------------------------
+# 9. Rate Limit & Pagination Guard
+# ---------------------------------------------------------------------------
+
+class TestRateLimitAndPagination:
+
+    @patch("astra.spacetrack.requests.Session")
+    @patch("astra.spacetrack.logger")
+    def test_rate_limit_warning(self, mock_logger, mock_session_cls):
+        mock_session = MagicMock()
+        mock_session_cls.return_value = mock_session
+        mock_session.post.return_value = Mock(status_code=200, ok=True, text="OK")
+        
+        mock_resp = Mock(status_code=200, ok=True, text=_MOCK_OMM_PAYLOAD)
+        mock_resp.headers = {"X-RateLimit-Remaining": "5"}
+        mock_session.get.return_value = mock_resp
+
+        env = {"SPACETRACK_USER": "u@test.com", "SPACETRACK_PASS": "pw"}
+        with patch.dict(os.environ, env):
+            fetch_spacetrack_group("active", format="json")
+            
+        mock_logger.warning.assert_called()
+        assert any("rate limit low" in call[0][0] for call in mock_logger.warning.call_args_list)
+
+    @patch("astra.spacetrack.requests.Session")
+    @patch("astra.spacetrack.logger")
+    def test_pagination_warning(self, mock_logger, mock_session_cls):
+        mock_session = MagicMock()
+        mock_session_cls.return_value = mock_session
+        mock_session.post.return_value = Mock(status_code=200, ok=True, text="OK")
+        
+        # Create a large response string
+        large_json = "[\n" + ",\n".join(["{}" for _ in range(50005)]) + "\n]"
+        mock_resp = Mock(status_code=200, ok=True, text=large_json)
+        mock_resp.headers = {}
+        mock_session.get.return_value = mock_resp
+
+        env = {"SPACETRACK_USER": "u@test.com", "SPACETRACK_PASS": "pw"}
+        
+        # We need to mock json.loads or parse_omm_json since the fake JSON won't parse completely correctly
+        with patch.dict(os.environ, env), patch('astra.omm.parse_omm_json', return_value=[]):
+            fetch_spacetrack_group("active", format="json")
+            
+        mock_logger.warning.assert_called()
+        assert any("truncated by Space-Track API caps" in call[0][0] for call in mock_logger.warning.call_args_list)

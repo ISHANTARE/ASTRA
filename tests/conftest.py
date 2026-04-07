@@ -16,6 +16,30 @@ TEST_JD_END   = 2460677.5  # 2025-01-02T00:00:00 UTC
 def iss_tle():
     return astra.parse_tle(ISS_NAME, ISS_LINE1, ISS_LINE2)
 
+
+@pytest.fixture
+def iss_omm():
+    """ISS-like OMM record (same regime as ``iss_tle``) for format-agnostic API tests."""
+    from astra.omm import parse_omm_record
+
+    rec = {
+        "OBJECT_NAME": ISS_NAME,
+        "OBJECT_ID": "1998-067A",
+        "NORAD_CAT_ID": ISS_NORAD,
+        "OBJECT_TYPE": "PAYLOAD",
+        "EPOCH": "2021-01-01T00:00:00.000000",
+        "MEAN_MOTION": "15.48922536",
+        "ECCENTRICITY": ".0001364",
+        "INCLINATION": "51.6442",
+        "RA_OF_ASC_NODE": "284.1199",
+        "ARG_OF_PERICENTER": "338.5498",
+        "MEAN_ANOMALY": "21.5664",
+        "BSTAR": ".34282E-4",
+        "RCS_SIZE": "LARGE",
+        "MASS": "419725",
+    }
+    return parse_omm_record(rec)
+
 @pytest.fixture
 def sample_observer():
     from astra.models import Observer

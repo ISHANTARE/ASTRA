@@ -5,6 +5,7 @@
 
 import os
 import sys
+
 sys.path.insert(0, os.path.abspath('..'))
 
 # -- Project information -----------------------------------------------------
@@ -14,8 +15,12 @@ project = 'ASTRA-Core'
 copyright = '2026, Ishan Tare'
 author = 'Ishan Tare'
 
-version = '3.2.0'
-release = '3.2.0'
+try:
+    from astra.version import __version__ as _pkg_version
+except ImportError:
+    _pkg_version = '3.3.0'
+
+version = release = _pkg_version
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
@@ -30,6 +35,12 @@ extensions = [
 templates_path = ['_templates']
 exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 
+# Avoid duplicate attribute lines for dataclasses / type-hinted fields (napoleon + autodoc).
+autodoc_typehints = 'none'
+
+suppress_warnings = [
+    'ref.python',  # :class:`AstraError` etc. exposed both on astra and astra.errors
+]
 
 
 # -- Options for HTML output -------------------------------------------------

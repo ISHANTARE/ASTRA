@@ -4,6 +4,15 @@ This script predicts when a specific satellite (e.g., the ISS)
 will be visible from physical coordinates on Earth.
 """
 
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 import astra
 from datetime import datetime, timezone
 import numpy as np

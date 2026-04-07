@@ -25,6 +25,11 @@ if errorlevel 9009 (
 
 if "%1" == "" goto help
 
+if /I "%1" == "html" (
+	python generate_api.py
+	if errorlevel 1 exit /b 1
+)
+
 %SPHINXBUILD% -M %1 %SOURCEDIR% %BUILDDIR% %SPHINXOPTS% %O%
 goto end
 

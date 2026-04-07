@@ -1,46 +1,139 @@
-# 🔭 KNOWMORE: The Science & Math behind ASTRA-Core
+# KNOWMORE: The science and math behind ASTRA-Core
 
-ASTRA-Core is a high-performance Python mathematical engine that calculates orbits and predicts satellite collisions. But what exactly is happening under the hood?
+ASTRA-Core computes orbits, screens conjunctions, and estimates collision risk. This guide explains **what the library is doing conceptually**—TLEs, OMM, frames, screening, P_c, and Cowell forces—and **where simplified models stop matching reality**.
 
-This document is designed to teach you the fundamental concepts of Space Situational Awareness (SSA), Orbital Mechanics, and Collision Probability as implemented in this library.
+For install steps, API tables, and copy-paste workflows, use [README.md](./README.md). For the full API, see [Read the Docs](https://astra-core.readthedocs.io/en/latest/).
+
+---
 
 ## 1. What is a TLE?
-A **Two-Line Element (TLE)** set is the standard data format used by NORAD and the US Space Force to describe the orbit of a satellite at a specific point in time (the **Epoch**). It contains parameters like:
-- **Inclination**: The tilt of the orbit relative to the Earth's equator.
-- **Eccentricity**: How elliptical (oval) versus circular the orbit is.
-- **Mean Anomaly**: Exactly where the satellite is along its orbit oval at the time of the epoch.
 
-## 2. Orbital Propagation (SGP4)
-A TLE is useless without an orbital mathematical model. You cannot simply use high-school physics (Kepler's laws) to predict where a satellite will be tomorrow. Earth isn't a perfect sphere (it bulges at the equator, known as the **$\text{J}_2$ perturbation**), the Moon and Sun exert gravitational pull, and Low Earth Orbit (LEO) has atmospheric drag.
+A **Two-Line Element (TLE)** set is the classic NORAD / US Space Force format for **mean orbital elements at an epoch**: inclination, eccentricity, RAAN, argument of perigee, mean anomaly, mean motion, etc. A TLE is **not** a Cartesian state—you need **SGP4** to turn (TLE, time) into position and velocity (typically in **TEME**).
 
-**SGP4 (Simplified General Perturbations #4)** is a mathematical model that accounts for these perturbations. You feed SGP4 a TLE and a target time, and it outputs the $(x,y,z)$ position and $(v_x,v_y,v_z)$ velocity of the satellite at that exact moment. ASTRA-Core vectorizes this model to propagate tens of thousands of objects at once across massive time arrays.
+TLEs have no mass, area, or ballistic coefficient fields, and the two-digit year convention creates **ambiguity around 2057**—for long horizons, **OMM** is usually clearer.
 
-## 3. Coordinate Systems
-Tracking a satellite requires rigorous conversion between reference frames. ASTRA-Core handles transformations between:
-- **TEME (True Equator, Mean Equinox)**: The native output frame of the SGP4 algorithm.
-- **ECI (Earth-Centered Inertial)**: A fixed coordinate system anchored relative to the distant stars. Crucial for physics math where Newton's laws apply.
-- **ECEF (Earth-Centered, Earth-Fixed)**: A coordinate system that rotates *with* the Earth. Needed to track satellites over a geographic map (Latitude/Longitude/Altitude).
-- **Topocentric (AER - Azimuth, Elevation, Range)**: The coordinate system from the perspective of an observer standing on the ground looking up at the sky.
+---
 
-## 4. Conjunction Analysis (Finding Collisions)
-When you have 30,000 active objects in space, checking every pair for a collision at every single second over a week is computationally impossible ($O(n^2)$ complexity). 
+## 2. Orbital propagation (SGP4)
 
-How ASTRA-Core solves this efficiently:
-1. **cKDTree Spatial Partitioning**: We map satellite trajectories into a highly-optimized C++ `scipy.spatial.cKDTree` structure. By querying spatial overlap across discrete integration intervals natively in C, we instantly discard 99.9% of safely passing configurations in $O(N \log N)$ time natively bypassing the Python Global Interpreter Lock (GIL).
-2. **Dynamic Attitude Cross-Sections**: For surviving "close calls", we compute the exact TCA (Time of Closest Approach). Based on the satellite's specific hardware pointing mode (e.g. Nadir Earth-pointing), we dynamically rotate its geometric faces to calculate the exact projected surface area slicing through the probability field.
+Earth is not a point mass: **J₂** flattening, drag in LEO, and deep-space perturbations are folded into **SGP4**. ASTRA uses the standard **sgp4** Python library and can propagate **many** satellites over the **same** time grid (`propagate_many`) efficiently.
 
-## 5. Covariance ($P_c$) & The 6x6 State Transition Matrix (STM)
-A miss distance of 500 meters doesn't mean much on its own. We only have *statistical estimations* of a satellite's state. ASTRA maps this uncertainty fundamentally:
+**UT1:** For consistent Earth rotation with the elset, ASTRA can apply **UT1−UTC** from a managed Skyfield timescale when data are available. In the default **relaxed** mode, some failures fall back with warnings; **strict** mode raises `EphemerisError` so you are not silently off by ~1 s class effects at the equator.
 
-- **6x6 State Propagation**: We integrate a 6x6 State Transition Matrix alongside the Cowell force model's numerical Jacobian. This correctly ties initial velocity variance into exploding positional uncertainty over time mathematically perfectly.
-- **6D Monte Carlo Encounter Sampling**: To calculate actual impact likelihood, we extract our localized 6D $C_0$ covariance. We generate tens of thousands of unique $N(\mu, \Sigma)$ 6D relative state vectors around the TCA. We project each localized error pair rectilinearly across the brief collision window to calculate exact structural minimum distances.
-- **Impact %**: The final ratio of structural intersections yields the true Probability of Collision ($P_c$), enabling mission control centers to definitively act on evasive maneuvers.
+---
 
-## 6. Active Collision Avoidance Maneuvers & Operations-Grade Physics
-Static un-thrusting satellites are rarely the focus of highly critical events. When risk hits a certain threshold, operators must plot **Collision Avoidance (COLA) Maneuvers**, fundamentally altering the numerical propagation chain.
+## 3. Coordinate systems
 
-ASTRA-Core uses a **7-DOF Variable Mass Cowell Integrator** for this step:
-1. **Attitude-Steered Burns**: Instead of a simple delta-V impulse, we define exact burn durations and engine thrust metrics. At every micro-step of propagation, the physics engine dynamically rotates the spacecraft vector (e.g. "burn along the current velocity axis") back into the absolute Space frame dynamically.
-2. **Numba JIT Accelerated Numerical Integration**: We JIT-compile the 7-DOF core Cowell differential equations (`@njit(fastmath=True)`) directly to machine code. This allows the integrator to dynamically resolve exact Lunar/Solar ephemerides interpolations and $J_2-J_4$ harmonics millions of times per orbit at near-C speeds.
-3. **Tsiolkovsky Flow**: Mass depletes continuously over the engine burn based on standard Specific Impulse equations (dm/dt = -F / Isp). This directly decreases inertial mass mid-flight resulting in greater resulting accelerations.
-3. **Space Weather & Celestial Truth**: During precision COLA verification, approximations are dumped. The integration loop inherently scales its atmospheric density drag based on **Live F10.7 Solar Flux** fed automatically from the internet and replaces the position of the Sun/Moon with highly rigorous sub-arcsecond **NASA JPL Ephemerides (DE421)**.
+You will see these frames in the pipeline:
+
+* **TEME (True Equator, Mean Equinox)** — Native output of SGP4; used heavily for screening.
+* **ECI / GCRS** — Inertial directions for Newtonian mechanics and some covariance conventions.
+* **ITRS / ECEF** — Fixed to Earth; bridge to latitude/longitude/height.
+* **Topocentric (ENU)** — East–North–Up at an observer; used for azimuth/elevation and passes.
+
+**Practical note:** Some code paths label inputs as **UTC Julian Date** while Skyfield may use **TT** internally for rotations. The library documents this at important entry points—do not mix scales without reading the docstring for that function.
+
+---
+
+## 4. Conjunction analysis (finding close approaches)
+
+Checking every pair of objects at every timestep is **O(n²)** in objects × time samples. ASTRA:
+
+1. Builds a **3D spatial index** (`scipy.spatial.cKDTree`) over positions at each coarse step to keep only pairs within a **large** distance threshold.
+2. Refines **time of closest approach (TCA)** with **cubic splines** on the time axis.
+3. Optionally uses **SGP4 velocities** (`vel_map`) at TCA instead of differentiating noisy position splines—important for eccentric LEO.
+
+**Effective radius:** When **OMM** supplies RCS or you attach dimensions, the code can use a **dynamic** collision radius instead of a generic default.
+
+---
+
+## 5. Covariance and probability of collision (P_c)
+
+A miss distance alone is not enough—you need **uncertainty**. ASTRA supports:
+
+* **Encounter-plane (Chan / Foster–type) methods** — fast; assumes **nearly straight-line** relative motion for the analytical shortcut. Near **direct hits**, a **2D quadrature** over the collision disk can be more appropriate when only 3×3 covariances exist.
+* **6×6 Monte Carlo** — samples the combined Gaussian uncertainty and counts hits inside a hard sphere; requires proper **6×6** covariances (e.g. from CDMs).
+
+**`estimate_covariance()`** grows a **diagonal RTN** heuristic from time since epoch and solar flux—it is **not** substitute for orbit-determination covariances. For operational thresholds, prefer **CDM** inputs. **Strict mode** can forbid the heuristic path.
+
+**CDM XML** is parsed with **defusedxml** to reduce classic XML abuse risks.
+
+---
+
+## 6. Cowell propagation, maneuvers, and environmental models
+
+**Cowell** integrates $\dot{r} = v$, $\dot{v} = a$ in inertial space with:
+
+* **Gravity:** Two-body + **J₂, J₃, J₄** (WGS-84).
+* **Drag:** Empirical density (F10.7, Ap) when space weather is loaded; co-rotating atmosphere.
+* **Third body:** Point-mass **Sun** and **Moon** using **JPL DE421** positions when the ephemeris is available.
+* **SRP:** Cannonball model, flux from 1 AU, optional **cylindrical Earth umbra** (full shadow vs full sun; **no penumbra**).
+* **Finite burns:** Thrust in **VNB** or **RTN**, with **mass depletion** (Tsiolkovsky-style $\dot{m}$).
+
+The fast path uses **Numba** (`fastmath=True`). Tiny numerical differences vs the pure-Python acceleration are normal—compare **integrated trajectories**, not bitwise forces.
+
+**Caches:** DE421, IERS, and space-weather files download to a user cache (override with **`ASTRA_DATA_DIR`**). Plan ahead for **air-gapped** machines.
+
+---
+
+## 7. OMM: the modern orbital data standard
+
+OMM (CCSDS) expresses the same *mean-element* information as TLE but with **named JSON fields**—including **mass**, **RCS size**, and **C_D A/m** when the provider supplies them.
+
+### Why it matters for physics
+
+| Need | TLE | OMM |
+|------|-----|-----|
+| Ballistic coefficient for drag | External table | Often in message |
+| Collision cross-section | Guessed default | RCS / metadata |
+| Mass for Cowell | External table | Often in message |
+
+### How ASTRA unifies formats
+
+Both `SatelliteTLE` and `SatelliteOMM` are accepted wherever the type hint says **`SatelliteState`**. Internally, `_build_satrec` either calls **TLE parsing** or **sgp4init** from OMM numbers with correct **unit conversions** (degrees → radians, rev/day → rad/min, ISO epoch → Julian Date).
+
+```
+   CelesTrak (TLE)  ───┐
+   CelesTrak (OMM)  ───┤
+   Space-Track      ───┤──► make_debris_object() ──► DebrisObject
+   Local JSON       ───┘              │
+                                      ▼
+                            propagate_*(), find_conjunctions(),
+                            filter_altitude(), …
+```
+
+---
+
+## 8. What the library does *not* guarantee
+
+1. **Ephemeris span:** Bundled **DE421** is nominally **~1900–2050**. Outside that, use another kernel and validate.
+2. **Atmosphere:** Not NRLMSISE; not a full re-entry tool.
+3. **SRP:** Simplified geometry—no penumbra, no detailed spacecraft bus model.
+4. **P_c:** Only as good as the **covariances** you pass in.
+5. **Network providers:** Respect CelesTrak and Space-Track **rate limits** and terms—cache catalogs for production.
+6. **Certification:** Automated tests check consistency and regressions; they do not replace **your** independent validation if your process requires it.
+
+---
+
+## 9. Strict vs relaxed mode
+
+**`astra.config.ASTRA_STRICT_MODE`** (or **`set_strict_mode(True)`** for thread-safe updates):
+
+* **Relaxed (default):** Missing optional data may produce **warnings** and **fallbacks** (e.g. simplified Sun/Moon if DE421 cannot load).
+* **Strict:** Many of those situations **raise** (`EphemerisError`, `SpaceWeatherError`, etc.) so pipelines do not silently continue with degraded physics.
+
+On import, ASTRA prints a one-line **stderr** banner about the mode—filter it in log aggregation if it is noisy.
+
+---
+
+## 10. Optional visualization
+
+**Plotly** is optional (`pip install "astra-core-engine[viz]"`). The name `plot_trajectories` is loaded **lazily** from `astra.plot` so headless servers do not need a plotting stack.
+
+---
+
+## Further reading
+
+* Vallado, *Fundamentals of Astrodynamics and Applications* — SGP4 and perturbations.
+* Park et al., JPL **DE440/DE441** — planetary ephemeris context.
+* Foster, Chan, Alfano — collision probability and encounter geometry.

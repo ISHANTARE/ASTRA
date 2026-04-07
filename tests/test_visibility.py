@@ -59,3 +59,11 @@ def test_passes_over_location_integration(iss_tle, observer):
             assert p.duration_seconds > 0.0
             assert p.max_elevation_deg >= observer.min_elevation_deg
             assert p.aos_jd < p.tca_jd < p.los_jd
+
+
+def test_passes_over_location_accepts_omm(iss_omm, observer):
+    """``passes_over_location`` accepts OMM-backed ``SatelliteState``."""
+    start_jd = iss_omm.epoch_jd
+    end_jd = start_jd + (100.0 / 1440.0)
+    passes = passes_over_location(iss_omm, observer, float(start_jd), float(end_jd), 1.0)
+    assert isinstance(passes, list)

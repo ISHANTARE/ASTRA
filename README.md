@@ -1,185 +1,303 @@
-# ASTRA-Core v3.2.0 (Autonomous Space Traffic Risk Analyzer) 🛰️
+# ASTRA-Core v3.3.0 (Autonomous Space Traffic Risk Analyzer) 🛰️
 
 ![PyPI - Version](https://img.shields.io/pypi/v/astra-core-engine?color=blue&label=astra-core-engine)
 [![Documentation Status](https://readthedocs.org/projects/astra-core/badge/?version=latest)](https://astra-core.readthedocs.io/en/latest/?badge=latest)
 ![License](https://img.shields.io/github/license/ISHANTARE/ASTRA)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.19201701.svg)](https://doi.org/10.5281/zenodo.19201701)
 ![Maintenance](https://img.shields.io/badge/Maintained%3F-yes-green.svg)
+![Python](https://img.shields.io/pypi/pyversions/astra-core-engine)
 
-**The High-Performance Mathematical Foundation for Space Situational Awareness.**
+**The high-performance mathematical foundation for space situational awareness.**
 
-📖 **Comprehensive User Guide & API Reference:** [Available on Read The Docs](https://astra-core.readthedocs.io/en/latest/)
+ASTRA-Core is a rigorous Python astrodynamics engine for aerospace engineers, researchers, and developers. It propagates large catalogs, screens conjunctions, estimates collision probability, and predicts ground passes—using both legacy **TLE** and modern **OMM** data end-to-end.
 
-ASTRA-Core is a rigorous, C-accelerated Python astrodynamics engine powering the ASTRA ecosystem. Designed for aerospace engineers, researchers, and developers, it solves the complex, heavy-lifting astrodynamics required to track thousands of orbital objects simultaneously, predict collisions, and monitor congestion across all orbital regimes.
+📖 **API reference:** [Read the Docs](https://astra-core.readthedocs.io/en/latest/)
 
-> 🧠 **Want to learn how the math works?** Check out our educational guide: [KNOWMORE.md](./KNOWMORE.md) to understand TLEs, SGP4, Sweep-and-Prune, and Collision Probabilities!
-
-currently working on optimization and irregularities of earth's surface.
-
----
-
-## 🚀 Key Features
-
-* **High-Fidelity Cowell Method Propagation**: Integrate the exact equations of motion (DOP853) with an elite force model evaluating $J_2-J_4$ zonal harmonics, Atmospheric Drag, and Solar/Lunar third-body perturbations.
-* **Maneuver Modeling & 7-DOF Flight Dynamics**: Formulate exact finite continuous burns using attitude-steered Dynamic VNB/RTN direction combinations with coupled mass expulsion tracking (Tsiolkovsky equation) directly in the integration loop.
-* **Operations-Grade Physical Truth Pipelines**: Ditch analytical physics approximations for real-world automated feeds: JPL DE421 (Sub-arcsecond Moon/Sun Ephemerides) and CelesTrak Space Weather (F10.7/Kp data scaling Jacchia-class empirical atmospheric density models).
-* **Spatial KD-Tree Conjunction Analysis**: Implements a highly optimized, persistent 3D $O(n \log n)$ Spatial KD-Tree index to uniquely isolate candidate colliding trajectories across massive time integrations.
-* **Continuous Time of Closest Approach (TCA)**: Uses interpolations to find the exact millisecond of closest approach, coupled with Dynamic LVLH Attitude Modes to project satellite cross-sections precisely at the impact geometry.
-* **True Probability of Collision ($P_c$)**: Executes a true 6D minimum-distance Monte Carlo probability distribution across colliding volumes, propagated physically via a full 6x6 State Transition Matrix built natively from numerical force Jacobians.
-* **Official Data Integration**: Directly parses active catalogs from CelesTrak and reads official U.S. Space Force CDM (Conjunction Data Message) XMLs.
-* **Pass Predictions**: Calculate topocentric geometry to find when a satellite will be visible from a specific ground station.
+🧠 **How the math works:** [KNOWMORE.md](./KNOWMORE.md) — TLEs, OMM, SGP4, spatial screening, P_c, Cowell forces, and what the models assume.
 
 ---
 
-## 📦 Installation
+## Orbital data: TLE vs OMM
 
-Available natively on PyPI for immediate use in your Python projects:
+ASTRA-Core supports **both** the legacy TLE format and the CCSDS **OMM (Orbit Mean-Elements Message)**. Physics APIs accept either via the unified `SatelliteState` type.
+
+| Feature | `SatelliteTLE` (legacy) | `SatelliteOMM` (modern ★) |
+|---------|-------------------------|---------------------------|
+| **Source format** | 69-character text lines | JSON key-value pairs |
+| **Mass (kg)** | Not in format | `mass_kg` |
+| **Radar cross-section (m²)** | Not in format | `rcs_m2` |
+| **Ballistic coefficient** | Not in format | `cd_area_over_mass` |
+| **Collision radius** | Estimated default | From RCS / metadata when present |
+| **Parsing** | Checksums, fixed columns | JSON — structured fields |
+| **Backwards compatible** | Yes | Yes (same pipelines) |
+| **Recommended for** | Legacy workflows | **New projects** |
+
+> **Tip:** Prefer **OMM** when you care about drag, realistic cross-sections, or conjunction risk—the extra metadata flows into screening and Cowell without extra glue code.
+
+---
+
+## Data sources: CelesTrak vs Space-Track
+
+| | **CelesTrak** | **Space-Track.org** |
+|---|---------------|---------------------|
+| **Account** | Not required | Free registration |
+| **Formats** | TLE + OMM JSON | TLE + OMM JSON |
+| **Coverage** | Large public catalogs | Authoritative catalog |
+| **Updates** | Periodic | Periodic (per provider) |
+| **Notes** | Rate limits may apply | Session auth via env vars |
+
+### CelesTrak (no account)
+
+```python
+import astra
+
+tles = astra.fetch_celestrak_group("starlink")
+omms = astra.fetch_celestrak_group_omm("starlink")
+```
+
+Requests identify the client as `ASTRA-Core/<version>`.
+
+### Space-Track (environment variables)
+
+Never hardcode passwords. Set once per machine:
+
+```bash
+# Windows (Command Prompt — restart shell after setx)
+setx SPACETRACK_USER your@email.com
+setx SPACETRACK_PASS yourpassword
+
+# Linux / macOS (~/.bashrc or ~/.zshrc)
+export SPACETRACK_USER=your@email.com
+export SPACETRACK_PASS=yourpassword
+```
+
+```python
+import astra
+
+starlinks = astra.fetch_spacetrack_group("starlink")
+catalog = astra.fetch_spacetrack_active()
+```
+
+If credentials are missing, ASTRA raises a clear error with setup hints.
+
+---
+
+## Key capabilities
+
+* **Dual format (TLE + OMM):** One API surface for parsing, propagation, filtering, and conjunctions.
+* **SGP4 at scale:** Vectorized propagation (`propagate_many`, generators) with UT1-aware handling where ephemeris data are available.
+* **Cowell propagation:** Dormand–Prince integration with **J₂–J₄**, empirical **drag** (space weather), **Sun/Moon** third-body gravity (**JPL DE421**), optional **solar radiation pressure** with **cylindrical Earth shadow** (umbra only; no penumbra), and **7-DOF** finite burns with mass flow.
+* **Conjunction screening:** KD-tree prefilter over time steps, spline refinement for TCA, dynamic effective radius from metadata when available.
+* **Collision probability:** Analytical (Chan/Foster lineage) and **6D Monte Carlo** paths when full covariances are supplied; **CDM XML** import via hardened parsing (`defusedxml`).
+* **Catalog ingestion:** CelesTrak and Space-Track helpers plus local **OMM** files.
+* **Pass prediction:** TEME → ground observer pipeline (ENU), coarse grid + refinement for AOS/TCA/LOS.
+* **Optional 3D plots:** Interactive Plotly figures via the **`[viz]`** extra—core install stays lean for servers and CI.
+
+---
+
+## Installation
+
+**Default (core physics, no Plotly):**
 
 ```bash
 pip install astra-core-engine
 ```
 
-**For development & contribution:**
-If you want to modify the source code or run the test suite:
+**With 3D trajectory plotting:**
+
+```bash
+pip install "astra-core-engine[viz]"
+```
+
+**From source (development + tests):**
 
 ```bash
 git clone https://github.com/ISHANTARE/ASTRA.git
 cd ASTRA
-pip install -e .[test]
+pip install -e ".[test]"
 ```
+
+Requires **Python 3.10+**. Core dependencies include NumPy, SciPy, Skyfield, SGP4, Requests, Numba, and defusedxml.
 
 ---
 
-## 💻 Technical Quickstart
+## Using the library responsibly
 
-Here is how you can use ASTRA-Core to fetch live satellite data and predict close calls within minutes.
+ASTRA-Core implements widely used models suitable for **research, education, integration prototypes, and operations-style workflows** when you understand the assumptions. It is **not** a certified conjunction or mission-closure product by itself—validate against your own requirements and reference tools if needed.
 
-### 1. Fetching Data and Mass Propagation
+| Topic | What to know |
+|-------|----------------|
+| **Sun/Moon ephemeris** | Default kernel is **DE421** (roughly **1900–2050**). Very long or future-dated studies may need another ephemeris (e.g. DE440) and your own validation. |
+| **Atmosphere** | Empirical **Jacchia-class** density, not NRLMSISE. Not intended for detailed re-entry or the densest LEO regimes alone. |
+| **SRP** | Simple **cannonball** model; optional **cylindrical** shadow (full sun or full shadow in umbra). **Penumbra is not modeled.** |
+| **P_c** | Depends on **covariance quality**. Built-in `estimate_covariance()` is a **rough heuristic**—for serious thresholds, use **CDM-class covariances**. Turn on **strict mode** to avoid silent fallbacks. |
+| **Monte Carlo P_c** | Uses a **straight-line** relative-motion model per sample; very **slow** co-orbital encounters need careful interpretation and finer time sampling. |
+| **Catalog quality** | Stale or poor elements dominate error—always check epoch and data source. |
+
+**Strict mode:** `astra.set_strict_mode(True)` or `astra.config.ASTRA_STRICT_MODE = True` makes many missing-data paths **raise** instead of warn-and-continue—recommended when building tools that must not guess.
+
+More detail: [KNOWMORE.md](./KNOWMORE.md) and the **Limitations** page on [Read the Docs](https://astra-core.readthedocs.io/en/latest/).
+
+---
+
+## Quickstart
+
+### TLE workflow
 
 ```python
 import astra
 import numpy as np
 
-# 1. Fetch live TLEs from CelesTrak
-print("Downloading live active satellite catalog...")
 active_catalog = astra.fetch_celestrak_active()
-
-# 2. Filter for Low Earth Orbit (LEO) only
 objects = [astra.make_debris_object(tle) for tle in active_catalog]
 leo_only = astra.filter_altitude(objects, min_km=200, max_km=2000)
 
-# 3. Propagate 10,000+ objects simultaneously across the next 2 hours
-tles = [obj.tle for obj in leo_only]
-time_steps = np.arange(0, 120, 5.0) # Minutes
-times_jd = leo_only[0].tle.epoch_jd + (time_steps / 1440.0)
-trajectories = astra.propagate_many(tles, times_jd)
+sources = [obj.source for obj in leo_only]
+times_jd = leo_only[0].source.epoch_jd + np.arange(0, 120, 5.0) / 1440.0
+trajectories = astra.propagate_many(sources, times_jd)
+
+events = astra.find_conjunctions(
+    trajectories,
+    times_jd=times_jd,
+    elements_map={obj.source.norad_id: obj for obj in leo_only},
+    threshold_km=5.0,
+)
 ```
 
-### 2. Detecting Conjunctions (Collisions)
+### OMM workflow (recommended for new code)
 
 ```python
-# Scan for any satellites coming within 5km of each other
-events = astra.find_conjunctions(
-    trajectories, 
-    times_jd=leo_only[0].tle.epoch_jd + (time_steps / 1440.0), 
-    elements_map={obj.tle.norad_id: obj for obj in leo_only}, 
-    threshold_km=5.0
-)
+import astra
+import numpy as np
 
-for event in events:
-    print(f"THREAT: SAT {event.primary_id} vs SAT {event.secondary_id}")
-    print(f"Distance: {event.min_distance_km:.2f} km at TCA: {event.tca}")
+omm_catalog = astra.fetch_celestrak_active_omm()
+# Or: omm_catalog = astra.load_omm_file("catalog.json")
+
+objects = [astra.make_debris_object(omm) for omm in omm_catalog]
+leo_only = astra.filter_altitude(objects, min_km=200, max_km=2000)
+
+sources = [obj.source for obj in leo_only]
+times_jd = leo_only[0].source.epoch_jd + np.arange(0, 120, 5.0) / 1440.0
+trajectories = astra.propagate_many(sources, times_jd)
+
+events = astra.find_conjunctions(
+    trajectories,
+    times_jd=times_jd,
+    elements_map={obj.source.norad_id: obj for obj in leo_only},
+    threshold_km=5.0,
+)
+print(f"Found {len(events)} conjunction events.")
+```
+
+### Space-Track catalog
+
+```python
+import astra
+
+catalog = astra.fetch_spacetrack_active()
+print(f"Loaded {len(catalog)} satellites.")
+```
+
+### Optional: Plotly (`[viz]` installed)
+
+```python
+from astra import plot_trajectories
+
+fig = plot_trajectories({"25544": positions_array})
 ```
 
 ---
 
-## 📚 Library API Cheatsheet (Exposed Functions)
+## Library API cheatsheet
 
-ASTRA-Core natively exposes all top-level functions directly from `astra.__init__`. Here are all the callable functions with a syntax implementation example for each:
+Functions are available from the `astra` namespace.
 
-### Data Acquisition & Parsing
+### CelesTrak
 
-* `fetch_celestrak_active()`: `catalog = astra.fetch_celestrak_active()`
-* `fetch_celestrak_comprehensive()`: `catalog = astra.fetch_celestrak_comprehensive()`
-* `fetch_celestrak_group(group)`: `gnss = astra.fetch_celestrak_group("gps-ops")`
-* `parse_cdm_xml(xml_string)`: `cdm = astra.parse_cdm_xml(xml_string)`
-* `load_tle_catalog(tle_lines)`: `tles = astra.load_tle_catalog(["name", "1...", "2..."])`
-* `parse_tle(name, l1, l2)`: `tle = astra.SatelliteTLE.from_strings("1 255...", "2 255...", name="ISS")`
-* `validate_tle(name, l1, l2)`: `is_valid = astra.validate_tle("ISS", line1, line2)`
+| Function | Returns |
+|----------|---------|
+| `fetch_celestrak_active()` | `list[SatelliteTLE]` |
+| `fetch_celestrak_group(group)` | `list[SatelliteTLE]` |
+| `fetch_celestrak_comprehensive()` | `list[SatelliteTLE]` |
+| `fetch_celestrak_active_omm()` | `list[SatelliteOMM]` |
+| `fetch_celestrak_group_omm(group)` | `list[SatelliteOMM]` |
+| `fetch_celestrak_comprehensive_omm()` | `list[SatelliteOMM]` |
 
-### Filtering & Debris Processing
+### Space-Track
 
-* `make_debris_object(tle)`: `obj = astra.make_debris_object(tle)`
-* `filter_altitude(objs, min, max)`: `leo = astra.filter_altitude(objects, 200, 2000)`
-* `filter_region(objs, lat, lon)`: `overhead = astra.filter_region(objects, lat_bounds, lon_bounds)`
-* `filter_time_window(objs, t1, t2)`: `visible = astra.filter_time_window(objects, start_jd, end_jd)`
-* `apply_filters(objs, config)`: `subset = astra.apply_filters(objects, filter_config)`
-* `catalog_statistics(objs)`: `stats_dict = astra.catalog_statistics(objects)`
+| Function | Returns |
+|----------|---------|
+| `fetch_spacetrack_group(group, format=...)` | OMM (default) or TLE |
+| `fetch_spacetrack_active()` | Active catalog |
+| `fetch_spacetrack_satcat()` | SATCAT-style records |
+| `spacetrack_logout()` | End session |
 
-### High-Performance Propagation & Orbit Math
+### OMM
 
-* `propagate_cowell(state, duration_s, ...)`: `trajectory = astra.propagate_cowell(initial_state, duration_s=7200, dt_out=60.0)`
-* `propagate_many(tles, times_jd)`: `traj_map = astra.propagate_many([tle1, tle2], times_jd)`
-* `propagate_many_generator(tles, times_jd)`: `for jd_chunk, traj_chunk in astra.propagate_many_generator(tles, times_jd): pass`
-* `propagate_orbit(tle, epoch, t_min)`: `state = astra.propagate_orbit(tle, tle.epoch_jd, 10.0)`
-* `propagate_trajectory(tle, t1, t2, step)`: `times_jd, pos = astra.propagate_trajectory(tle, start_jd, end_jd, step_minutes=5.0)`
-* `ground_track(positions, times)`: `lat_lon_alt = astra.ground_track(teme_pos, times_jd)`
-* `orbital_elements(pos, vel)`: `elements = astra.orbital_elements(r, v)`
-* `orbit_period(semi_major_axis)`: `period_s = astra.orbit_period(a_km)`
+* `parse_omm_json(text)` → `list[SatelliteOMM]`
+* `parse_omm_record(dict)` → `SatelliteOMM`
+* `load_omm_file(path)` → `list[SatelliteOMM]`
+* `validate_omm(dict)` → `bool`
 
-### Conjunctions & Covariance (O(n log n) cKDTree)
+### TLE
 
-* `find_conjunctions(...)`: `events = astra.find_conjunctions(trajs, times_jd, obj_map, 5.0, 50.0)`
-* `closest_approach(...)`: `tca, dist = astra.closest_approach(traj_a, traj_b, times)`
-* `distance_3d(pos1, pos2)`: `d = astra.distance_3d(r1, r2)`
-* `compute_collision_probability(...)`: `pc = astra.compute_collision_probability(r_rel, v_rel, cov)`
-* `compute_collision_probability_mc(...)`: `pc = astra.compute_collision_probability_mc(r_rel, v_rel, cov, 10000)`
-* `estimate_covariance(days_since_epoch, f107_flux=150)`: `cov = astra.estimate_covariance(0.5, 120.0)`
-* `propagate_covariance_stm(...)`: `cov_t = astra.propagate_covariance_stm(cov_0, initial_state, t_span)`
+* `load_tle_catalog(lines)` → `list[SatelliteTLE]`
+* `parse_tle(name, l1, l2)` → `SatelliteTLE`
+* `validate_tle(name, l1, l2)` → `bool`
 
-### Visibility & Ground Stations
+### Filtering & debris
 
-* `visible_from_location(...)`: `elevations = astra.visible_from_location(pos, times, observer)`
-* `passes_over_location(...)`: `passes = astra.passes_over_location(tle, observer, t_start, t_end)`
+* `make_debris_object(source)` — `SatelliteTLE` or `SatelliteOMM`
+* `filter_altitude`, `filter_region`, `filter_time_window`, `apply_filters`, `catalog_statistics`
 
-### High-Fidelity Physics & Maneuvers
+### Propagation
 
-* `projected_area_m2(dim, quat, v_rel)`: `area = astra.projected_area_m2((1,2,3), q, v_dir)`
-* `thrust_acceleration_inertial(...)`: `acc = astra.thrust_acceleration_inertial(burn, mass, t, state)`
-* `rotation_vnb_to_inertial(pos, vel)`: `matrix = astra.rotation_vnb_to_inertial(r, v)`
-* `rotation_rtn_to_inertial(pos, vel)`: `matrix = astra.rotation_rtn_to_inertial(r, v)`
-* `frame_to_inertial(frame, pos, vel)`: `matrix = astra.frame_to_inertial(ManeuverFrame.VNB, r, v)`
-* `validate_burn(burn)`: `is_valid = astra.validate_burn(burn_dataclass)`
+* `propagate_orbit`, `propagate_many`, `propagate_many_generator`, `propagate_trajectory`, `ground_track`
+* `propagate_cowell` — numerical Cowell + `DragConfig`
 
-### Space Weather & Data Pipelines
+### Conjunctions & probability
 
-* `get_space_weather(jd)`: `f107, f107a, ap = astra.get_space_weather(t_jd)`
-* `load_space_weather(data_dir, force_download)`: `astra.load_space_weather(data_dir=".", force_download=True)`
-* `atmospheric_density_empirical(...)`: `rho = astra.atmospheric_density_empirical(alt, f107, f107a, ap)`
-* `sun_position_de(jd)`: `r_sun = astra.sun_position_de(t_jd)`
-* `moon_position_de(jd)`: `r_moon = astra.moon_position_de(t_jd)`
+* `find_conjunctions`, `closest_approach`, `distance_3d`
+* `compute_collision_probability`, `compute_collision_probability_mc`
+* `estimate_covariance`, `propagate_covariance_stm`, `rotate_covariance_rtn_to_eci`
+* `parse_cdm_xml`
 
-### Top-Level Utilities
+### Space weather & ephemeris helpers
 
-* `haversine_distance(l1, ln1, l2, ln2)`: `dist_km = astra.haversine_distance(34.0, -118.0, 40.0, -74.0)`
-* `convert_time(time_val, to_format)`: `jd = astra.convert_time("2026-01-01T00:00:00Z", "jd")`
-* `plot_trajectories(trajs, events)`: `fig = astra.plot_trajectories(trajectories, conjunction_events)`
+* `get_space_weather`, `load_space_weather`, `atmospheric_density_empirical`
+* `sun_position_de`, `moon_position_de`, etc.
+
+### Visibility
+
+* `passes_over_location`, `visible_from_location`
+
+### Utilities & config
+
+* `convert_time`, `vincenty_distance`, `orbit_period`, `orbital_elements`
+* `set_strict_mode`, `astra.config.ASTRA_STRICT_MODE`
 
 ---
 
-## 🚀 Examples
+## Examples
 
-Want to see the math in action? Check out the `examples/` directory included in the repository source code:
-
-* `examples/01_basic_conjunctions.py` - Full collision prediction pipeline using cKDTree.
-* `examples/02_visualize_swarm.py` - 3D trajectory rendering of LEO satellite constellations.
-* `examples/03_ground_station_visibility.py` - Predict when satellites will pass over your coordinates.
+| Script | Topic |
+|--------|--------|
+| `examples/01_basic_conjunctions.py` | Collision screening pipeline |
+| `examples/02_visualize_swarm.py` | 3D LEO constellation plot |
+| `examples/03_ground_station_visibility.py` | Pass prediction |
+| `examples/04_omm_pipeline.py` | OMM end-to-end |
+| `examples/05_compare_tle_omm.py` | TLE vs OMM |
+| `examples/06_spacetrack_pipeline.py` | Space-Track |
 
 ---
 
-## 📝 How to Cite ASTRA
+## Changelog
 
-If you use ASTRA-Core in an academic paper, research project, or commercial product, please use the following BibTeX entry to provide attribution:
+Release notes: [CHANGELOG.md](./CHANGELOG.md).
+
+---
+
+## How to cite
 
 ```bibtex
 @software{Tare_ASTRA_2026,
@@ -189,15 +307,14 @@ If you use ASTRA-Core in an academic paper, research project, or commercial prod
   publisher = {GitHub},
   journal = {GitHub repository},
   howpublished = {\url{https://github.com/ISHANTARE/ASTRA}},
-  version = {3.2.0}
+  version = {3.3.0}
 }
 ```
 
 ---
 
-## 👤 Author
+## Author
 
-**ISHAN TARE**  
-*Computer Science Student*
+**ASTRA Team — Ishan Tare**
 
-© 2026 ASTRA Project
+© 2026 ASTRA Project · MIT License

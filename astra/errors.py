@@ -7,10 +7,12 @@ maps to a typed exception that carries full diagnostic information.
 Hierarchy:
     AstraError (base)
     ├── InvalidTLEError       — TLE parsing and validation failures
-    ├── PropagationError      — SGP4 propagation failures
+    ├── PropagationError      — Orbit propagation failures (SGP4, Cowell IVP, etc.)
     ├── FilterError           — Invalid filter configuration
     ├── CoordinateError       — Coordinate frame conversion failures
-    └── ManeuverError         — Maneuver definition or execution failures
+    ├── ManeuverError         — Maneuver definition or execution failures
+    ├── SpaceWeatherError     — Solar flux/Ap data unavailable in STRICT_MODE
+    └── EphemerisError        — JPL ephemeris data cannot be loaded in STRICT_MODE
 """
 from __future__ import annotations
 
@@ -76,12 +78,12 @@ class InvalidTLEError(AstraError):
 
 
 class PropagationError(AstraError):
-    """Raised when SGP4 orbit propagation fails.
+    """Raised when numerical orbit propagation fails (SGP4 or Cowell integrator).
 
     Args:
         message: Human-readable error description.
-        norad_id: NORAD catalog number of the failing satellite.
-        error_code: SGP4 internal error code (0 = success, 1–6 = failure).
+        norad_id: NORAD catalog number of the failing satellite (SGP4 paths).
+        error_code: SGP4 internal error code when applicable (0 = success, 1–6 = failure).
         t_jd: Julian Date at which propagation failed.
     """
 
@@ -162,3 +164,21 @@ class ManeuverError(AstraError):
         super().__init__(message, parameter=parameter, value=value)
         self.parameter: Optional[str] = parameter
         self.value: Optional[Any] = value
+
+
+class SpaceWeatherError(AstraError):
+    """Raised when solar flux/Ap data is unavailable in STRICT_MODE.
+
+    Triggered by ``get_space_weather()`` when the CelesTrak cache is empty
+    or stale and ASTRA_STRICT_MODE is True. In relaxed mode, synthetic
+    defaults (F10.7=150, Ap=15) are substituted with a WARNING log.
+    """
+
+
+class EphemerisError(AstraError):
+    """Raised when JPL ephemeris data cannot be loaded in STRICT_MODE.
+
+    Triggered by Sun/Moon position functions when the DE421 BSP file is
+    missing and ASTRA_STRICT_MODE is True. In relaxed mode, the low-fidelity
+    analytical approximation is substituted with a WARNING log.
+    """

@@ -1,13 +1,13 @@
 import pytest
 import math
-from astra.utils import haversine_distance, orbital_elements, orbit_period
+from astra.utils import vincenty_distance, orbital_elements, orbit_period
 
-def test_haversine_distance_same_point():
-    assert haversine_distance(0.0, 0.0, 0.0, 0.0) == 0.0
+def test_vincenty_distance_same_point():
+    assert vincenty_distance(0.0, 0.0, 0.0, 0.0) == 0.0
 
-def test_haversine_distance_equator():
+def test_vincenty_distance_equator():
     # 1 degree on equator is approx 111.19 km
-    d = haversine_distance(0.0, 0.0, 0.0, 1.0)
+    d = vincenty_distance(0.0, 0.0, 0.0, 1.0)
     assert 111.0 < d < 112.0
 
 def test_orbital_elements_extracts_correctly():

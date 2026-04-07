@@ -8,43 +8,72 @@ positions). Filtering is O(N) and involves no SGP4 calls.
 from __future__ import annotations
 
 import math
-from typing import Any
+from typing import Any, Optional
 
-from astra.models import DebrisObject, FilterConfig, SatelliteTLE
+from astra.models import DebrisObject, FilterConfig, SatelliteTLE, SatelliteOMM, SatelliteState
 from astra.utils import orbit_period, orbital_elements
-from astra.constants import EARTH_RADIUS_KM, EARTH_MU_KM3_S2, TLE_AGE_LEO_MAX_DAYS, TLE_AGE_DEFAULT_MAX_DAYS
+from astra.constants import EARTH_RADIUS_KM, EARTH_EQUATORIAL_RADIUS_KM, EARTH_MU_KM3_S2, TLE_AGE_LEO_MAX_DAYS, TLE_AGE_DEFAULT_MAX_DAYS
 
 
 
 
-def make_debris_object(tle: SatelliteTLE) -> DebrisObject:
-    """Build a DebrisObject from a SatelliteTLE with derived elements."""
-    elements = orbital_elements(tle.line2)
-    period_min = orbit_period(elements["mean_motion_rev_per_day"])
+def make_debris_object(source: SatelliteState) -> DebrisObject:
+    """Build a DebrisObject from a SatelliteTLE or SatelliteOMM with derived elements.
 
-    # Compute semi-major axis using Kepler's Third Law
-    if period_min <= 0:
-        n_rad_s = float('inf')
-        a = 0.0
+    For TLE sources, elements are parsed directly from the raw TLE lines.
+    For OMM sources, elements are read directly from the already-converted
+    dataclass fields (no string parsing required).
+    """
+    if isinstance(source, SatelliteTLE):
+        elements = orbital_elements(source.line2)
+        period_min = orbit_period(elements["mean_motion_rev_per_day"])
+        # Mean motion in rad/s for semi-major axis
+        if period_min <= 0:
+            n_rad_s = float('inf')
+            a = 0.0
+        else:
+            n_rad_s = (2.0 * math.pi) / (period_min * 60.0)
+            a = (EARTH_MU_KM3_S2 / (n_rad_s**2)) ** (1.0 / 3.0)
+        e = elements["eccentricity"]
+        inclination_deg = elements["inclination_deg"]
+        raan_deg = elements["raan_deg"]
+
+    elif isinstance(source, SatelliteOMM):
+        # OMM already carries all elements as clean floats — no string parsing.
+        # mean_motion_rad_min → convert to rev/day for orbit_period()
+        mean_motion_rev_day = source.mean_motion_rad_min * 1440.0 / (2.0 * math.pi)
+        period_min = orbit_period(mean_motion_rev_day)
+        if period_min <= 0:
+            n_rad_s = float('inf')
+            a = 0.0
+        else:
+            n_rad_s = (2.0 * math.pi) / (period_min * 60.0)
+            a = (EARTH_MU_KM3_S2 / (n_rad_s**2)) ** (1.0 / 3.0)
+        e = source.eccentricity
+        inclination_deg = math.degrees(source.inclination_rad)
+        raan_deg = math.degrees(source.raan_rad)
+
     else:
-        n_rad_s = (2.0 * math.pi) / (period_min * 60.0)
-        a = (EARTH_MU_KM3_S2 / (n_rad_s**2)) ** (1.0 / 3.0)
+        raise TypeError(f"Unsupported source type: {type(source).__name__}")
 
-    e = elements["eccentricity"]
-    perigee_km = a * (1.0 - e) - EARTH_RADIUS_KM
-    apogee_km = a * (1.0 + e) - EARTH_RADIUS_KM
-    altitude_km = a - EARTH_RADIUS_KM
+    perigee_km = a * (1.0 - e) - EARTH_EQUATORIAL_RADIUS_KM
+    apogee_km = a * (1.0 + e) - EARTH_EQUATORIAL_RADIUS_KM
+    altitude_km = a - EARTH_EQUATORIAL_RADIUS_KM
+
+    # Harvest RCS from OMM if available
+    rcs_m2 = getattr(source, 'rcs_m2', None)
 
     return DebrisObject(
-        tle=tle,
+        source=source,
         altitude_km=altitude_km,
-        inclination_deg=elements["inclination_deg"],
+        inclination_deg=inclination_deg,
         period_minutes=period_min,
-        raan_deg=elements["raan_deg"],
+        raan_deg=raan_deg,
         eccentricity=e,
         apogee_km=apogee_km,
         perigee_km=perigee_km,
-        object_class=tle.object_type,
+        object_class=source.object_type,
+        rcs_m2=rcs_m2,
     )
 
 
@@ -76,19 +105,24 @@ def filter_region(
     objects: list[DebrisObject],
     lat_min_deg: float,
     lat_max_deg: float,
-    lon_min_deg: float,
-    lon_max_deg: float,
+    lon_min_deg: Optional[float] = None,
+    lon_max_deg: Optional[float] = None,
 ) -> list[DebrisObject]:
     """Retain objects whose ground track could pass through a bounding box.
 
     Approximation based on orbital inclination. It is an over-inclusive filter.
 
+    .. warning::
+        The longitude arguments are silently ignored — the inclination-based
+        approximation cannot restrict longitude. In STRICT_MODE a
+        ``FilterError`` is raised if either longitude bound is set.
+
     Args:
         objects: List of DebrisObjects.
         lat_min_deg: Minimum latitude bound.
         lat_max_deg: Maximum latitude bound.
-        lon_min_deg: Minimum longitude bound (currently unused, kept for API).
-        lon_max_deg: Maximum longitude bound (currently unused, kept for API).
+        lon_min_deg: NOT IMPLEMENTED. Triggers a warning (or error in STRICT_MODE).
+        lon_max_deg: NOT IMPLEMENTED. Triggers a warning (or error in STRICT_MODE).
 
     Returns:
         Filtered list of DebrisObjects.
@@ -108,6 +142,25 @@ def filter_region(
             # Overlap exists. Longitude is skipped since the Earth rotates underneath,
             # meaning all longitudes are eventually covered in the operational band.
             results.append(obj)
+
+    # Longitude filters are not implemented for this inclination-only heuristic
+    if lon_min_deg is not None or lon_max_deg is not None:
+        from astra import config
+        lon_msg = (
+            "filter_region() longitude bounds are set but IGNORED. "
+            "This filter uses inclination-only approximation and cannot restrict longitude — "
+            "all longitudes within the inclination band are included. "
+            "Use propagate_trajectory() + post-filtering for ground-track longitude restriction."
+        )
+        if config.ASTRA_STRICT_MODE:
+            from astra.errors import FilterError
+            raise FilterError(
+                f"[ASTRA STRICT] {lon_msg}",
+                parameter="lon_min_deg/lon_max_deg"
+            )
+        import logging
+        logging.getLogger(__name__).warning(lon_msg)
+
     return results
 
 
@@ -126,7 +179,7 @@ def filter_time_window(
     """
     results = []
     for obj in objects:
-        age_days = t_start_jd - obj.tle.epoch_jd
+        age_days = t_start_jd - obj.source.epoch_jd
         
         # Stale thresholds
         # Stricter threshold for LEO due to higher atmospheric drag
@@ -153,72 +206,59 @@ def catalog_statistics(objects: list[DebrisObject]) -> dict[str, Any]:
     Returns:
         Dictionary of computed statistics.
     """
-    total_count = len(objects)
-
-    by_type = {"PAYLOAD": 0, "ROCKET_BODY": 0, "DEBRIS": 0, "UNKNOWN": 0}
-    by_regime = {"LEO": 0, "MEO": 0, "GEO": 0, "HEO": 0}
-    
-    inclination_dist = {"equatorial": 0, "inclined": 0, "polar": 0, "retrograde": 0}
-
-    altitudes = []
-
-    for obj in objects:
-        # By type
-        t = obj.object_class if obj.object_class in by_type else "UNKNOWN"
-        by_type[t] += 1
-        
-        # By regime (Basic logic)
-        alt = obj.altitude_km
-        altitudes.append(alt)
-        
-        if obj.eccentricity > 0.25:
-            # Highly Elliptical
-            by_regime["HEO"] += 1
-        elif alt < 2000:
-            by_regime["LEO"] += 1
-        elif 35000 <= alt <= 36000:
-            # Approx GEO ring
-            by_regime["GEO"] += 1
-        else:
-            # Middle Earth Orbit
-            by_regime["MEO"] += 1
-
-        # Inclination distribution
-        inc = obj.inclination_deg
-        if inc < 10.0:
-            inclination_dist["equatorial"] += 1
-        elif inc < 80.0:
-            inclination_dist["inclined"] += 1
-        elif inc <= 90.0:
-            inclination_dist["polar"] += 1
-        else:
-            inclination_dist["retrograde"] += 1
-
-    if not altitudes:
+    if not objects:
         return {
             "total_count": 0,
-            "by_type": by_type,
-            "by_regime": by_regime,
+            "by_type": {"PAYLOAD": 0, "ROCKET_BODY": 0, "DEBRIS": 0, "UNKNOWN": 0},
+            "by_regime": {"LEO": 0, "MEO": 0, "GEO": 0, "HEO": 0},
             "altitude_mean_km": 0.0,
             "altitude_std_km": 0.0,
             "altitude_min_km": 0.0,
             "altitude_max_km": 0.0,
-            "inclination_distribution": inclination_dist,
+            "inclination_distribution": {"equatorial": 0, "inclined": 0, "polar": 0, "retrograde": 0},
         }
 
-    alt_mean = sum(altitudes) / total_count
-    # Std dev
-    variance = sum((a - alt_mean) ** 2 for a in altitudes) / total_count
-    alt_std = math.sqrt(variance)
+    import numpy as np
+    altitudes = np.array([obj.altitude_km for obj in objects])
+    eccentricities = np.array([obj.eccentricity for obj in objects])
+    inclinations = np.array([obj.inclination_deg for obj in objects])
+    classes = [obj.object_class for obj in objects]
+
+    # Regime classification via vectorized boolean indexing
+    is_heo = eccentricities > 0.25
+    is_leo = (~is_heo) & (altitudes < 2000)
+    is_geo = (~is_heo) & (altitudes >= 35000) & (altitudes <= 36000)
+    is_meo = (~is_heo) & (~is_leo) & (~is_geo)
+
+    by_regime = {
+        "LEO": int(np.sum(is_leo)),
+        "MEO": int(np.sum(is_meo)),
+        "GEO": int(np.sum(is_geo)),
+        "HEO": int(np.sum(is_heo)),
+    }
+
+    # Inclination distribution
+    inclination_dist = {
+        "equatorial": int(np.sum(inclinations < 10.0)),
+        "inclined":   int(np.sum((inclinations >= 10.0) & (inclinations < 80.0))),
+        "polar":      int(np.sum((inclinations >= 80.0) & (inclinations <= 90.0))),
+        "retrograde": int(np.sum(inclinations > 90.0)),
+    }
+
+    # Object type counts
+    from collections import Counter
+    type_counts = Counter(classes)
+    by_type = {"PAYLOAD": 0, "ROCKET_BODY": 0, "DEBRIS": 0, "UNKNOWN": 0}
+    by_type.update({k: v for k, v in type_counts.items() if k in by_type})
 
     return {
-        "total_count": total_count,
+        "total_count": len(objects),
         "by_type": by_type,
         "by_regime": by_regime,
-        "altitude_mean_km": alt_mean,
-        "altitude_std_km": alt_std,
-        "altitude_min_km": min(altitudes),
-        "altitude_max_km": max(altitudes),
+        "altitude_mean_km": float(np.mean(altitudes)),
+        "altitude_std_km": float(np.std(altitudes)),
+        "altitude_min_km": float(np.min(altitudes)),
+        "altitude_max_km": float(np.max(altitudes)),
         "inclination_distribution": inclination_dist,
     }
 

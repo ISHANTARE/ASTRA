@@ -29,7 +29,7 @@ def test_propagate_many_generator_chunking(dummy_tles):
     chunks_received = 0
     total_times_received = 0
     
-    for t_chunk, results_map in gen:
+    for t_chunk, results_map, vel_map in gen:
         chunks_received += 1
         chunk_len = len(t_chunk)
         total_times_received += chunk_len
@@ -41,6 +41,8 @@ def test_propagate_many_generator_chunking(dummy_tles):
         # Verify shape of results
         assert results_map["25544"].shape == (chunk_len, 3)
         assert results_map["99999"].shape == (chunk_len, 3)
+        assert vel_map["25544"].shape == (chunk_len, 3)
+        assert vel_map["99999"].shape == (chunk_len, 3)
         
     assert chunks_received == 4  # 2000 / 500 = 4 chunks exactly
     assert total_times_received == 2000
