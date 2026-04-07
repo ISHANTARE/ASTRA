@@ -10,6 +10,10 @@ Wraps the ultra-fast C++ scipy.spatial.cKDTree.
 from __future__ import annotations
 
 import threading
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from astra.models import TrajectoryMap
 import numpy as np
 from scipy.spatial import cKDTree
 

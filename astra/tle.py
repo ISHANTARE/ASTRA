@@ -8,6 +8,11 @@ raw text.
 from __future__ import annotations
 
 import logging
+import numpy as np
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from astra.models import SatelliteState
 from datetime import datetime, timedelta, timezone
 
 from astra.errors import AstraError, InvalidTLEError

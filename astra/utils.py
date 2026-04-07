@@ -1,7 +1,11 @@
 from __future__ import annotations
 import math
-from typing import Union, Optional, Any
+from typing import Union, Optional, Any, TYPE_CHECKING
 import numpy as np
+
+if TYPE_CHECKING:
+    from astra.models import OrbitalState
+    from astra.propagator import NumericalState
 
 from astra.constants import EARTH_EQUATORIAL_RADIUS_KM
 
