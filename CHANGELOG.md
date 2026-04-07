@@ -2,7 +2,7 @@
 
 All notable changes to **astra-core-engine** are summarized here. The canonical version string lives in `astra/version.py` and `pyproject.toml`.
 
-## 3.3.0 — 2026
+## 3.3.0 — 2026-04-07
 
 ### Highlights
 
