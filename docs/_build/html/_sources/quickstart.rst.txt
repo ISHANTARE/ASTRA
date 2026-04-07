@@ -1,0 +1,102 @@
+Quickstart
+==========
+
+This guide uses APIs that match the current **astra-core-engine** package. Adjust
+NORAD IDs and time windows for your own data.
+
+1. Parse a TLE
+----------------
+
+Build a :class:`astra.models.SatelliteTLE` from two lines (checksums should be
+valid for production use):
+
+.. code-block:: python
+
+    from astra.models import SatelliteTLE
+
+    line1 = "1 25544U 98067A   21001.00000000  .00001480  00000-0  34282-4 0  9990"
+    line2 = "2 25544  51.6442 284.1199 0001364 338.5498  21.5664 15.48922536 12341"
+
+    iss = SatelliteTLE.from_strings(line1, line2, name="ISS (ZARYA)")
+    print(f"Epoch JD: {iss.epoch_jd}")
+
+2. Propagate with SGP4
+------------------------
+
+.. code-block:: python
+
+    import numpy as np
+    from astra import propagate_many
+
+    dt_min = np.arange(0.0, 120.0, 5.0)
+    times_jd = iss.epoch_jd + dt_min / 1440.0
+
+    traj = propagate_many([iss], times_jd)
+    positions = traj[iss.norad_id]   # (T, 3) km, TEME
+
+3. Screen for conjunctions
+--------------------------
+
+.. code-block:: python
+
+    from astra import find_conjunctions, make_debris_object
+
+    elements_map = {iss.norad_id: make_debris_object(iss)}
+
+    events = find_conjunctions(
+        traj,
+        times_jd,
+        elements_map,
+        threshold_km=5.0,
+    )
+
+    for ev in events:
+        print(ev)
+
+4. Load a live CelesTrak catalog
+----------------------------------
+
+.. code-block:: python
+
+    from astra import fetch_celestrak_active, load_tle_catalog
+
+    # Recommended: live fetch (requires network)
+    catalog = fetch_celestrak_active()
+
+    # Or parse lines you already have:
+    # catalog = load_tle_catalog(open("catalog.txt").read().splitlines())
+
+    print(f"Objects: {len(catalog)}")
+
+5. Ground-station passes
+--------------------------
+
+.. code-block:: python
+
+    import numpy as np
+    from datetime import datetime, timezone
+
+    from astra import Observer, passes_over_location, convert_time
+
+    observer = Observer(lat_deg=34.0522, lon_deg=-118.2437, alt_km=0.071)
+
+    now = datetime.now(timezone.utc)
+    t0_jd = float(convert_time(now, "jd"))
+
+    passes = passes_over_location(
+        satellite=iss,
+        observer=observer,
+        t_start_jd=t0_jd,
+        t_end_jd=t0_jd + 1.0,
+        step_minutes=1.0,
+    )
+
+    for p in passes:
+        print(f"Max elevation (deg): {np.degrees(p.max_elevation_rad):.1f}")
+
+Next steps
+----------
+
+* OMM workflows: ``fetch_celestrak_active_omm``, ``parse_omm_json``, ``load_omm_file``
+* High-fidelity propagation: ``propagate_cowell`` with :class:`astra.propagator.DragConfig`
+* Read :doc:`limitations` and the repository **KNOWMORE.md** for physics scope

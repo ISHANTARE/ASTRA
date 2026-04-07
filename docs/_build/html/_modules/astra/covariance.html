@@ -1,0 +1,911 @@
+<!doctype html>
+<html class="no-js" lang="en" data-content_root="../../">
+  <head><meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="color-scheme" content="light dark"><link rel="index" title="Index" href="../../genindex.html"><link rel="search" title="Search" href="../../search.html">
+
+    <!-- Generated with Sphinx 9.1.0 and Furo 2025.12.19 -->
+        <title>astra.covariance - ASTRA-Core 3.3.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=acfd86a5" />
+    <link rel="stylesheet" type="text/css" href="../../_static/styles/furo.css?v=7bdb33bb" />
+    <link rel="stylesheet" type="text/css" href="../../_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="../../_static/styles/furo-extensions.css?v=8dab3a3b" />
+    
+    
+
+
+<style>
+  body {
+    --color-code-background: #f2f2f2;
+  --color-code-foreground: #1e1e1e;
+  
+  }
+  @media not print {
+    body[data-theme="dark"] {
+      --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+  
+    }
+    @media (prefers-color-scheme: dark) {
+      body:not([data-theme="light"]) {
+        --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+  
+      }
+    }
+  }
+</style></head>
+  <body>
+    
+    <script>
+      document.body.dataset.theme = localStorage.getItem("theme") || "auto";
+    </script>
+    
+
+<svg xmlns="http://www.w3.org/2000/svg" style="display: none;">
+  <symbol id="svg-toc" viewBox="0 0 24 24">
+    <title>Contents</title>
+    <svg stroke="currentColor" fill="currentColor" stroke-width="0" viewBox="0 0 1024 1024">
+      <path d="M408 442h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8zm-8 204c0 4.4 3.6 8 8 8h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56zm504-486H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zm0 632H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zM115.4 518.9L271.7 642c5.8 4.6 14.4.5 14.4-6.9V388.9c0-7.4-8.5-11.5-14.4-6.9L115.4 505.1a8.74 8.74 0 0 0 0 13.8z"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-menu" viewBox="0 0 24 24">
+    <title>Menu</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-menu">
+      <line x1="3" y1="12" x2="21" y2="12"></line>
+      <line x1="3" y1="6" x2="21" y2="6"></line>
+      <line x1="3" y1="18" x2="21" y2="18"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-arrow-right" viewBox="0 0 24 24">
+    <title>Expand</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-chevron-right">
+      <polyline points="9 18 15 12 9 6"></polyline>
+    </svg>
+  </symbol>
+  <symbol id="svg-sun" viewBox="0 0 24 24">
+    <title>Light mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="feather-sun">
+      <circle cx="12" cy="12" r="5"></circle>
+      <line x1="12" y1="1" x2="12" y2="3"></line>
+      <line x1="12" y1="21" x2="12" y2="23"></line>
+      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+      <line x1="1" y1="12" x2="3" y2="12"></line>
+      <line x1="21" y1="12" x2="23" y2="12"></line>
+      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-moon" viewBox="0 0 24 24">
+    <title>Dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-moon">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+      <path d="M12 3c.132 0 .263 0 .393 0a7.5 7.5 0 0 0 7.92 12.446a9 9 0 1 1 -8.313 -12.454z" />
+    </svg>
+  </symbol>
+  <symbol id="svg-sun-with-moon" viewBox="0 0 24 24">
+    <title>Auto light/dark, in light mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round"
+      class="icon-custom-derived-from-feather-sun-and-tabler-moon">
+      <path style="opacity: 50%" d="M 5.411 14.504 C 5.471 14.504 5.532 14.504 5.591 14.504 C 3.639 16.319 4.383 19.569 6.931 20.352 C 7.693 20.586 8.512 20.551 9.25 20.252 C 8.023 23.207 4.056 23.725 2.11 21.184 C 0.166 18.642 1.702 14.949 4.874 14.536 C 5.051 14.512 5.231 14.5 5.411 14.5 L 5.411 14.504 Z"/>
+      <line x1="14.5" y1="3.25" x2="14.5" y2="1.25"/>
+      <line x1="14.5" y1="15.85" x2="14.5" y2="17.85"/>
+      <line x1="10.044" y1="5.094" x2="8.63" y2="3.68"/>
+      <line x1="19" y1="14.05" x2="20.414" y2="15.464"/>
+      <line x1="8.2" y1="9.55" x2="6.2" y2="9.55"/>
+      <line x1="20.8" y1="9.55" x2="22.8" y2="9.55"/>
+      <line x1="10.044" y1="14.006" x2="8.63" y2="15.42"/>
+      <line x1="19" y1="5.05" x2="20.414" y2="3.636"/>
+      <circle cx="14.5" cy="9.55" r="3.6"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-moon-with-sun" viewBox="0 0 24 24">
+    <title>Auto light/dark, in dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round"
+      class="icon-custom-derived-from-feather-sun-and-tabler-moon">
+      <path d="M 8.282 7.007 C 8.385 7.007 8.494 7.007 8.595 7.007 C 5.18 10.184 6.481 15.869 10.942 17.24 C 12.275 17.648 13.706 17.589 15 17.066 C 12.851 22.236 5.91 23.143 2.505 18.696 C -0.897 14.249 1.791 7.786 7.342 7.063 C 7.652 7.021 7.965 7 8.282 7 L 8.282 7.007 Z"/>
+      <line style="opacity: 50%" x1="18" y1="3.705" x2="18" y2="2.5"/>
+      <line style="opacity: 50%" x1="18" y1="11.295" x2="18" y2="12.5"/>
+      <line style="opacity: 50%" x1="15.316" y1="4.816" x2="14.464" y2="3.964"/>
+      <line style="opacity: 50%" x1="20.711" y1="10.212" x2="21.563" y2="11.063"/>
+      <line style="opacity: 50%" x1="14.205" y1="7.5" x2="13.001" y2="7.5"/>
+      <line style="opacity: 50%" x1="21.795" y1="7.5" x2="23" y2="7.5"/>
+      <line style="opacity: 50%" x1="15.316" y1="10.184" x2="14.464" y2="11.036"/>
+      <line style="opacity: 50%" x1="20.711" y1="4.789" x2="21.563" y2="3.937"/>
+      <circle style="opacity: 50%" cx="18" cy="7.5" r="2.169"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-pencil" viewBox="0 0 24 24">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-pencil-code">
+      <path d="M4 20h4l10.5 -10.5a2.828 2.828 0 1 0 -4 -4l-10.5 10.5v4" />
+      <path d="M13.5 6.5l4 4" />
+      <path d="M20 21l2 -2l-2 -2" />
+      <path d="M17 17l-2 2l2 2" />
+    </svg>
+  </symbol>
+  <symbol id="svg-eye" viewBox="0 0 24 24">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-eye-code">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+      <path d="M10 12a2 2 0 1 0 4 0a2 2 0 0 0 -4 0" />
+      <path
+        d="M11.11 17.958c-3.209 -.307 -5.91 -2.293 -8.11 -5.958c2.4 -4 5.4 -6 9 -6c3.6 0 6.6 2 9 6c-.21 .352 -.427 .688 -.647 1.008" />
+      <path d="M20 21l2 -2l-2 -2" />
+      <path d="M17 17l-2 2l2 2" />
+    </svg>
+  </symbol>
+</svg>
+
+<input type="checkbox" class="sidebar-toggle" name="__navigation" id="__navigation" aria-label="Toggle site navigation sidebar">
+<input type="checkbox" class="sidebar-toggle" name="__toc" id="__toc" aria-label="Toggle table of contents sidebar">
+<label class="overlay sidebar-overlay" for="__navigation"></label>
+<label class="overlay toc-overlay" for="__toc"></label>
+
+<a class="skip-to-content muted-link" href="#furo-main-content">Skip to content</a>
+
+
+
+<div class="page">
+  <header class="mobile-header">
+    <div class="header-left">
+      <label class="nav-overlay-icon" for="__navigation">
+        <span class="icon"><svg><use href="#svg-menu"></use></svg></span>
+      </label>
+    </div>
+    <div class="header-center">
+      <a href="../../index.html"><div class="brand">ASTRA-Core 3.3.0 documentation</div></a>
+    </div>
+    <div class="header-right">
+      <div class="theme-toggle-container theme-toggle-header">
+        <button class="theme-toggle" aria-label="Toggle Light / Dark / Auto color theme">
+          <svg class="theme-icon-when-auto-light"><use href="#svg-sun-with-moon"></use></svg>
+          <svg class="theme-icon-when-auto-dark"><use href="#svg-moon-with-sun"></use></svg>
+          <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+          <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+        </button>
+      </div>
+      <label class="toc-overlay-icon toc-header-icon no-toc" for="__toc">
+        <span class="icon"><svg><use href="#svg-toc"></use></svg></span>
+      </label>
+    </div>
+  </header>
+  <aside class="sidebar-drawer">
+    <div class="sidebar-container">
+      
+      <div class="sidebar-sticky"><a class="sidebar-brand" href="../../index.html">
+  
+  <span class="sidebar-brand-text">ASTRA-Core 3.3.0 documentation</span>
+  
+</a><form class="sidebar-search-container" method="get" action="../../search.html" role="search">
+  <input class="sidebar-search" placeholder="Search" name="q" aria-label="Search">
+  <input type="hidden" name="check_keywords" value="yes">
+  <input type="hidden" name="area" value="default">
+</form>
+<div id="searchbox"></div><div class="sidebar-scroll"><div class="sidebar-tree">
+  <p class="caption" role="heading"><span class="caption-text">User guide</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../limitations.html">Operational limitations</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../quickstart.html">Quickstart</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../theory.html">Theoretical Framework</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../architecture.html">Architecture &amp; Physics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../maneuvers.html">Orbital Maneuvers</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../api.html">API reference</a><input aria-label="Toggle navigation of API reference" class="toctree-checkbox" id="toctree-checkbox-1" name="toctree-checkbox-1" role="switch" type="checkbox"/><label for="toctree-checkbox-1"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../apidoc/modules.html">astra</a><input aria-label="Toggle navigation of astra" class="toctree-checkbox" id="toctree-checkbox-2" name="toctree-checkbox-2" role="switch" type="checkbox"/><label for="toctree-checkbox-2"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../apidoc/astra.html">astra package</a><input aria-label="Toggle navigation of astra package" class="toctree-checkbox" id="toctree-checkbox-3" name="toctree-checkbox-3" role="switch" type="checkbox"/><label for="toctree-checkbox-3"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../apidoc/astra.cdm.html">astra.cdm module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../apidoc/astra.config.html">astra.config module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../apidoc/astra.conjunction.html">astra.conjunction module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../apidoc/astra.constants.html">astra.constants module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../apidoc/astra.covariance.html">astra.covariance module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../apidoc/astra.data.html">astra.data module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../apidoc/astra.data_pipeline.html">astra.data_pipeline module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../apidoc/astra.debris.html">astra.debris module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../apidoc/astra.errors.html">astra.errors module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../apidoc/astra.jdutil.html">astra.jdutil module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../apidoc/astra.log.html">astra.log module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../apidoc/astra.maneuver.html">astra.maneuver module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../apidoc/astra.models.html">astra.models module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../apidoc/astra.omm.html">astra.omm module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../apidoc/astra.orbit.html">astra.orbit module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../apidoc/astra.plot.html">astra.plot module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../apidoc/astra.propagator.html">astra.propagator module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../apidoc/astra.spacetrack.html">astra.spacetrack module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../apidoc/astra.spatial_index.html">astra.spatial_index module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../apidoc/astra.time.html">astra.time module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../apidoc/astra.tle.html">astra.tle module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../apidoc/astra.utils.html">astra.utils module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../apidoc/astra.version.html">astra.version module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../apidoc/astra.visibility.html">astra.visibility module</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+</div>
+</div>
+
+      </div>
+      
+    </div>
+  </aside>
+  <div class="main">
+    <div class="content">
+      <div class="article-container">
+        <a href="#" class="back-to-top muted-link">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+            <path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8v12z"></path>
+          </svg>
+          <span>Back to top</span>
+        </a>
+        <div class="content-icon-container">
+          <div class="theme-toggle-container theme-toggle-content">
+            <button class="theme-toggle" aria-label="Toggle Light / Dark / Auto color theme">
+              <svg class="theme-icon-when-auto-light"><use href="#svg-sun-with-moon"></use></svg>
+              <svg class="theme-icon-when-auto-dark"><use href="#svg-moon-with-sun"></use></svg>
+              <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+              <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+            </button>
+          </div>
+          <label class="toc-overlay-icon toc-content-icon no-toc" for="__toc">
+            <span class="icon"><svg><use href="#svg-toc"></use></svg></span>
+          </label>
+        </div>
+        <article role="main" id="furo-main-content">
+          <h1>Source code for astra.covariance</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;ASTRA Core Covariance and Uncertainty Modeling.</span>
+
+<span class="sd">Calculates Mahalanobis distance and Probability of Collision (Pc) </span>
+<span class="sd">by projecting 3D positional covariances onto the 2D encounter plane.</span>
+
+<span class="sd">Includes:</span>
+<span class="sd">- Analytical Foster/Chan Pc (rectilinear short-duration encounters)</span>
+<span class="sd">- Monte Carlo Pc (co-orbital, slow encounters, curvilinear geometry)</span>
+<span class="sd">- STM-based covariance propagation (linearized J2 dynamics)</span>
+<span class="sd">- Empirical covariance estimation (TLE degradation model)</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="kn">from</span> <span class="nn">__future__</span> <span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">import</span> <span class="nn">math</span>
+<span class="kn">from</span> <span class="nn">typing</span> <span class="kn">import</span> <span class="n">Optional</span><span class="p">,</span> <span class="n">Any</span>
+<span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+<span class="kn">from</span> <span class="nn">scipy.integrate</span> <span class="kn">import</span> <span class="n">solve_ivp</span>
+
+<span class="kn">from</span> <span class="nn">astra.constants</span> <span class="kn">import</span> <span class="p">(</span>
+    <span class="n">EARTH_EQUATORIAL_RADIUS_KM</span><span class="p">,</span>
+    <span class="n">EARTH_MU_KM3_S2</span><span class="p">,</span>
+    <span class="n">J2</span><span class="p">,</span>
+<span class="p">)</span>
+
+
+<div class="viewcode-block" id="rotate_covariance_rtn_to_eci">
+<a class="viewcode-back" href="../../apidoc/astra.covariance.html#astra.covariance.rotate_covariance_rtn_to_eci">[docs]</a>
+<span class="k">def</span> <span class="nf">rotate_covariance_rtn_to_eci</span><span class="p">(</span>
+    <span class="n">cov_rtn</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>
+    <span class="n">r_eci_km</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>
+    <span class="n">v_eci_km_s</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Map a 3×3 covariance from RTN (diagonal or full) into ECI at the given state.</span>
+
+<span class="sd">    RTN: R radial (position), T along-track, N cross-track (angular momentum).</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">r</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">r_eci_km</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">float</span><span class="p">)</span><span class="o">.</span><span class="n">ravel</span><span class="p">()</span>
+    <span class="n">v</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">v_eci_km_s</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">float</span><span class="p">)</span><span class="o">.</span><span class="n">ravel</span><span class="p">()</span>
+    <span class="n">r_mag</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">norm</span><span class="p">(</span><span class="n">r</span><span class="p">))</span>
+    <span class="n">h</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">cross</span><span class="p">(</span><span class="n">r</span><span class="p">,</span> <span class="n">v</span><span class="p">)</span>
+    <span class="n">h_mag</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">norm</span><span class="p">(</span><span class="n">h</span><span class="p">))</span>
+    <span class="k">if</span> <span class="n">r_mag</span> <span class="o">&lt;</span> <span class="mf">1e-9</span> <span class="ow">or</span> <span class="n">h_mag</span> <span class="o">&lt;</span> <span class="mf">1e-12</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">cov_rtn</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">float</span><span class="p">)</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">r_hat</span> <span class="o">=</span> <span class="n">r</span> <span class="o">/</span> <span class="n">r_mag</span>
+    <span class="n">n_hat</span> <span class="o">=</span> <span class="n">h</span> <span class="o">/</span> <span class="n">h_mag</span>
+    <span class="n">t_hat</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">cross</span><span class="p">(</span><span class="n">n_hat</span><span class="p">,</span> <span class="n">r_hat</span><span class="p">)</span>
+    <span class="n">t_hat</span> <span class="o">/=</span> <span class="nb">max</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">norm</span><span class="p">(</span><span class="n">t_hat</span><span class="p">)),</span> <span class="mf">1e-15</span><span class="p">)</span>
+    <span class="n">B</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">column_stack</span><span class="p">((</span><span class="n">r_hat</span><span class="p">,</span> <span class="n">t_hat</span><span class="p">,</span> <span class="n">n_hat</span><span class="p">))</span>
+    <span class="n">C</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">cov_rtn</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">float</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">B</span> <span class="o">@</span> <span class="n">C</span> <span class="o">@</span> <span class="n">B</span><span class="o">.</span><span class="n">T</span></div>
+
+
+
+<span class="k">def</span> <span class="nf">_exact_pc_2d_integral</span><span class="p">(</span>
+    <span class="n">miss_2d</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>
+    <span class="n">inv_C_p</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>
+    <span class="n">det_C_p</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
+    <span class="n">combined_radius_km</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Exact Pc via 2-D Gaussian integration over the hard-body collision disk.</span>
+
+<span class="sd">    Computes the double integral</span>
+
+<span class="sd">        Pc = 1/(2π√det C) ∬_{disk} exp(-½ δᵀ C⁻¹ δ) dx dy</span>
+
+<span class="sd">    where δ = (x,y) − miss_2d is the displacement from the covariance peak.</span>
+<span class="sd">    This is exact for arbitrary (non-diagonal) encounter-plane covariances</span>
+<span class="sd">    and is accurate where Chan&#39;s point approximation fails (Mahalanobis &lt; 1).</span>
+
+<span class="sd">    Falls back to Chan&#39;s formula on integration failure.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        miss_2d: (2,) projected miss vector in encounter plane (km).</span>
+<span class="sd">        inv_C_p: (2,2) inverse of 2-D projected covariance (km⁻²).</span>
+<span class="sd">        det_C_p: Determinant of C_p (km⁴).</span>
+<span class="sd">        combined_radius_km: Hard-body collision radius sum (km).</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        Probability of collision in [0.0, 1.0].</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">import</span> <span class="nn">scipy.integrate</span>
+
+    <span class="n">norm</span> <span class="o">=</span> <span class="mf">1.0</span> <span class="o">/</span> <span class="p">(</span><span class="mf">2.0</span> <span class="o">*</span> <span class="n">math</span><span class="o">.</span><span class="n">pi</span> <span class="o">*</span> <span class="n">math</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">det_C_p</span><span class="p">))</span>
+    <span class="n">mx</span><span class="p">,</span> <span class="n">my</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">miss_2d</span><span class="p">[</span><span class="mi">0</span><span class="p">]),</span> <span class="nb">float</span><span class="p">(</span><span class="n">miss_2d</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span>
+
+    <span class="c1"># Extract inv-covariance elements once outside the hot loop.</span>
+    <span class="n">a11</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">inv_C_p</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">])</span>
+    <span class="n">a12</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">inv_C_p</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">])</span> <span class="o">+</span> <span class="nb">float</span><span class="p">(</span><span class="n">inv_C_p</span><span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">])</span>  <span class="c1"># symmetric off-diagonal</span>
+    <span class="n">a22</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">inv_C_p</span><span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">])</span>
+
+    <span class="k">def</span> <span class="nf">_integrand</span><span class="p">(</span><span class="n">y</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">x</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
+        <span class="n">dx</span><span class="p">,</span> <span class="n">dy</span> <span class="o">=</span> <span class="n">x</span> <span class="o">-</span> <span class="n">mx</span><span class="p">,</span> <span class="n">y</span> <span class="o">-</span> <span class="n">my</span>
+        <span class="k">return</span> <span class="n">norm</span> <span class="o">*</span> <span class="n">math</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="o">-</span><span class="mf">0.5</span> <span class="o">*</span> <span class="p">(</span><span class="n">a11</span> <span class="o">*</span> <span class="n">dx</span> <span class="o">*</span> <span class="n">dx</span> <span class="o">+</span> <span class="n">a12</span> <span class="o">*</span> <span class="n">dx</span> <span class="o">*</span> <span class="n">dy</span> <span class="o">+</span> <span class="n">a22</span> <span class="o">*</span> <span class="n">dy</span> <span class="o">*</span> <span class="n">dy</span><span class="p">))</span>
+
+    <span class="n">rc</span> <span class="o">=</span> <span class="n">combined_radius_km</span>
+
+    <span class="k">def</span> <span class="nf">_y_lo</span><span class="p">(</span><span class="n">x</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
+        <span class="k">return</span> <span class="o">-</span><span class="n">math</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="nb">max</span><span class="p">(</span><span class="n">rc</span> <span class="o">*</span> <span class="n">rc</span> <span class="o">-</span> <span class="n">x</span> <span class="o">*</span> <span class="n">x</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">))</span>
+
+    <span class="k">def</span> <span class="nf">_y_hi</span><span class="p">(</span><span class="n">x</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">math</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="nb">max</span><span class="p">(</span><span class="n">rc</span> <span class="o">*</span> <span class="n">rc</span> <span class="o">-</span> <span class="n">x</span> <span class="o">*</span> <span class="n">x</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">))</span>
+
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">result</span><span class="p">,</span> <span class="n">_err</span> <span class="o">=</span> <span class="n">scipy</span><span class="o">.</span><span class="n">integrate</span><span class="o">.</span><span class="n">dblquad</span><span class="p">(</span>
+            <span class="n">_integrand</span><span class="p">,</span>
+            <span class="o">-</span><span class="n">rc</span><span class="p">,</span> <span class="n">rc</span><span class="p">,</span>
+            <span class="n">_y_lo</span><span class="p">,</span> <span class="n">_y_hi</span><span class="p">,</span>
+            <span class="n">limit</span><span class="o">=</span><span class="mi">200</span><span class="p">,</span>
+            <span class="n">epsabs</span><span class="o">=</span><span class="mf">1e-10</span><span class="p">,</span>
+            <span class="n">epsrel</span><span class="o">=</span><span class="mf">1e-8</span><span class="p">,</span>
+        <span class="p">)</span>
+    <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+        <span class="c1"># Numerical failure — fall through to Chan approximation.</span>
+        <span class="n">area</span> <span class="o">=</span> <span class="n">math</span><span class="o">.</span><span class="n">pi</span> <span class="o">*</span> <span class="n">rc</span> <span class="o">**</span> <span class="mi">2</span>
+        <span class="n">result</span> <span class="o">=</span> <span class="n">math</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="o">-</span><span class="mf">0.5</span> <span class="o">*</span> <span class="nb">float</span><span class="p">(</span><span class="n">miss_2d</span> <span class="o">@</span> <span class="n">inv_C_p</span> <span class="o">@</span> <span class="n">miss_2d</span><span class="p">))</span> <span class="o">*</span> <span class="n">area</span> <span class="o">*</span> <span class="n">norm</span>
+
+    <span class="k">return</span> <span class="nb">float</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">clip</span><span class="p">(</span><span class="n">result</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">))</span>
+
+
+<div class="viewcode-block" id="compute_collision_probability">
+<a class="viewcode-back" href="../../apidoc/astra.covariance.html#astra.covariance.compute_collision_probability">[docs]</a>
+<span class="k">def</span> <span class="nf">compute_collision_probability</span><span class="p">(</span>
+    <span class="n">miss_vector_km</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> 
+    <span class="n">rel_vel_km_s</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> 
+    <span class="n">cov_a</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> 
+    <span class="n">cov_b</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> 
+    <span class="n">radius_a_km</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.005</span><span class="p">,</span>
+    <span class="n">radius_b_km</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.005</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Computes Probability of Collision (Pc) via 2D projection on the encounter plane.</span>
+<span class="sd">    </span>
+<span class="sd">    Uses standard Foster/Chan methodology for projecting combined 3D Cartesian</span>
+<span class="sd">    covariance onto the B-plane (perpendicular to relative velocity vector).</span>
+<span class="sd">    </span>
+<span class="sd">    Args:</span>
+<span class="sd">        miss_vector_km: (3,) relative position vector at exact TCA (km).</span>
+<span class="sd">        rel_vel_km_s: (3,) relative velocity vector at TCA (km/s).</span>
+<span class="sd">        cov_a: (3, 3) positional covariance matrix for Object A (km^2).</span>
+<span class="sd">        cov_b: (3, 3) positional covariance matrix for Object B (km^2).</span>
+<span class="sd">        combined_radius_km: Hard-body collision radius sum (km).</span>
+<span class="sd">        </span>
+<span class="sd">    Returns:</span>
+<span class="sd">        Probability of collision (float) bounded [0.0, 1.0].</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">combined_radius_km</span> <span class="o">=</span> <span class="n">radius_a_km</span> <span class="o">+</span> <span class="n">radius_b_km</span>
+    <span class="n">C</span> <span class="o">=</span> <span class="n">cov_a</span> <span class="o">+</span> <span class="n">cov_b</span>
+    <span class="k">if</span> <span class="n">np</span><span class="o">.</span><span class="n">all</span><span class="p">(</span><span class="n">C</span> <span class="o">==</span> <span class="mi">0</span><span class="p">):</span>
+        <span class="c1"># Deterministic collision boolean</span>
+        <span class="k">return</span> <span class="mf">1.0</span> <span class="k">if</span> <span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">norm</span><span class="p">(</span><span class="n">miss_vector_km</span><span class="p">)</span> <span class="o">&lt;=</span> <span class="n">combined_radius_km</span> <span class="k">else</span> <span class="mf">0.0</span>
+
+    <span class="n">v_mag</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">norm</span><span class="p">(</span><span class="n">rel_vel_km_s</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">v_mag</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="k">return</span> <span class="mf">0.0</span>
+        
+    <span class="c1"># U_y is along relative velocity direction (out of encounter plane)</span>
+    <span class="n">u_y</span> <span class="o">=</span> <span class="n">rel_vel_km_s</span> <span class="o">/</span> <span class="n">v_mag</span>
+
+    <span class="c1"># Robust perpendicular (avoids u_y ≈ ŷ with temp = ŷ → degenerate cross)</span>
+    <span class="n">abs_u</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">u_y</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">abs_u</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">&lt;=</span> <span class="n">abs_u</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="ow">and</span> <span class="n">abs_u</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">&lt;=</span> <span class="n">abs_u</span><span class="p">[</span><span class="mi">2</span><span class="p">]:</span>
+        <span class="n">temp</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">])</span>
+    <span class="k">elif</span> <span class="n">abs_u</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">&lt;=</span> <span class="n">abs_u</span><span class="p">[</span><span class="mi">2</span><span class="p">]:</span>
+        <span class="n">temp</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mf">0.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">])</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">temp</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">])</span>
+
+    <span class="n">u_z</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">cross</span><span class="p">(</span><span class="n">u_y</span><span class="p">,</span> <span class="n">temp</span><span class="p">)</span>
+    <span class="n">u_z</span> <span class="o">/=</span> <span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">norm</span><span class="p">(</span><span class="n">u_z</span><span class="p">)</span>
+    <span class="n">u_x</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">cross</span><span class="p">(</span><span class="n">u_y</span><span class="p">,</span> <span class="n">u_z</span><span class="p">)</span>
+    
+    <span class="c1"># Rotation matrix to 2D encounter plane</span>
+    <span class="n">R</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">vstack</span><span class="p">((</span><span class="n">u_x</span><span class="p">,</span> <span class="n">u_z</span><span class="p">))</span>  <span class="c1"># Shape (2, 3)</span>
+    
+    <span class="c1"># Project 3D combined covariance to 2D</span>
+    <span class="n">C_p</span> <span class="o">=</span> <span class="n">R</span> <span class="o">@</span> <span class="n">C</span> <span class="o">@</span> <span class="n">R</span><span class="o">.</span><span class="n">T</span>
+    
+    <span class="c1"># Project 3D miss vector into the 2D plane</span>
+    <span class="n">r_p</span> <span class="o">=</span> <span class="n">R</span> <span class="o">@</span> <span class="n">miss_vector_km</span>
+    
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">cond</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">cond</span><span class="p">(</span><span class="n">C_p</span><span class="p">))</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">np</span><span class="o">.</span><span class="n">isfinite</span><span class="p">(</span><span class="n">cond</span><span class="p">)</span> <span class="ow">or</span> <span class="n">cond</span> <span class="o">&gt;</span> <span class="mf">1e12</span><span class="p">:</span>
+            <span class="n">inv_C_p</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">pinv</span><span class="p">(</span><span class="n">C_p</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">inv_C_p</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">inv</span><span class="p">(</span><span class="n">C_p</span><span class="p">)</span>
+        <span class="n">det_C_p</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">det</span><span class="p">(</span><span class="n">C_p</span><span class="p">)</span>
+    <span class="k">except</span> <span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">LinAlgError</span> <span class="k">as</span> <span class="n">_lae</span><span class="p">:</span>
+        <span class="kn">import</span> <span class="nn">logging</span>
+        <span class="kn">from</span> <span class="nn">astra</span> <span class="kn">import</span> <span class="n">config</span>
+        <span class="n">_cov_log</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="vm">__name__</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">config</span><span class="o">.</span><span class="n">ASTRA_STRICT_MODE</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="s2">&quot;[ASTRA STRICT] Degenerate 2D encounter covariance matrix — Pc cannot be &quot;</span>
+                <span class="s2">&quot;computed reliably. This indicates zero uncertainty in one encounter-plane &quot;</span>
+                <span class="sa">f</span><span class="s2">&quot;axis (singular C_p). Inspect covariance source quality. (</span><span class="si">{</span><span class="n">_lae</span><span class="si">}</span><span class="s2">)&quot;</span>
+            <span class="p">)</span> <span class="kn">from</span> <span class="nn">_lae</span>
+        <span class="n">_cov_log</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span>
+            <span class="s2">&quot;Singular 2D encounter covariance (det ≈ 0) — Pc returned as 0.0. &quot;</span>
+            <span class="s2">&quot;This may indicate a deterministic trajectory or zero-uncertainty axis. &quot;</span>
+            <span class="s2">&quot;Do NOT interpret 0.0 as a safe miss — verify covariance data quality.&quot;</span>
+        <span class="p">)</span>
+        <span class="k">return</span> <span class="mf">0.0</span>
+
+    <span class="k">if</span> <span class="n">det_C_p</span> <span class="o">&lt;=</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="kn">import</span> <span class="nn">logging</span>
+        <span class="kn">from</span> <span class="nn">astra</span> <span class="kn">import</span> <span class="n">config</span>
+        <span class="n">_cov_log</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="vm">__name__</span><span class="p">)</span>
+        <span class="n">_cov_log</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;Non-positive det(C_p)=</span><span class="si">{</span><span class="n">det_C_p</span><span class="si">:</span><span class="s2">.3e</span><span class="si">}</span><span class="s2"> in encounter plane — Pc returned as 0.0. &quot;</span>
+            <span class="s2">&quot;Verify that the combined covariance matrix is positive semi-definite.&quot;</span>
+        <span class="p">)</span>
+        <span class="k">return</span> <span class="mf">0.0</span>
+        
+    <span class="c1"># Mahalanobis distance squared (u^2)</span>
+    <span class="n">mahalanobis_sq</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">r_p</span><span class="o">.</span><span class="n">T</span> <span class="o">@</span> <span class="n">inv_C_p</span> <span class="o">@</span> <span class="n">r_p</span><span class="p">)</span>
+
+    <span class="c1"># Foster/Chan assumes short, nearly rectilinear encounters.</span>
+    <span class="c1"># For co-orbital (very slow) encounters with mahalanobis_sq &lt; 4.0</span>
+    <span class="c1"># (within the 2-sigma error ellipse), Chan&#39;s formula under-estimates Pc.</span>
+    <span class="c1"># Attempt MC escalation only when full 6×6 covariances are provided.</span>
+    <span class="k">if</span> <span class="n">mahalanobis_sq</span> <span class="o">&lt;</span> <span class="mf">4.0</span><span class="p">:</span>
+        <span class="kn">import</span> <span class="nn">logging</span>
+        <span class="kn">from</span> <span class="nn">astra</span> <span class="kn">import</span> <span class="n">config</span>
+        <span class="n">_m5_logger</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="vm">__name__</span><span class="p">)</span>
+        <span class="c1"># Only escalate to MC when full 6×6 state covariances are available</span>
+        <span class="k">if</span> <span class="n">cov_a</span><span class="o">.</span><span class="n">shape</span> <span class="o">==</span> <span class="p">(</span><span class="mi">6</span><span class="p">,</span> <span class="mi">6</span><span class="p">)</span> <span class="ow">and</span> <span class="n">cov_b</span><span class="o">.</span><span class="n">shape</span> <span class="o">==</span> <span class="p">(</span><span class="mi">6</span><span class="p">,</span> <span class="mi">6</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">config</span><span class="o">.</span><span class="n">ASTRA_STRICT_MODE</span><span class="p">:</span>
+                <span class="n">_m5_logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span>
+                    <span class="s2">&quot;Foster/Chan Pc: mahalanobis_sq=</span><span class="si">%.3f</span><span class="s2"> &lt; 4.0 (co-orbital regime). &quot;</span>
+                    <span class="s2">&quot;Escalating to Exact Monte Carlo integration for accurate Pc.&quot;</span><span class="p">,</span>
+                    <span class="n">mahalanobis_sq</span>
+                <span class="p">)</span>
+            <span class="k">return</span> <span class="n">compute_collision_probability_mc</span><span class="p">(</span>
+                <span class="n">miss_vector_km</span><span class="o">=</span><span class="n">miss_vector_km</span><span class="p">,</span>
+                <span class="n">rel_vel_km_s</span><span class="o">=</span><span class="n">rel_vel_km_s</span><span class="p">,</span>
+                <span class="n">cov_a</span><span class="o">=</span><span class="n">cov_a</span><span class="p">,</span>
+                <span class="n">cov_b</span><span class="o">=</span><span class="n">cov_b</span><span class="p">,</span>
+                <span class="n">radius_a_km</span><span class="o">=</span><span class="n">radius_a_km</span><span class="p">,</span>
+                <span class="n">radius_b_km</span><span class="o">=</span><span class="n">radius_b_km</span><span class="p">,</span>
+                <span class="n">n_samples</span><span class="o">=</span><span class="mi">100_000</span><span class="p">,</span>
+            <span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="c1"># 3×3 positional-only matrices supplied — MC cannot run (needs 6×6).</span>
+            <span class="c1"># Very close encounters (Mahalanobis &lt; 1): Chan&#39;s point</span>
+            <span class="c1"># approximation can underestimate Pc by 30-40%.  Use the exact</span>
+            <span class="c1"># 2D Gaussian integral via scipy.integrate.dblquad.</span>
+            <span class="k">if</span> <span class="n">mahalanobis_sq</span> <span class="o">&lt;</span> <span class="mf">1.0</span><span class="p">:</span>
+                <span class="n">_m5_logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span>
+                    <span class="s2">&quot;Near-hit encounter (mahalanobis_sq=</span><span class="si">%.3f</span><span class="s2"> &lt; 1.0) with 3×3 covariances: &quot;</span>
+                    <span class="s2">&quot;using exact scipy.integrate.dblquad. &quot;</span>
+                    <span class="s2">&quot;Supply 6×6 CDM covariances to use Monte Carlo instead.&quot;</span><span class="p">,</span>
+                    <span class="n">mahalanobis_sq</span><span class="p">,</span>
+                <span class="p">)</span>
+                <span class="k">return</span> <span class="n">_exact_pc_2d_integral</span><span class="p">(</span><span class="n">r_p</span><span class="p">,</span> <span class="n">inv_C_p</span><span class="p">,</span> <span class="n">det_C_p</span><span class="p">,</span> <span class="n">combined_radius_km</span><span class="p">)</span>
+            <span class="c1"># mahalanobis_sq in [1.0, 4.0) with 3×3 — Chan/Foster is adequate;</span>
+            <span class="c1"># emit a warning so the caller can decide whether to provide CDM data.</span>
+            <span class="n">_m5_logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span>
+                <span class="s2">&quot;co-orbital encounter (mahalanobis_sq=</span><span class="si">%.3f</span><span class="s2">) detected but only 3×3 &quot;</span>
+                <span class="s2">&quot;covariances available — Foster/Chan formula applied (may under-estimate Pc). &quot;</span>
+                <span class="s2">&quot;Supply 6×6 state covariances from CDM for MC accuracy.&quot;</span><span class="p">,</span>
+                <span class="n">mahalanobis_sq</span>
+            <span class="p">)</span>
+
+    <span class="c1"># Area of collision cross-section</span>
+    <span class="n">area</span> <span class="o">=</span> <span class="n">math</span><span class="o">.</span><span class="n">pi</span> <span class="o">*</span> <span class="p">(</span><span class="n">combined_radius_km</span> <span class="o">**</span> <span class="mi">2</span><span class="p">)</span>
+    
+    <span class="c1"># 2D Gaussian Density Integration Approximation (Chan&#39;s formulation)</span>
+    <span class="n">p_c</span> <span class="o">=</span> <span class="n">math</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="o">-</span><span class="mf">0.5</span> <span class="o">*</span> <span class="n">mahalanobis_sq</span><span class="p">)</span> <span class="o">*</span> <span class="n">area</span> <span class="o">/</span> <span class="p">(</span><span class="mf">2.0</span> <span class="o">*</span> <span class="n">math</span><span class="o">.</span><span class="n">pi</span> <span class="o">*</span> <span class="n">math</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">det_C_p</span><span class="p">))</span>
+    
+    <span class="k">return</span> <span class="nb">float</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">clip</span><span class="p">(</span><span class="n">p_c</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="estimate_covariance">
+<a class="viewcode-back" href="../../apidoc/astra.covariance.html#astra.covariance.estimate_covariance">[docs]</a>
+<span class="k">def</span> <span class="nf">estimate_covariance</span><span class="p">(</span><span class="n">time_since_epoch_days</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">f107_flux</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">150.0</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Generates an estimated positional covariance matrix (3x3) in RTN frame.</span>
+<span class="sd">    </span>
+<span class="sd">    Models realistic anisotropic TLE degradation based on Vallado &amp; Alfano (2014):</span>
+<span class="sd">    - Radial (R): grows quadratically with time (gravity model uncertainty)</span>
+<span class="sd">    - In-track (T): grows cubically with time (drag uncertainty dominates)</span>
+<span class="sd">    - Cross-track (N): grows linearly with time (inclination uncertainty)</span>
+<span class="sd">    </span>
+<span class="sd">    The returned matrix is diagonal in RTN. For full accuracy, this should be</span>
+<span class="sd">    rotated to the ECI/TEME frame using the satellite&#39;s orbital state, but for</span>
+<span class="sd">    encounter-plane projection this diagonal approximation produces physically</span>
+<span class="sd">    meaningful Pc values.</span>
+
+<span class="sd">    .. warning::</span>
+<span class="sd">        In ``ASTRA_STRICT_MODE=True`` this function raises ``ValueError``.</span>
+<span class="sd">        Collision probability pipelines require real Orbit Determination</span>
+<span class="sd">        covariances, not heuristic estimates.</span>
+<span class="sd">    </span>
+<span class="sd">    Args:</span>
+<span class="sd">        time_since_epoch_days: Days elapsed since TLE epoch.</span>
+<span class="sd">        f107_flux: Solar F10.7 index for drag scaling.</span>
+<span class="sd">        </span>
+<span class="sd">    Returns:</span>
+<span class="sd">        np.ndarray: (3, 3) diagonal covariance matrix in km^2.</span>
+
+<span class="sd">    Raises:</span>
+<span class="sd">        ValueError: In STRICT_MODE — real OD covariance data must be supplied.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">from</span> <span class="nn">astra</span> <span class="kn">import</span> <span class="n">config</span>
+    <span class="k">if</span> <span class="n">config</span><span class="o">.</span><span class="n">ASTRA_STRICT_MODE</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+            <span class="s2">&quot;[ASTRA STRICT] estimate_covariance() is disabled in strict mode. &quot;</span>
+            <span class="s2">&quot;Collision probability calculations require real Orbit Determination &quot;</span>
+            <span class="s2">&quot;covariance matrices from CDM data or propagate_covariance_stm(). &quot;</span>
+            <span class="s2">&quot;Set ASTRA_STRICT_MODE=False to allow heuristic fallbacks.&quot;</span>
+        <span class="p">)</span>
+
+    <span class="kn">import</span> <span class="nn">logging</span>
+    <span class="n">_cov_logger</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="vm">__name__</span><span class="p">)</span>
+    <span class="n">_cov_logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span>
+        <span class="s2">&quot;estimate_covariance() is generating a SYNTHETIC covariance matrix. &quot;</span>
+        <span class="s2">&quot;Collision Probability (Pc) outputs are NOT statistically valid — &quot;</span>
+        <span class="s2">&quot;supply a real OD covariance for mission-critical analysis.&quot;</span>
+    <span class="p">)</span>
+
+    <span class="n">days</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="mf">0.1</span><span class="p">,</span> <span class="nb">abs</span><span class="p">(</span><span class="n">time_since_epoch_days</span><span class="p">))</span>
+    <span class="n">drag_scale</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="mf">0.1</span><span class="p">,</span> <span class="n">f107_flux</span> <span class="o">/</span> <span class="mf">150.0</span><span class="p">)</span>
+
+    <span class="n">sigma_r_km</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="mf">0.05</span> <span class="o">+</span> <span class="mf">0.5</span> <span class="o">*</span> <span class="n">days</span><span class="o">**</span><span class="mi">2</span><span class="p">,</span> <span class="mf">50.0</span><span class="p">)</span>
+    <span class="n">sigma_t_km</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="mf">0.1</span> <span class="o">+</span> <span class="p">(</span><span class="mf">2.0</span> <span class="o">*</span> <span class="n">drag_scale</span><span class="p">)</span> <span class="o">*</span> <span class="n">days</span><span class="o">**</span><span class="mi">3</span><span class="p">,</span> <span class="mf">100.0</span><span class="p">)</span>
+    <span class="n">sigma_n_km</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="mf">0.05</span> <span class="o">+</span> <span class="mf">0.1</span> <span class="o">*</span> <span class="n">days</span><span class="p">,</span> <span class="mf">50.0</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">diag</span><span class="p">([</span><span class="n">sigma_r_km</span><span class="o">**</span><span class="mi">2</span><span class="p">,</span> <span class="n">sigma_t_km</span><span class="o">**</span><span class="mi">2</span><span class="p">,</span> <span class="n">sigma_n_km</span><span class="o">**</span><span class="mi">2</span><span class="p">])</span></div>
+
+
+
+<div class="viewcode-block" id="compute_collision_probability_mc">
+<a class="viewcode-back" href="../../apidoc/astra.covariance.html#astra.covariance.compute_collision_probability_mc">[docs]</a>
+<span class="k">def</span> <span class="nf">compute_collision_probability_mc</span><span class="p">(</span>
+    <span class="n">miss_vector_km</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>
+    <span class="n">rel_vel_km_s</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>
+    <span class="n">cov_a</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>
+    <span class="n">cov_b</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>
+    <span class="n">radius_a_km</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.005</span><span class="p">,</span>
+    <span class="n">radius_b_km</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.005</span><span class="p">,</span>
+    <span class="n">n_samples</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">100_000</span><span class="p">,</span>
+    <span class="n">seed</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Monte Carlo Collision Probability for long-duration/co-orbital encounters.</span>
+
+<span class="sd">    Unlike the analytical Foster/Chan method (which assumes rectilinear motion),</span>
+<span class="sd">    this Monte Carlo approach works for arbitrary encounter geometries including</span>
+<span class="sd">    co-orbital (Starlink vs Starlink) and slow planetary-approach trajectories.</span>
+
+<span class="sd">    The internal minimum-distance model is linear in relative velocity per</span>
+<span class="sd">    sample. For very slow co-orbital encounters (relative speed ≲ 10 m/s) the</span>
+<span class="sd">    sampled geometry can underestimate curvature; validate with higher-fidelity</span>
+<span class="sd">    ephemeris or shorter screening steps.</span>
+
+<span class="sd">    Draws samples from the combined 3D Gaussian covariance and counts the</span>
+<span class="sd">    fraction falling within the combined hard-body collision sphere.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        miss_vector_km: (3,) relative position at TCA (km).</span>
+<span class="sd">        rel_vel_km_s: (3,) relative velocity at TCA (km/s).</span>
+<span class="sd">        cov_a: (6,6) Object A full covariance (km², km²/s² etc).</span>
+<span class="sd">        cov_b: (6,6) Object B full covariance (km², km²/s² etc).</span>
+<span class="sd">        radius_a_km: Object A hard-body radius (km).</span>
+<span class="sd">        radius_b_km: Object B hard-body radius (km).</span>
+<span class="sd">        n_samples: Number of Monte Carlo samples (default 100,000).</span>
+<span class="sd">        seed: Optional RNG seed for reproducibility.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        Probability of collision (float) bounded [0.0, 1.0].</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">cov_a</span><span class="o">.</span><span class="n">shape</span> <span class="o">==</span> <span class="p">(</span><span class="mi">3</span><span class="p">,</span> <span class="mi">3</span><span class="p">)</span> <span class="ow">or</span> <span class="n">cov_b</span><span class="o">.</span><span class="n">shape</span> <span class="o">==</span> <span class="p">(</span><span class="mi">3</span><span class="p">,</span> <span class="mi">3</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Monte-Carlo (6DOF) collision probability requires a 6x6 covariance matrix. Legacy 3x3 matrices are unsupported here; fallback to 2D Foster-Chan.&quot;</span><span class="p">)</span>
+    <span class="n">combined_radius_km</span> <span class="o">=</span> <span class="n">radius_a_km</span> <span class="o">+</span> <span class="n">radius_b_km</span>
+    <span class="n">combined_cov</span> <span class="o">=</span> <span class="n">cov_a</span> <span class="o">+</span> <span class="n">cov_b</span>
+
+    <span class="k">if</span> <span class="n">np</span><span class="o">.</span><span class="n">all</span><span class="p">(</span><span class="n">combined_cov</span> <span class="o">==</span> <span class="mi">0</span><span class="p">):</span>
+        <span class="k">return</span> <span class="mf">1.0</span> <span class="k">if</span> <span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">norm</span><span class="p">(</span><span class="n">miss_vector_km</span><span class="p">)</span> <span class="o">&lt;=</span> <span class="n">combined_radius_km</span> <span class="k">else</span> <span class="mf">0.0</span>
+
+    <span class="n">rng</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">default_rng</span><span class="p">(</span><span class="n">seed</span><span class="p">)</span>
+
+    <span class="n">sym</span> <span class="o">=</span> <span class="mf">0.5</span> <span class="o">*</span> <span class="p">(</span><span class="n">combined_cov</span> <span class="o">+</span> <span class="n">combined_cov</span><span class="o">.</span><span class="n">T</span><span class="p">)</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">L</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">cholesky</span><span class="p">(</span><span class="n">sym</span><span class="p">)</span>
+    <span class="k">except</span> <span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">LinAlgError</span><span class="p">:</span>
+        <span class="n">eigvals</span><span class="p">,</span> <span class="n">eigvecs</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">eigh</span><span class="p">(</span><span class="n">sym</span><span class="p">)</span>
+        <span class="n">eigvals</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">clip</span><span class="p">(</span><span class="n">eigvals</span><span class="p">,</span> <span class="mf">1e-12</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+        <span class="n">combined_cov</span> <span class="o">=</span> <span class="n">eigvecs</span> <span class="o">@</span> <span class="n">np</span><span class="o">.</span><span class="n">diag</span><span class="p">(</span><span class="n">eigvals</span><span class="p">)</span> <span class="o">@</span> <span class="n">eigvecs</span><span class="o">.</span><span class="n">T</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">L</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">cholesky</span><span class="p">(</span><span class="n">combined_cov</span><span class="p">)</span>
+        <span class="k">except</span> <span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">LinAlgError</span><span class="p">:</span>
+            <span class="k">return</span> <span class="mf">1.0</span> <span class="k">if</span> <span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">norm</span><span class="p">(</span><span class="n">miss_vector_km</span><span class="p">)</span> <span class="o">&lt;=</span> <span class="n">combined_radius_km</span> <span class="k">else</span> <span class="mf">0.0</span>
+
+    <span class="c1"># Sample 6D error states (n_samples, 6)</span>
+    <span class="n">samples</span> <span class="o">=</span> <span class="n">rng</span><span class="o">.</span><span class="n">standard_normal</span><span class="p">((</span><span class="n">n_samples</span><span class="p">,</span> <span class="mi">6</span><span class="p">))</span> <span class="o">@</span> <span class="n">L</span><span class="o">.</span><span class="n">T</span>
+    
+    <span class="c1"># 6D Relative Trajectories</span>
+    <span class="n">r_samples</span> <span class="o">=</span> <span class="n">miss_vector_km</span> <span class="o">+</span> <span class="n">samples</span><span class="p">[:,</span> <span class="p">:</span><span class="mi">3</span><span class="p">]</span>
+    <span class="n">v_samples</span> <span class="o">=</span> <span class="n">rel_vel_km_s</span> <span class="o">+</span> <span class="n">samples</span><span class="p">[:,</span> <span class="mi">3</span><span class="p">:]</span>
+    
+    <span class="c1"># Calculate geometric minimum distance along the linear relative path for EACH sample</span>
+    <span class="c1"># t_min = -(r · v) / (v · v)</span>
+    <span class="n">v_dot_v</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">v_samples</span> <span class="o">*</span> <span class="n">v_samples</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+    <span class="c1"># Avoid division by zero for stationary samples</span>
+    <span class="n">v_dot_v</span><span class="p">[</span><span class="n">v_dot_v</span> <span class="o">&lt;</span> <span class="mf">1e-16</span><span class="p">]</span> <span class="o">=</span> <span class="mf">1e-16</span>
+    
+    <span class="n">t_min</span> <span class="o">=</span> <span class="o">-</span><span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">r_samples</span> <span class="o">*</span> <span class="n">v_samples</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span> <span class="o">/</span> <span class="n">v_dot_v</span>
+    
+    <span class="c1"># Minimum distance vectors</span>
+    <span class="n">r_min_vec</span> <span class="o">=</span> <span class="n">r_samples</span> <span class="o">+</span> <span class="n">v_samples</span> <span class="o">*</span> <span class="n">t_min</span><span class="p">[:,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">]</span>
+    <span class="n">d_min</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">norm</span><span class="p">(</span><span class="n">r_min_vec</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+    
+    <span class="n">hits</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">d_min</span> <span class="o">&lt;=</span> <span class="n">combined_radius_km</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="nb">float</span><span class="p">(</span><span class="n">hits</span> <span class="o">/</span> <span class="n">n_samples</span><span class="p">)</span></div>
+
+
+
+<span class="k">try</span><span class="p">:</span>
+    <span class="kn">from</span> <span class="nn">numba</span> <span class="kn">import</span> <span class="n">njit</span>
+    <span class="n">_NUMBA_AVAILABLE</span> <span class="o">=</span> <span class="kc">True</span>
+<span class="k">except</span> <span class="ne">ImportError</span><span class="p">:</span>
+    <span class="n">_NUMBA_AVAILABLE</span> <span class="o">=</span> <span class="kc">False</span>
+    <span class="k">def</span> <span class="nf">njit</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;No-op decorator when Numba is unavailable.&quot;&quot;&quot;</span>
+        <span class="k">def</span> <span class="nf">decorator</span><span class="p">(</span><span class="n">f</span><span class="p">):</span>
+            <span class="k">return</span> <span class="n">f</span>
+        <span class="k">return</span> <span class="n">decorator</span> <span class="k">if</span> <span class="p">(</span><span class="n">args</span> <span class="ow">and</span> <span class="nb">callable</span><span class="p">(</span><span class="n">args</span><span class="p">[</span><span class="mi">0</span><span class="p">]))</span> <span class="k">else</span> <span class="n">decorator</span>
+    <span class="kn">import</span> <span class="nn">logging</span> <span class="k">as</span> <span class="nn">_logging</span>
+    <span class="n">_logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="vm">__name__</span><span class="p">)</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span>
+        <span class="s2">&quot;Numba not installed — STM covariance kernels will run in pure-Python mode.&quot;</span>
+    <span class="p">)</span>
+<span class="kn">from</span> <span class="nn">astra.constants</span> <span class="kn">import</span> <span class="n">J3</span><span class="p">,</span> <span class="n">J4</span>
+
+<span class="nd">@njit</span><span class="p">(</span><span class="n">fastmath</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">cache</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="k">def</span> <span class="nf">_acceleration_njit</span><span class="p">(</span><span class="n">r</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">v</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">Bc</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">rho_ref</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">H_km</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">:</span>
+    <span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">z</span> <span class="o">=</span> <span class="n">r</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">r</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="n">r</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span>
+    <span class="n">r_mag</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">norm</span><span class="p">(</span><span class="n">r</span><span class="p">)</span>
+    <span class="n">r2</span> <span class="o">=</span> <span class="n">r_mag</span><span class="o">**</span><span class="mi">2</span>
+    <span class="n">r3</span> <span class="o">=</span> <span class="n">r2</span> <span class="o">*</span> <span class="n">r_mag</span>
+    
+    <span class="c1"># --- Two-body gravity ---</span>
+    <span class="n">a_total</span> <span class="o">=</span> <span class="o">-</span><span class="n">EARTH_MU_KM3_S2</span> <span class="o">*</span> <span class="n">r</span> <span class="o">/</span> <span class="n">r3</span>
+    
+    <span class="c1"># --- Earth Oblateness (J2, J3, J4) ---</span>
+    <span class="n">z2</span> <span class="o">=</span> <span class="n">z</span><span class="o">**</span><span class="mi">2</span>
+    <span class="n">r5</span> <span class="o">=</span> <span class="n">r3</span> <span class="o">*</span> <span class="n">r2</span>
+    <span class="n">r7</span> <span class="o">=</span> <span class="n">r5</span> <span class="o">*</span> <span class="n">r2</span>
+    <span class="n">r9</span> <span class="o">=</span> <span class="n">r7</span> <span class="o">*</span> <span class="n">r2</span>
+    <span class="n">Re</span> <span class="o">=</span> <span class="n">EARTH_EQUATORIAL_RADIUS_KM</span>
+    <span class="n">mu</span> <span class="o">=</span> <span class="n">EARTH_MU_KM3_S2</span>
+
+    <span class="n">fJ2</span> <span class="o">=</span> <span class="mf">1.5</span> <span class="o">*</span> <span class="n">J2</span> <span class="o">*</span> <span class="n">mu</span> <span class="o">*</span> <span class="n">Re</span><span class="o">**</span><span class="mi">2</span> <span class="o">/</span> <span class="n">r5</span>
+    <span class="n">a_total</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">+=</span> <span class="n">fJ2</span> <span class="o">*</span> <span class="n">x</span> <span class="o">*</span> <span class="p">(</span><span class="mf">5.0</span> <span class="o">*</span> <span class="n">z2</span> <span class="o">/</span> <span class="n">r2</span> <span class="o">-</span> <span class="mf">1.0</span><span class="p">)</span>
+    <span class="n">a_total</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">+=</span> <span class="n">fJ2</span> <span class="o">*</span> <span class="n">y</span> <span class="o">*</span> <span class="p">(</span><span class="mf">5.0</span> <span class="o">*</span> <span class="n">z2</span> <span class="o">/</span> <span class="n">r2</span> <span class="o">-</span> <span class="mf">1.0</span><span class="p">)</span>
+    <span class="n">a_total</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span> <span class="o">+=</span> <span class="n">fJ2</span> <span class="o">*</span> <span class="n">z</span> <span class="o">*</span> <span class="p">(</span><span class="mf">5.0</span> <span class="o">*</span> <span class="n">z2</span> <span class="o">/</span> <span class="n">r2</span> <span class="o">-</span> <span class="mf">3.0</span><span class="p">)</span>
+
+    <span class="n">fJ3</span> <span class="o">=</span> <span class="mf">0.5</span> <span class="o">*</span> <span class="n">J3</span> <span class="o">*</span> <span class="n">mu</span> <span class="o">*</span> <span class="n">Re</span><span class="o">**</span><span class="mi">3</span> <span class="o">/</span> <span class="n">r7</span>
+    <span class="n">a_total</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">+=</span> <span class="n">fJ3</span> <span class="o">*</span> <span class="n">x</span> <span class="o">*</span> <span class="p">(</span><span class="mf">35.0</span> <span class="o">*</span> <span class="n">z2</span> <span class="o">*</span> <span class="n">z</span> <span class="o">/</span> <span class="n">r2</span> <span class="o">-</span> <span class="mf">15.0</span> <span class="o">*</span> <span class="n">z</span><span class="p">)</span>
+    <span class="n">a_total</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">+=</span> <span class="n">fJ3</span> <span class="o">*</span> <span class="n">y</span> <span class="o">*</span> <span class="p">(</span><span class="mf">35.0</span> <span class="o">*</span> <span class="n">z2</span> <span class="o">*</span> <span class="n">z</span> <span class="o">/</span> <span class="n">r2</span> <span class="o">-</span> <span class="mf">15.0</span> <span class="o">*</span> <span class="n">z</span><span class="p">)</span>
+    <span class="n">a_total</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span> <span class="o">+=</span> <span class="n">fJ3</span> <span class="o">*</span> <span class="p">(</span><span class="mf">35.0</span> <span class="o">*</span> <span class="n">z2</span> <span class="o">*</span> <span class="n">z2</span> <span class="o">/</span> <span class="n">r2</span> <span class="o">-</span> <span class="mf">30.0</span> <span class="o">*</span> <span class="n">z2</span> <span class="o">+</span> <span class="mf">3.0</span> <span class="o">*</span> <span class="n">r2</span><span class="p">)</span>
+
+    <span class="n">fJ4</span> <span class="o">=</span> <span class="mf">0.625</span> <span class="o">*</span> <span class="n">J4</span> <span class="o">*</span> <span class="n">mu</span> <span class="o">*</span> <span class="n">Re</span><span class="o">**</span><span class="mi">4</span> <span class="o">/</span> <span class="n">r9</span>
+    <span class="n">z4</span> <span class="o">=</span> <span class="n">z2</span> <span class="o">*</span> <span class="n">z2</span>
+    <span class="n">a_total</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">+=</span> <span class="n">fJ4</span> <span class="o">*</span> <span class="n">x</span> <span class="o">*</span> <span class="p">(</span><span class="mf">63.0</span> <span class="o">*</span> <span class="n">z4</span> <span class="o">/</span> <span class="n">r2</span> <span class="o">-</span> <span class="mf">42.0</span> <span class="o">*</span> <span class="n">z2</span> <span class="o">+</span> <span class="mf">3.0</span> <span class="o">*</span> <span class="n">r2</span><span class="p">)</span>
+    <span class="n">a_total</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">+=</span> <span class="n">fJ4</span> <span class="o">*</span> <span class="n">y</span> <span class="o">*</span> <span class="p">(</span><span class="mf">63.0</span> <span class="o">*</span> <span class="n">z4</span> <span class="o">/</span> <span class="n">r2</span> <span class="o">-</span> <span class="mf">42.0</span> <span class="o">*</span> <span class="n">z2</span> <span class="o">+</span> <span class="mf">3.0</span> <span class="o">*</span> <span class="n">r2</span><span class="p">)</span>
+    <span class="n">a_total</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span> <span class="o">+=</span> <span class="n">fJ4</span> <span class="o">*</span> <span class="n">z</span> <span class="o">*</span> <span class="p">(</span><span class="mf">63.0</span> <span class="o">*</span> <span class="n">z4</span> <span class="o">/</span> <span class="n">r2</span> <span class="o">-</span> <span class="mf">70.0</span> <span class="o">*</span> <span class="n">z2</span> <span class="o">+</span> <span class="mf">15.0</span> <span class="o">*</span> <span class="n">r2</span><span class="p">)</span>
+
+    <span class="c1"># --- Atmospheric Drag (LEO Only) ---</span>
+    <span class="n">alt</span> <span class="o">=</span> <span class="n">r_mag</span> <span class="o">-</span> <span class="n">Re</span>
+    <span class="k">if</span> <span class="n">alt</span> <span class="o">&lt;</span> <span class="mf">1500.0</span> <span class="ow">and</span> <span class="n">Bc</span> <span class="o">&gt;</span> <span class="mf">0.0</span><span class="p">:</span>
+        <span class="c1"># Standard exponential model: rho = rho_ref * exp(-(alt - h0)/H)</span>
+        <span class="c1"># where h0 is 400 km matching the empirical reference.</span>
+        <span class="n">rho</span> <span class="o">=</span> <span class="n">rho_ref</span> <span class="o">*</span> <span class="n">math</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="o">-</span><span class="p">(</span><span class="n">alt</span> <span class="o">-</span> <span class="mf">400.0</span><span class="p">)</span> <span class="o">/</span> <span class="n">H_km</span><span class="p">)</span>
+        <span class="n">v_mag</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">norm</span><span class="p">(</span><span class="n">v</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">v_mag</span> <span class="o">&gt;</span> <span class="mf">1e-6</span><span class="p">:</span>
+            <span class="c1"># 1e-6 (m^2 to km^2) * 1e9 (kg/m^3 to kg/km^3) = 1e3</span>
+            <span class="c1"># Bc is m^2/kg.</span>
+            <span class="n">a_drag</span> <span class="o">=</span> <span class="o">-</span><span class="mf">0.5</span> <span class="o">*</span> <span class="n">rho</span> <span class="o">*</span> <span class="mf">1e3</span> <span class="o">*</span> <span class="n">Bc</span> <span class="o">*</span> <span class="n">v_mag</span> <span class="o">*</span> <span class="n">v</span>
+            <span class="n">a_total</span> <span class="o">+=</span> <span class="n">a_drag</span>
+
+    <span class="k">return</span> <span class="n">a_total</span>
+
+<span class="nd">@njit</span><span class="p">(</span><span class="n">fastmath</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">cache</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="k">def</span> <span class="nf">_stm_jacobian_njit</span><span class="p">(</span><span class="n">r</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">v</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">Bc</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">rho_ref</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">H_km</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">:</span>
+    <span class="c1"># Central-difference Jacobian step (km)</span>
+    <span class="n">eps_r</span> <span class="o">=</span> <span class="mf">1e-4</span>
+    <span class="n">eps_v</span> <span class="o">=</span> <span class="mf">1e-4</span>
+    <span class="n">J</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="mi">6</span><span class="p">,</span> <span class="mi">6</span><span class="p">))</span>
+    
+    <span class="c1"># Upper-right: dr/dt = v -&gt; d(dr/dt)/dv = I</span>
+    <span class="n">J</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">3</span><span class="p">]</span> <span class="o">=</span> <span class="mf">1.0</span>
+    <span class="n">J</span><span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">4</span><span class="p">]</span> <span class="o">=</span> <span class="mf">1.0</span>
+    <span class="n">J</span><span class="p">[</span><span class="mi">2</span><span class="p">,</span> <span class="mi">5</span><span class="p">]</span> <span class="o">=</span> <span class="mf">1.0</span>
+    
+    <span class="c1"># Lower-left: da/dr</span>
+    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">3</span><span class="p">):</span>
+        <span class="n">r_plus</span> <span class="o">=</span> <span class="n">r</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+        <span class="n">r_minus</span> <span class="o">=</span> <span class="n">r</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+        <span class="n">r_plus</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">+=</span> <span class="n">eps_r</span>
+        <span class="n">r_minus</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">-=</span> <span class="n">eps_r</span>
+        <span class="n">a_plus</span> <span class="o">=</span> <span class="n">_acceleration_njit</span><span class="p">(</span><span class="n">r_plus</span><span class="p">,</span> <span class="n">v</span><span class="p">,</span> <span class="n">Bc</span><span class="p">,</span> <span class="n">rho_ref</span><span class="p">,</span> <span class="n">H_km</span><span class="p">)</span>
+        <span class="n">a_minus</span> <span class="o">=</span> <span class="n">_acceleration_njit</span><span class="p">(</span><span class="n">r_minus</span><span class="p">,</span> <span class="n">v</span><span class="p">,</span> <span class="n">Bc</span><span class="p">,</span> <span class="n">rho_ref</span><span class="p">,</span> <span class="n">H_km</span><span class="p">)</span>
+        <span class="n">J</span><span class="p">[</span><span class="mi">3</span><span class="p">:,</span> <span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="n">a_plus</span> <span class="o">-</span> <span class="n">a_minus</span><span class="p">)</span> <span class="o">/</span> <span class="p">(</span><span class="mf">2.0</span> <span class="o">*</span> <span class="n">eps_r</span><span class="p">)</span>
+        
+    <span class="c1"># Lower-right: da/dv (mainly for drag)</span>
+    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">3</span><span class="p">):</span>
+        <span class="n">v_plus</span> <span class="o">=</span> <span class="n">v</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+        <span class="n">v_minus</span> <span class="o">=</span> <span class="n">v</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+        <span class="n">v_plus</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">+=</span> <span class="n">eps_v</span>
+        <span class="n">v_minus</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">-=</span> <span class="n">eps_v</span>
+        <span class="n">a_plus</span> <span class="o">=</span> <span class="n">_acceleration_njit</span><span class="p">(</span><span class="n">r</span><span class="p">,</span> <span class="n">v_plus</span><span class="p">,</span> <span class="n">Bc</span><span class="p">,</span> <span class="n">rho_ref</span><span class="p">,</span> <span class="n">H_km</span><span class="p">)</span>
+        <span class="n">a_minus</span> <span class="o">=</span> <span class="n">_acceleration_njit</span><span class="p">(</span><span class="n">r</span><span class="p">,</span> <span class="n">v_minus</span><span class="p">,</span> <span class="n">Bc</span><span class="p">,</span> <span class="n">rho_ref</span><span class="p">,</span> <span class="n">H_km</span><span class="p">)</span>
+        <span class="n">J</span><span class="p">[</span><span class="mi">3</span><span class="p">:,</span> <span class="mi">3</span><span class="o">+</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="n">a_plus</span> <span class="o">-</span> <span class="n">a_minus</span><span class="p">)</span> <span class="o">/</span> <span class="p">(</span><span class="mf">2.0</span> <span class="o">*</span> <span class="n">eps_v</span><span class="p">)</span>
+        
+    <span class="k">return</span> <span class="n">J</span>
+
+<span class="nd">@njit</span><span class="p">(</span><span class="n">fastmath</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">cache</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="k">def</span> <span class="nf">_stm_derivatives_njit</span><span class="p">(</span><span class="n">t</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">y</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">Bc</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">rho_ref</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">H_km</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">:</span>
+    <span class="n">r</span> <span class="o">=</span> <span class="n">y</span><span class="p">[:</span><span class="mi">3</span><span class="p">]</span>
+    <span class="n">v</span> <span class="o">=</span> <span class="n">y</span><span class="p">[</span><span class="mi">3</span><span class="p">:</span><span class="mi">6</span><span class="p">]</span>
+    <span class="n">Phi</span> <span class="o">=</span> <span class="n">y</span><span class="p">[</span><span class="mi">6</span><span class="p">:]</span><span class="o">.</span><span class="n">reshape</span><span class="p">((</span><span class="mi">6</span><span class="p">,</span> <span class="mi">6</span><span class="p">))</span>
+    
+    <span class="n">a_total</span> <span class="o">=</span> <span class="n">_acceleration_njit</span><span class="p">(</span><span class="n">r</span><span class="p">,</span> <span class="n">v</span><span class="p">,</span> <span class="n">Bc</span><span class="p">,</span> <span class="n">rho_ref</span><span class="p">,</span> <span class="n">H_km</span><span class="p">)</span>
+    <span class="n">A</span> <span class="o">=</span> <span class="n">_stm_jacobian_njit</span><span class="p">(</span><span class="n">r</span><span class="p">,</span> <span class="n">v</span><span class="p">,</span> <span class="n">Bc</span><span class="p">,</span> <span class="n">rho_ref</span><span class="p">,</span> <span class="n">H_km</span><span class="p">)</span>
+    
+    <span class="n">dPhi</span> <span class="o">=</span> <span class="n">A</span> <span class="o">@</span> <span class="n">Phi</span>
+    
+    <span class="n">dy</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">empty</span><span class="p">(</span><span class="mi">42</span><span class="p">)</span>
+    <span class="n">dy</span><span class="p">[:</span><span class="mi">3</span><span class="p">]</span> <span class="o">=</span> <span class="n">v</span>
+    <span class="n">dy</span><span class="p">[</span><span class="mi">3</span><span class="p">:</span><span class="mi">6</span><span class="p">]</span> <span class="o">=</span> <span class="n">a_total</span>
+    
+    <span class="c1"># Flatten dPhi back to the state vector</span>
+    <span class="n">dy</span><span class="p">[</span><span class="mi">6</span><span class="p">:]</span> <span class="o">=</span> <span class="n">dPhi</span><span class="o">.</span><span class="n">ravel</span><span class="p">()</span>
+        
+    <span class="k">return</span> <span class="n">dy</span>
+
+<div class="viewcode-block" id="propagate_covariance_stm">
+<a class="viewcode-back" href="../../apidoc/astra.covariance.html#astra.covariance.propagate_covariance_stm">[docs]</a>
+<span class="k">def</span> <span class="nf">propagate_covariance_stm</span><span class="p">(</span>
+    <span class="n">t_jd0</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
+    <span class="n">r0_km</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>
+    <span class="n">v0_km_s</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>
+    <span class="n">cov0_6x6</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>
+    <span class="n">duration_s</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
+    <span class="n">drag_config</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">any</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Propagate a full 6x6 covariance matrix using the State Transition Matrix.</span>
+
+<span class="sd">    Uses linearized J2/J3/J4 + exponential drag dynamics to compute the 6x6 STM</span>
+<span class="sd">    via numerical integration, mapping the full 6x6 state uncertainty:</span>
+
+<span class="sd">        C(t) = Φ(t, t₀) · C₀ · Φ(t, t₀)ᵀ</span>
+
+<span class="sd">    The state-transition matrix Φ is computed by integrating the variational </span>
+<span class="sd">    equations along the nominal trajectory. The Jacobian includes:</span>
+<span class="sd">    - Point-mass gravity (μ/r³)</span>
+<span class="sd">    - Zonal harmonics (J2, J3, J4)</span>
+<span class="sd">    - **Atmospheric Drag** partials (∂a/∂v) for LEO satellites.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">y0</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="mi">42</span><span class="p">)</span>
+    <span class="n">y0</span><span class="p">[:</span><span class="mi">3</span><span class="p">]</span> <span class="o">=</span> <span class="n">r0_km</span>
+    <span class="n">y0</span><span class="p">[</span><span class="mi">3</span><span class="p">:</span><span class="mi">6</span><span class="p">]</span> <span class="o">=</span> <span class="n">v0_km_s</span>
+    <span class="n">y0</span><span class="p">[</span><span class="mi">6</span><span class="p">:]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">eye</span><span class="p">(</span><span class="mi">6</span><span class="p">)</span><span class="o">.</span><span class="n">ravel</span><span class="p">()</span>
+
+    <span class="c1"># Capture drag constants for STM Jacobian</span>
+    <span class="n">Bc</span> <span class="o">=</span> <span class="mf">0.0</span>
+    <span class="n">rho_ref</span> <span class="o">=</span> <span class="mf">0.0</span>
+    <span class="n">H_km</span> <span class="o">=</span> <span class="mf">50.0</span>  <span class="c1"># Default scale height (km)</span>
+    
+    <span class="k">if</span> <span class="n">drag_config</span><span class="p">:</span>
+        <span class="n">Bc</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">drag_config</span><span class="o">.</span><span class="n">cd</span> <span class="o">*</span> <span class="n">drag_config</span><span class="o">.</span><span class="n">area_m2</span> <span class="o">/</span> <span class="n">drag_config</span><span class="o">.</span><span class="n">mass_kg</span><span class="p">)</span>
+        <span class="kn">from</span> <span class="nn">astra.constants</span> <span class="kn">import</span> <span class="n">DRAG_REF_DENSITY_KG_M3</span><span class="p">,</span> <span class="n">DRAG_SCALE_HEIGHT_KM</span>
+        <span class="n">rho_ref</span> <span class="o">=</span> <span class="n">DRAG_REF_DENSITY_KG_M3</span>
+        <span class="n">H_km</span> <span class="o">=</span> <span class="n">DRAG_SCALE_HEIGHT_KM</span>
+
+    <span class="n">sol</span> <span class="o">=</span> <span class="n">solve_ivp</span><span class="p">(</span>
+        <span class="n">_stm_derivatives_njit</span><span class="p">,</span>
+        <span class="n">t_span</span><span class="o">=</span><span class="p">(</span><span class="mf">0.0</span><span class="p">,</span> <span class="n">duration_s</span><span class="p">),</span>
+        <span class="n">y0</span><span class="o">=</span><span class="n">y0</span><span class="p">,</span>
+        <span class="n">args</span><span class="o">=</span><span class="p">(</span><span class="n">Bc</span><span class="p">,</span> <span class="n">rho_ref</span><span class="p">,</span> <span class="n">H_km</span><span class="p">),</span>
+        <span class="n">method</span><span class="o">=</span><span class="s1">&#39;DOP853&#39;</span><span class="p">,</span>
+        <span class="n">rtol</span><span class="o">=</span><span class="mf">1e-10</span><span class="p">,</span>
+        <span class="n">atol</span><span class="o">=</span><span class="mf">1e-12</span><span class="p">,</span>
+    <span class="p">)</span>
+
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">sol</span><span class="o">.</span><span class="n">success</span><span class="p">:</span>
+        <span class="c1"># STRICT_MODE: do not silently degrade Pc inputs</span>
+        <span class="kn">from</span> <span class="nn">astra</span> <span class="kn">import</span> <span class="n">config</span>
+        <span class="k">if</span> <span class="n">config</span><span class="o">.</span><span class="n">ASTRA_STRICT_MODE</span><span class="p">:</span>
+            <span class="kn">from</span> <span class="nn">astra.errors</span> <span class="kn">import</span> <span class="n">PropagationError</span>
+            <span class="k">raise</span> <span class="n">PropagationError</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;[ASTRA STRICT] STM covariance propagation failed: </span><span class="si">{</span><span class="n">sol</span><span class="o">.</span><span class="n">message</span><span class="si">}</span><span class="s2">. &quot;</span>
+                <span class="s2">&quot;Returning initial covariance would silently degrade accuracy. &quot;</span>
+                <span class="s2">&quot;Set ASTRA_STRICT_MODE=False to allow fallback to initial covariance.&quot;</span><span class="p">,</span>
+                <span class="n">norad_id</span><span class="o">=</span><span class="s2">&quot;COVARIANCE_STM&quot;</span>
+            <span class="p">)</span>
+        <span class="kn">import</span> <span class="nn">logging</span>
+        <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="vm">__name__</span><span class="p">)</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;STM integration failed (</span><span class="si">{</span><span class="n">sol</span><span class="o">.</span><span class="n">message</span><span class="si">}</span><span class="s2">) — returning initial covariance as conservative fallback.&quot;</span>
+        <span class="p">)</span>
+        <span class="k">return</span> <span class="n">cov0_6x6</span>  <span class="c1"># Fallback to initial</span>
+
+    <span class="n">Phi_final</span> <span class="o">=</span> <span class="n">sol</span><span class="o">.</span><span class="n">y</span><span class="p">[</span><span class="mi">6</span><span class="p">:,</span> <span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="mi">6</span><span class="p">,</span> <span class="mi">6</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">Phi_final</span> <span class="o">@</span> <span class="n">cov0_6x6</span> <span class="o">@</span> <span class="n">Phi_final</span><span class="o">.</span><span class="n">T</span></div>
+
+</pre></div>
+        </article>
+      </div>
+      <footer>
+        
+        <div class="related-pages">
+          
+          
+        </div>
+        <div class="bottom-of-page">
+          <div class="left-details">
+            <div class="copyright">
+                Copyright &#169; 2026, Ishan Tare
+            </div>
+            Made with <a href="https://www.sphinx-doc.org/">Sphinx</a> and <a class="muted-link" href="https://pradyunsg.me">@pradyunsg</a>'s
+            
+            <a href="https://github.com/pradyunsg/furo">Furo</a>
+            
+          </div>
+          <div class="right-details">
+            
+          </div>
+        </div>
+        
+      </footer>
+    </div>
+    <aside class="toc-drawer no-toc">
+      
+      
+      
+    </aside>
+  </div>
+</div><script src="../../_static/documentation_options.js?v=3eb8911e"></script>
+    <script src="../../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <script src="../../_static/scripts/furo.js?v=46bd48cc"></script>
+    <script src="../../_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="../../_static/copybutton.js?v=f281be69"></script>
+    </body>
+</html>

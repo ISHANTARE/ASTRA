@@ -1,0 +1,34 @@
+ASTRA-Core documentation
+========================
+
+Welcome to **astra-core-engine** (Autonomous Space Traffic Risk Analyzer): a
+Python library for orbit propagation, conjunction screening, collision
+probability, catalog ingestion (CelesTrak, Space-Track), and pass prediction—
+with native support for both **TLE** and **CCSDS OMM**.
+
+* **Install:** :doc:`installation`
+* **First steps:** :doc:`quickstart`
+* **What the models assume:** :doc:`limitations`
+* **Deeper background:** **KNOWMORE.md** in the repository root (TLE, SGP4, P_c, frames)
+
+**API reference** is regenerated on every docs build (``sphinx-apidoc`` stubs under
+``docs/apidoc/``, then ``sphinx-build``).
+
+.. toctree::
+   :maxdepth: 3
+   :caption: User guide
+
+   installation
+   limitations
+   quickstart
+   theory
+   architecture
+   maneuvers
+   api
+
+Indices and tables
+==================
+
+* :ref:`genindex`
+* :ref:`modindex`
+* :ref:`search`

@@ -1,0 +1,7 @@
+astra.cdm module
+================
+
+.. automodule:: astra.cdm
+   :members:
+   :show-inheritance:
+   :undoc-members:
