@@ -77,10 +77,11 @@ def _make_debris(perigee=400, apogee=420, inclination=53, eccentricity=0.01):
 class TestSpaceWeatherStrict:
     def test_get_space_weather_raises_in_strict_with_no_data(self, monkeypatch):
         """get_space_weather should raise SpaceWeatherError in STRICT when cache empty."""
-        # Ensure cache is empty
-        from astra import data_pipeline
+        # Ensure cache is empty and Spacebook is disabled
+        from astra import data_pipeline, spacebook
         monkeypatch.setattr(data_pipeline, "_sw_loaded", True)  # prevent download
         monkeypatch.setattr(data_pipeline, "_sw_cache", {})       # empty cache
+        monkeypatch.setattr(spacebook, "SPACEBOOK_ENABLED", False)
 
         with _StrictMode(True):
             with pytest.raises(SpaceWeatherError, match=r"\[ASTRA STRICT\]"):
@@ -88,10 +89,11 @@ class TestSpaceWeatherStrict:
 
     def test_get_space_weather_returns_default_in_relaxed(self, monkeypatch, caplog):
         """get_space_weather should return synthetic default with WARNING in Relaxed."""
-        from astra import data_pipeline
+        from astra import data_pipeline, spacebook
         import logging
         monkeypatch.setattr(data_pipeline, "_sw_loaded", True)
         monkeypatch.setattr(data_pipeline, "_sw_cache", {})
+        monkeypatch.setattr(spacebook, "SPACEBOOK_ENABLED", False)
 
         logger = logging.getLogger("astra.data_pipeline")
         orig_prop = logger.propagate

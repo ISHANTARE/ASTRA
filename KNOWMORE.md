@@ -76,7 +76,25 @@ The fast path uses **Numba** (`fastmath=True`). Tiny numerical differences vs th
 
 ---
 
-## 7. OMM: the modern orbital data standard
+## 7. Data Source Priority Hierarchy
+
+ASTRA-Core implements a fail-safe data hierarchy to ensure the best available observations are used before falling back on models. This hierarchy is controlled by strict mode and environment variables (e.g. `ASTRA_SPACEBOOK_ENABLED="true"`).
+
+1. **Spacebook / COMSPOC (Primary)** — High-fidelity observational data.
+   - *Ephemeris & Uncertainty:* Synthetic Covariance files containing 6x6 observational covariance and precise numerical reference states mapped accurately over time.
+   - *Space Weather:* Live daily observations retrieved from COMSPOC endpoints.
+   - *Orbits:* XP-TLEs with precision parameters.
+
+2. **CelesTrak / Space-Track (Secondary)** — The classic catalog fallback.
+   - *Orbits:* Standard TLEs / OMM elements.
+   - *Space Weather:* CelesTrak SW files downloaded and cached locally.
+
+3. **Synthetic Defaults (Last Resort)** — Empirical models.
+   - *Covariance:* Time-based degradation models applying generic drag/SRP variances (`estimate_covariance()`). NOTE: Forbidden in **strict mode** without explicit configuration.
+
+---
+
+## 8. OMM: the modern orbital data standard
 
 OMM (CCSDS) expresses the same *mean-element* information as TLE but with **named JSON fields**—including **mass**, **RCS size**, and **C_D A/m** when the provider supplies them.
 
@@ -90,32 +108,33 @@ OMM (CCSDS) expresses the same *mean-element* information as TLE but with **name
 
 ### How ASTRA unifies formats
 
-Both `SatelliteTLE` and `SatelliteOMM` are accepted wherever the type hint says **`SatelliteState`**. Internally, `_build_satrec` either calls **TLE parsing** or **sgp4init** from OMM numbers with correct **unit conversions** (degrees → radians, rev/day → rad/min, ISO epoch → Julian Date).
+Both `SatelliteTLE` and `SatelliteOMM` are accepted wherever the type hint says **`SatelliteState`**. Internally, `_build_satrec` either calls **TLE parsing** or **sgp4init** from OMM numbers with correct **unit conversions** (degrees → radians, rev/day → rad/min, ISO epoch → Julian Date). Spacebook's **XP-TLEs** are seamlessly converted directly into `SatelliteOMM` types ensuring parameter compliance.
 
 ```
-   CelesTrak (TLE)  ───┐
-   CelesTrak (OMM)  ───┤
-   Space-Track      ───┤──► make_debris_object() ──► DebrisObject
-   Local JSON       ───┘              │
-                                      ▼
-                            propagate_*(), find_conjunctions(),
-                            filter_altitude(), …
+   Spacebook (XP-TLE) ───┐
+   CelesTrak (TLE)  ─────┤
+   CelesTrak (OMM)  ─────┤
+   Space-Track      ─────┤──► make_debris_object() ──► DebrisObject
+   Local JSON       ─────┘              │
+                                        ▼
+                              propagate_*(), find_conjunctions(),
+                              filter_altitude(), …
 ```
 
 ---
 
-## 8. What the library does *not* guarantee
+## 9. What the library does *not* guarantee
 
 1. **Ephemeris span:** Bundled **DE421** is nominally **~1900–2050**. Outside that, use another kernel and validate.
 2. **Atmosphere:** Not NRLMSISE; not a full re-entry tool.
 3. **SRP:** Simplified geometry—no penumbra, no detailed spacecraft bus model.
 4. **P_c:** Only as good as the **covariances** you pass in.
-5. **Network providers:** Respect CelesTrak and Space-Track **rate limits** and terms—cache catalogs for production.
+5. **Network providers:** Respect CelesTrak, Space-Track, and Spacebook **rate limits** and terms—cache catalogs for production.
 6. **Certification:** Automated tests check consistency and regressions; they do not replace **your** independent validation if your process requires it.
 
 ---
 
-## 9. Strict vs relaxed mode
+## 10. Strict vs relaxed mode
 
 **`astra.config.ASTRA_STRICT_MODE`** (or **`set_strict_mode(True)`** for thread-safe updates):
 

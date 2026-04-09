@@ -36,15 +36,26 @@ ASTRA-Core supports **both** the legacy TLE format and the CCSDS **OMM (Orbit Me
 
 ---
 
-## Data sources: CelesTrak vs Space-Track
+## Data sources: Spacebook vs CelesTrak vs Space-Track
 
-| | **CelesTrak** | **Space-Track.org** |
-|---|---------------|---------------------|
-| **Account** | Not required | Free registration |
-| **Formats** | TLE + OMM JSON | TLE + OMM JSON |
-| **Coverage** | Large public catalogs | Authoritative catalog |
-| **Updates** | Periodic | Periodic (per provider) |
-| **Notes** | Rate limits may apply | Session auth via env vars |
+| | **Spacebook (COMSPOC)** | **CelesTrak** | **Space-Track.org** |
+|---|-------------------------|---------------|---------------------|
+| **Account** | Not required | Not required | Free registration |
+| **Formats** | XP-TLE, STK Synthetic | TLE + OMM JSON | TLE + OMM JSON |
+| **Coverage** | Highly precise objects | Large public catalogs | Authoritative catalog |
+| **Updates** | Daily (live observational)| Periodic | Periodic (per provider)|
+| **Notes** | Superior uncertainty/SW | Rate limits may apply | Session auth via env vars |
+
+### Spacebook (High-Fidelity)
+
+Spacebook provides synthetic covariance and standard/XP-TLEs along with highly precise Space Weather metrics. Spacebook overrides CelesTrak SW defaults when active.
+
+```python
+import astra
+
+# Load XP-TLE catalog formatted transparently as SatelliteOMM with precision tags
+xp_catalog = astra.fetch_xp_tle_catalog()
+```
 
 ### CelesTrak (no account)
 
@@ -84,11 +95,12 @@ If credentials are missing, ASTRA raises a clear error with setup hints.
 
 ## Key capabilities
 
+* **Spacebook Integration:** Direct streaming of Spacebook XP-TLEs, true observational covariance matrices, and live Space Weather priorities—bypassing heuristic estimation models for flight-grade accuracy.
 * **Dual format (TLE + OMM):** One API surface for parsing, propagation, filtering, and conjunctions.
 * **SGP4 at scale:** Vectorized propagation (`propagate_many`, generators) with UT1-aware handling where ephemeris data are available.
 * **Cowell propagation:** Dormand–Prince integration with **J₂–J₄**, empirical **drag** (space weather), **Sun/Moon** third-body gravity (**JPL DE421**), optional **solar radiation pressure** with **cylindrical Earth shadow** (umbra only; no penumbra), and **7-DOF** finite burns with mass flow.
 * **Conjunction screening:** KD-tree prefilter over time steps, spline refinement for TCA, dynamic effective radius from metadata when available.
-* **Collision probability:** Analytical (Chan/Foster lineage) and **6D Monte Carlo** paths when full covariances are supplied; **CDM XML** import via hardened parsing (`defusedxml`).
+* **Collision probability:** Analytical (Chan/Foster lineage) and **6D Monte Carlo** paths when full covariances are supplied; Seamless integration with Spacebook synthetic covariance matrices.
 * **Catalog ingestion:** CelesTrak and Space-Track helpers plus local **OMM** files.
 * **Pass prediction:** TEME → ground observer pipeline (ENU), coarse grid + refinement for AOS/TCA/LOS.
 * **Optional 3D plots:** Interactive Plotly figures via the **`[viz]`** extra—core install stays lean for servers and CI.
@@ -231,6 +243,15 @@ Functions are available from the `astra` namespace.
 | `fetch_spacetrack_active()` | Active catalog |
 | `fetch_spacetrack_satcat()` | SATCAT-style records |
 | `spacetrack_logout()` | End session |
+
+### Spacebook (COMSPOC)
+
+| Function | Returns |
+|----------|---------|
+| `fetch_xp_tle_catalog()` | Spacebook XP-TLE active subset |
+| `fetch_historical_tle(date)` | Historical TLEs |
+| `fetch_synthetic_covariance_stk(id)` | STK 6x6 observational errors |
+| `get_space_weather_sb(jd)` | COMSPOC live SW parameters |
 
 ### OMM
 

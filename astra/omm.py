@@ -30,7 +30,7 @@ from typing import Optional
 
 from astra.errors import AstraError, InvalidTLEError
 from astra.log import get_logger
-from astra.models import SatelliteOMM
+from astra.models import SatelliteOMM, SatelliteTLE
 
 logger = get_logger(__name__)
 
@@ -283,6 +283,63 @@ def parse_omm_json(json_text: str) -> list[SatelliteOMM]:
     else:
         logger.info(f"OMM parsing complete: {len(results)} records loaded successfully.")
 
+    return results
+
+
+# ---------------------------------------------------------------------------
+# XP-TLE Translation
+# ---------------------------------------------------------------------------
+
+def xptle_to_satellite_omm(tle_objects: list["SatelliteTLE"]) -> list[SatelliteOMM]:
+    """Convert SatelliteTLE objects (e.g. from Spacebook XP-TLE) to SatelliteOMM.
+
+    Extracts the Keplerian elements using SGP4's internal parser and populates
+    a generic SatelliteOMM structure. The resulting objects will inherit metadata
+    tags (like ``_spacebook_source``) transparently.
+
+    Since TLEs lack mass and RCS by definition, these physical fields will be ``None``.
+
+    Args:
+        tle_objects: List of ``SatelliteTLE`` instances.
+
+    Returns:
+        List of ``SatelliteOMM`` instances matching the TLE element states.
+    """
+    from sgp4.api import Satrec
+    results = []
+    
+    for tle in tle_objects:
+        try:
+            satrec = Satrec.twoline2rv(tle.line1, tle.line2)
+            omm = SatelliteOMM(
+                norad_id=tle.norad_id,
+                name=tle.name,
+                epoch_jd=tle.epoch_jd,
+                object_type=tle.object_type,
+                inclination_rad=satrec.inclo,
+                raan_rad=satrec.nodeo,
+                argpo_rad=satrec.argpo,
+                mo_rad=satrec.mo,
+                eccentricity=satrec.ecco,
+                mean_motion_rad_min=satrec.no_kozai,
+                bstar=satrec.bstar,
+                mean_motion_dot=getattr(satrec, 'ndot', 0.0),
+                mean_motion_ddot=getattr(satrec, 'nddot', 0.0),
+                rcs_m2=None,
+                mass_kg=None,
+                cd_area_over_mass=None,
+            )
+            # Propagate Spacebook provenance tags if present
+            source = getattr(tle, "_spacebook_source", None)
+            if source:
+                object.__setattr__(omm, "_spacebook_source", source)
+                
+            results.append(omm)
+        except Exception as exc:
+            logger.warning(
+                f"Failed to convert TLE for {tle.name} (NORAD {tle.norad_id}) to OMM: {exc}"
+            )
+            
     return results
 
 

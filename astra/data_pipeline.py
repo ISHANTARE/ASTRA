@@ -385,11 +385,13 @@ def load_space_weather(data_dir: Optional[str] = None, force_download: bool = Fa
 def get_space_weather(t_jd: float, data_dir: Optional[str] = None) -> tuple[float, float, float]:
     """Retrieve F10.7 solar flux and Ap index for a given Julian Date.
 
-    Returns the observed F10.7, adjusted F10.7, and daily Ap value
-    for the calendar date corresponding to ``t_jd``.
-
-    If the exact date is not in the cache (e.g. future predictions),
-    returns moderate solar activity defaults (F10.7 = 150 SFU, Ap = 15).
+    Priority hierarchy:
+    1. **Spacebook:** Defaults to Spacebook (higher precision, COMSPOC-verified)
+       if ``ASTRA_SPACEBOOK_ENABLED=true``.
+    2. **CelesTrak:** Falls back to legacy CelesTrak CSV if Spacebook fails or
+       is disabled.
+    3. **Synthetic Defaults:** Returns (150, 150, 15) if no data is found and
+       ``ASTRA_STRICT_MODE=False``.
 
     Args:
         t_jd: Julian Date.
@@ -398,10 +400,21 @@ def get_space_weather(t_jd: float, data_dir: Optional[str] = None) -> tuple[floa
     Returns:
         Tuple (F10.7_obs, F10.7_adj, Ap_daily).
     """
+    # ── 1. Spacebook (Primary) ──
+    from astra import spacebook
+    if spacebook.SPACEBOOK_ENABLED:
+        try:
+            # Spacebook handles its own background refreshing
+            return spacebook.get_space_weather_sb(t_jd)
+        except Exception as exc:
+            logger.warning(
+                "Spacebook Space Weather lookup failed: %s. Falling back to CelesTrak...", exc
+            )
+
+    # ── 2. CelesTrak (Fallback) ──
     load_space_weather(data_dir)
 
     # Stale cache: background refresh if > 48 h since last successful load
-    # global must be declared at function top, before any use of the name
     global _sw_fetch_thread
     with _SW_LOCK:
         if _sw_last_success is not None:
@@ -414,8 +427,6 @@ def get_space_weather(t_jd: float, data_dir: Optional[str] = None) -> tuple[floa
                 _sw_fetch_thread.start()
 
     # JD → calendar date via integer-split day/fraction (stable vs float drift)
-    # Avoids floating-point rounding errors at midnight boundaries.
-    # JD 2451545.0 = 2000-01-01T12:00:00 TT
     from datetime import timedelta
     days_offset = t_jd - 2451545.0
     whole_days = int(days_offset)
@@ -431,7 +442,7 @@ def get_space_weather(t_jd: float, data_dir: Optional[str] = None) -> tuple[floa
         if date_str in _sw_cache:
             return _sw_cache[date_str]
 
-    # Fallback: check STRICT_MODE before returning synthetic defaults
+    # ── 3. Synthetic Defaults ──
     from astra import config
     from astra.errors import SpaceWeatherError
     if config.ASTRA_STRICT_MODE:

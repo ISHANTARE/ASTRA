@@ -22,6 +22,7 @@ from astra.covariance import (
     estimate_covariance,
     rotate_covariance_rtn_to_eci,
 )
+from astra.spacebook import fetch_synthetic_covariance_stk, SPACEBOOK_ENABLED
 from astra.log import get_logger
 from astra.spatial_index import SpatialIndex
 
@@ -120,6 +121,57 @@ def _dynamic_radius_km(
     # ------------------------------------------------------------------
     return 0.005
 
+
+def load_spacebook_covariance(norad_id: int) -> np.ndarray | None:
+    """Fetch and parse Spacebook Synthetic Covariance for a given satellite.
+
+    Extracts the first 6x6 positional/velocity covariance matrix from the
+    satellite's SynCoPate STK ephemeris.
+
+    Args:
+        norad_id: NORAD Catalog ID.
+
+    Returns:
+        (6, 6) covariance matrix in TEME Of Date (km, km/s), or None if
+        download fails, parsing fails, or Spacebook is disabled.
+    """
+    if not SPACEBOOK_ENABLED:
+        return None
+
+    try:
+        stk_text = fetch_synthetic_covariance_stk(norad_id)
+    except Exception as exc:
+        logger.warning(f"Failed to fetch Spacebook covariance for NORAD {norad_id}: {exc}")
+        return None
+
+    in_cov_block = False
+    for line in stk_text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if line.lower().startswith("covariancetimeposvel"):
+            in_cov_block = True
+            continue
+        
+        if in_cov_block:
+            fields = line.split()
+            if len(fields) == 22:
+                # First valid row! Time + 21 lower-triangular elements
+                cov = np.zeros((6, 6))
+                idx = 1
+                for i in range(6):
+                    for j in range(i + 1):
+                        val = float(fields[idx])
+                        cov[i, j] = val
+                        cov[j, i] = val
+                        idx += 1
+                return cov
+            elif len(fields) > 0 and not fields[0].replace(".", "").replace("-", "").isdigit():
+                # Reached the end of the data block
+                break
+
+    logger.warning(f"No valid CovarianceTimePosVel block found for NORAD {norad_id}")
+    return None
 
 
 def closest_approach(
@@ -324,19 +376,29 @@ def find_conjunctions(
             cov_A = cov_map[A]
         else:
             try:
-                cov_rtn_A = estimate_covariance(days_since_epoch_A)
-                cov_A = rotate_covariance_rtn_to_eci(cov_rtn_A, pos_A, vel_A)
+                cov_A = load_spacebook_covariance(int(A))
             except Exception:
                 cov_A = None
+            if cov_A is None:
+                try:
+                    cov_rtn_A = estimate_covariance(days_since_epoch_A)
+                    cov_A = rotate_covariance_rtn_to_eci(cov_rtn_A, pos_A, vel_A)
+                except Exception:
+                    cov_A = None
 
         if cov_map and B in cov_map:
             cov_B = cov_map[B]
         else:
             try:
-                cov_rtn_B = estimate_covariance(days_since_epoch_B)
-                cov_B = rotate_covariance_rtn_to_eci(cov_rtn_B, pos_B, vel_B)
+                cov_B = load_spacebook_covariance(int(B))
             except Exception:
                 cov_B = None
+            if cov_B is None:
+                try:
+                    cov_rtn_B = estimate_covariance(days_since_epoch_B)
+                    cov_B = rotate_covariance_rtn_to_eci(cov_rtn_B, pos_B, vel_B)
+                except Exception:
+                    cov_B = None
         
         miss_vector = pos_A - pos_B
         
@@ -347,6 +409,12 @@ def find_conjunctions(
         rad_B_km = _dynamic_radius_km(obj_B, rel_vel_hat, pos_B, vel_B)
         
         if cov_A is not None and cov_B is not None:
+            if cov_A.shape != cov_B.shape:
+                if cov_A.shape == (6, 6) and cov_B.shape == (3, 3):
+                    cov_A = cov_A[:3, :3]
+                elif cov_B.shape == (6, 6) and cov_A.shape == (3, 3):
+                    cov_B = cov_B[:3, :3]
+                    
             P_c = compute_collision_probability(
                 miss_vector, rel_vel_vec, cov_A, cov_B, radius_a_km=rad_A_km, radius_b_km=rad_B_km
             )
@@ -358,10 +426,16 @@ def find_conjunctions(
             )
         
         risk = _classify_risk(P_c) if P_c is not None else "UNKNOWN"
-        covariance_src = "CDM" if (cov_map and A in cov_map and B in cov_map) else (
-            "SYNTHETIC" if cov_A is not None else "UNAVAILABLE"
-        )
         
+        # Determine provenance
+        if cov_map and A in cov_map and B in cov_map:
+            covariance_src = "CDM"
+        elif cov_A is not None and cov_B is not None:
+            # If both covariances came from Spacebook (or at least one did while the other was synthetic/mapped)
+            covariance_src = "COMSPOC_SYNTHETIC"
+        else:
+            covariance_src = "UNAVAILABLE"
+            
         return ConjunctionEvent(
             object_a_id=A,
             object_b_id=B,

@@ -12,7 +12,9 @@ Hierarchy:
     ├── CoordinateError       — Coordinate frame conversion failures
     ├── ManeuverError         — Maneuver definition or execution failures
     ├── SpaceWeatherError     — Solar flux/Ap data unavailable in STRICT_MODE
-    └── EphemerisError        — JPL ephemeris data cannot be loaded in STRICT_MODE
+    ├── EphemerisError        — JPL ephemeris data cannot be loaded in STRICT_MODE
+    └── SpacebookError        — COMSPOC Spacebook API failures
+        └── SpacebookLookupError  — NORAD ID cannot be resolved to a COMSPOC GUID
 """
 from __future__ import annotations
 
@@ -182,3 +184,60 @@ class EphemerisError(AstraError):
     missing and ASTRA_STRICT_MODE is True. In relaxed mode, the low-fidelity
     analytical approximation is substituted with a WARNING log.
     """
+
+
+class SpacebookError(AstraError):
+    """Raised when a COMSPOC Spacebook API call fails or returns unexpected data.
+
+    This is the base class for all Spacebook-related failures. It is raised
+    when an HTTP request to a Spacebook endpoint fails with a non-200 status,
+    times out, or returns a response body that cannot be parsed by the
+    expected format (TLE, fixed-width text, JSON, or STK ephemeris).
+
+    Callers that wish to catch any Spacebook data error but still allow
+    general ASTRA errors to propagate should catch ``SpacebookError`` directly.
+    Callers that want to tolerate all data failures should catch ``AstraError``.
+
+    Args:
+        message: Human-readable error description.
+        url: The Spacebook API URL that triggered the failure, if known.
+        status_code: HTTP status code returned, if the request reached the server.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        url: Optional[str] = None,
+        status_code: Optional[int] = None,
+    ) -> None:
+        super().__init__(message, url=url, status_code=status_code)
+        self.url: Optional[str] = url
+        self.status_code: Optional[int] = status_code
+
+
+class SpacebookLookupError(SpacebookError):
+    """Raised when a NORAD Catalog ID cannot be resolved to a COMSPOC GUID.
+
+    COMSPOC assigns each tracked space object a UUID-based GUID (distinct
+    from the public NORAD ID). Several Spacebook per-object API endpoints
+    require this GUID. This error is raised when a NORAD ID passed to
+    ``get_norad_guid()`` is not found in the Spacebook satellite catalog.
+
+    Common causes:
+    - The satellite is tracked by Space-Track but not yet by COMSPOC.
+    - The satellite has decayed and was removed from the active catalog.
+    - The catalog cache is stale; calling ``refresh_satcat_cache()``
+      to force a re-download may resolve the issue.
+
+    Args:
+        message: Human-readable error description.
+        norad_id: The NORAD ID that could not be resolved.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        norad_id: Optional[int] = None,
+    ) -> None:
+        super().__init__(message)
+        self.norad_id: Optional[int] = norad_id

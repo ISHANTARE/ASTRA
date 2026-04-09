@@ -39,6 +39,7 @@ from astra.conjunction import (
     closest_approach,
     distance_3d,
     find_conjunctions,
+    load_spacebook_covariance,
 )
 
 # ---------------------------------------------------------------------------
@@ -82,6 +83,19 @@ from astra.spacetrack import (
 )
 
 # ---------------------------------------------------------------------------
+# Data Ingestion: Spacebook (unauthenticated, COMSPOC)
+# ---------------------------------------------------------------------------
+from astra.spacebook import (
+    fetch_xp_tle_catalog,
+    fetch_historical_tle,
+    fetch_tle_catalog,
+    fetch_synthetic_covariance_stk,
+    fetch_satcat_details,
+    get_space_weather_sb,
+    get_eop_sb,
+)
+
+# ---------------------------------------------------------------------------
 # Debris Catalog Filtering
 # ---------------------------------------------------------------------------
 from astra.debris import (
@@ -105,6 +119,8 @@ from astra.errors import (
     ManeuverError,
     PropagationError,
     SpaceWeatherError,
+    SpacebookError,
+    SpacebookLookupError,
 )
 
 # ---------------------------------------------------------------------------
@@ -135,7 +151,13 @@ from astra.omm import (
     parse_omm_json,      # Parse OMM JSON string → list[SatelliteOMM]
     parse_omm_record,    # Parse single OMM dict → SatelliteOMM
     validate_omm,        # Validate OMM dict sanity before parsing
+    xptle_to_satellite_omm, # Convert XP-TLE format into high-fidelity OMM
 )
+
+# ---------------------------------------------------------------------------
+# STK Ephemeris Parser (Spacebook Synthetic Covariance output)
+# ---------------------------------------------------------------------------
+from astra.ocm import parse_stk_ephemeris
 
 # ---------------------------------------------------------------------------
 # TLE Parser (legacy format — backwards compatible)
@@ -210,6 +232,10 @@ __all__ = [
     "parse_omm_json",
     "load_omm_file",
     "validate_omm",
+    "xptle_to_satellite_omm",
+
+    # --- STK Ephemeris Parser (Spacebook) ---
+    "parse_stk_ephemeris",
 
     # --- Data Models ---
     "SatelliteTLE",
@@ -237,6 +263,15 @@ __all__ = [
     "fetch_spacetrack_satcat",          # → list[dict]
     "spacetrack_logout",
 
+    # --- Data Ingestion: Spacebook (unauthenticated) ---
+    "fetch_xp_tle_catalog",             # → list[SatelliteTLE]
+    "fetch_historical_tle",             # → list[SatelliteTLE]
+    "fetch_tle_catalog",                # → list[SatelliteTLE]
+    "fetch_synthetic_covariance_stk",   # → str
+    "fetch_satcat_details",             # → dict
+    "get_space_weather_sb",
+    "get_eop_sb",
+
     # --- Orbit Propagation (✓ TLE | ✓ OMM) ---
     "propagate_orbit",
     "propagate_many",
@@ -256,6 +291,7 @@ __all__ = [
     "distance_3d",
     "closest_approach",
     "find_conjunctions",
+    "load_spacebook_covariance",
     "compute_collision_probability",
     "estimate_covariance",
 
@@ -308,6 +344,8 @@ __all__ = [
     "ManeuverError",
     "SpaceWeatherError",
     "EphemerisError",
+    "SpacebookError",
+    "SpacebookLookupError",
 
     # --- Config & Mode Control ---
     "set_strict_mode",
