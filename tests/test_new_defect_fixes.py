@@ -72,7 +72,7 @@ def test_eop_batching_length():
 # ---------------------------------------------------------
 # DEF-016: Strict Mode Network Propagation
 # ---------------------------------------------------------
-def test_strict_mode_network_failure(monkeypatch):
+def test_strict_mode_network_failure(monkeypatch, tmp_path):
     """Ensure HTTP failures raise instead of silently continuing in strict mode"""
     def mock_get(*args, **kwargs):
         raise ValueError("Simulated network failure")
@@ -81,6 +81,6 @@ def test_strict_mode_network_failure(monkeypatch):
     
     config.ASTRA_STRICT_MODE = True
     with pytest.raises(ValueError, match="ASTRA STRICT"):
-        _download_space_weather("/fake/dir")
+        _download_space_weather(str(tmp_path / "fake_dir"))
         
     config.ASTRA_STRICT_MODE = False
