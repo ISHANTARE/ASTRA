@@ -709,7 +709,7 @@ def refresh_satcat_cache() -> int:
     Raises:
         SpacebookError: If the download fails.
     """
-    global _guid_loaded, _guid_last_success
+    global _guid_loaded
     with _GUID_LOCK:
         _guid_loaded = False
     _load_satcat_guid_map()

@@ -538,7 +538,7 @@ def propagate_covariance_stm(
     v0_km_s: np.ndarray,
     cov0_6x6: np.ndarray,
     duration_s: float,
-    drag_config: Optional['DragConfig'] = None,
+    drag_config: Optional[Any] = None,
 ) -> np.ndarray:
     """Propagate a full 6x6 covariance matrix using the State Transition Matrix.
 
