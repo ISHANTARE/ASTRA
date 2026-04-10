@@ -76,26 +76,12 @@ def visible_from_location(
     ts = _dp._skyfield_ts
     t = ts.tt_jd(times_jd)
 
-    r_teme_au = positions_teme.T / AU_KM
-    
-    # 1. TEME to GCRS setup
-    R_teme_to_gcrs = np.transpose(TEME.rotation_at(t), axes=(1, 0, 2)) if hasattr(t, 'shape') else np.transpose(TEME.rotation_at(t))
-    if hasattr(t, 'shape'):
-        r_gcrs_au = np.einsum('ij...,j...->i...', R_teme_to_gcrs, r_teme_au)
-    else:
-        r_gcrs_au = R_teme_to_gcrs.dot(r_teme_au)
-
-    # 2. GCRS to ITRS natively via rotation matrix mapping
-    R_gcrs_to_itrs = np.transpose(itrs.rotation_at(t), axes=(1, 0, 2)) if hasattr(t, 'shape') else np.transpose(itrs.rotation_at(t))
-    if hasattr(t, 'shape'):
-        r_itrs_au = np.einsum('ij...,j...->i...', R_gcrs_to_itrs, r_gcrs_au)
-    else:
-        r_itrs_au = R_gcrs_to_itrs.dot(r_gcrs_au)
-    r_itrs_km = r_itrs_au * AU_KM
+    from astra.frames import teme_to_ecef
+    r_itrs_km = teme_to_ecef(positions_teme, times_jd, use_spacebook_eop=True)
     
     # 3. WGS84 observer position
     r_obs = _wgs84_observer_itrs(observer.latitude_deg, observer.longitude_deg, observer.elevation_m)
-    rho_itrs = r_itrs_km - r_obs[:, np.newaxis]
+    rho_itrs = r_itrs_km.T - r_obs[:, np.newaxis]
     
     # 4. ITRS to ENU topocentric
     R_enu = _itrs_to_enu_matrix(observer.latitude_deg, observer.longitude_deg)
@@ -117,22 +103,11 @@ def get_azimuths(
     ts = _dp._skyfield_ts
     t = ts.tt_jd(times_jd)
 
-    r_teme_au = positions_teme.T / AU_KM
-    R_teme_to_gcrs = np.transpose(TEME.rotation_at(t), axes=(1, 0, 2)) if hasattr(t, 'shape') else np.transpose(TEME.rotation_at(t))
-    if hasattr(t, 'shape'):
-        r_gcrs_au = np.einsum('ij...,j...->i...', R_teme_to_gcrs, r_teme_au)
-    else:
-        r_gcrs_au = R_teme_to_gcrs.dot(r_teme_au)
-
-    R_gcrs_to_itrs = np.transpose(itrs.rotation_at(t), axes=(1, 0, 2)) if hasattr(t, 'shape') else np.transpose(itrs.rotation_at(t))
-    if hasattr(t, 'shape'):
-        r_itrs_au = np.einsum('ij...,j...->i...', R_gcrs_to_itrs, r_gcrs_au)
-    else:
-        r_itrs_au = R_gcrs_to_itrs.dot(r_gcrs_au)
-    r_itrs_km = r_itrs_au * AU_KM
+    from astra.frames import teme_to_ecef
+    r_itrs_km = teme_to_ecef(positions_teme, times_jd, use_spacebook_eop=True)
     
     r_obs = _wgs84_observer_itrs(observer.latitude_deg, observer.longitude_deg, observer.elevation_m)
-    rho_itrs = r_itrs_km - r_obs[:, np.newaxis]
+    rho_itrs = r_itrs_km.T - r_obs[:, np.newaxis]
     
     R_enu = _itrs_to_enu_matrix(observer.latitude_deg, observer.longitude_deg)
     rho_enu = R_enu @ rho_itrs
@@ -146,20 +121,12 @@ def _visible_from_location_cached(
     positions_teme: np.ndarray, times_jd: np.ndarray, observer: Observer, ts, R_teme_to_gcrs: np.ndarray
 ) -> np.ndarray:
     """Compute topocentric elevation angles using cached timescale and TEME->GCRS rotation."""
-    t = ts.tt_jd(times_jd)
-    r_teme_au = positions_teme.T / AU_KM
-    
-    r_gcrs_au = R_teme_to_gcrs.dot(r_teme_au)
-
-    R_gcrs_to_itrs = np.transpose(itrs.rotation_at(t), axes=(1, 0, 2)) if hasattr(t, 'shape') else np.transpose(itrs.rotation_at(t))
-    if hasattr(t, 'shape'):
-        r_itrs_au = np.einsum('ij...,j...->i...', R_gcrs_to_itrs, r_gcrs_au)
-    else:
-        r_itrs_au = R_gcrs_to_itrs.dot(r_gcrs_au)
-    r_itrs_km = r_itrs_au * AU_KM
+    from astra.frames import teme_to_ecef
+    # Bypass Spacebook inside bisection search loops to prioritize microsecond latency
+    r_itrs_km = teme_to_ecef(positions_teme, times_jd, use_spacebook_eop=False)
     
     r_obs = _wgs84_observer_itrs(observer.latitude_deg, observer.longitude_deg, observer.elevation_m)
-    rho_itrs = r_itrs_km - r_obs[:, np.newaxis]
+    rho_itrs = r_itrs_km.T - r_obs[:, np.newaxis]
     
     R_enu = _itrs_to_enu_matrix(observer.latitude_deg, observer.longitude_deg)
     rho_enu = R_enu @ rho_itrs

@@ -24,8 +24,7 @@ Atmosphere and drag
 Solar radiation pressure
 ------------------------
 
-* **Cannonball SRP** with flux scaled from 1 AU. An optional **cylindrical Earth
-  umbra** zeros SRP in full shadow; **penumbra is not modeled**.
+* **Cannonball SRP** with flux scaled from 1 AU. Features a highly realistic **conical Earth umbra** model that scales fractional solar illumination continuously through the penumbra and transitions smoothly into the dark umbra.
 
 Collision probability
 ---------------------

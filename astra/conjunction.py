@@ -372,11 +372,14 @@ def find_conjunctions(
         days_since_epoch_A = tca_jd - obj_A.source.epoch_jd
         days_since_epoch_B = tca_jd - obj_B.source.epoch_jd
         
+        _spacebook_cov_a = False
         if cov_map and A in cov_map:
             cov_A = cov_map[A]
         else:
             try:
                 cov_A = load_spacebook_covariance(int(A))
+                if cov_A is not None:
+                    _spacebook_cov_a = True
             except Exception:
                 cov_A = None
             if cov_A is None:
@@ -386,11 +389,14 @@ def find_conjunctions(
                 except Exception:
                     cov_A = None
 
+        _spacebook_cov_b = False
         if cov_map and B in cov_map:
             cov_B = cov_map[B]
         else:
             try:
                 cov_B = load_spacebook_covariance(int(B))
+                if cov_B is not None:
+                    _spacebook_cov_b = True
             except Exception:
                 cov_B = None
             if cov_B is None:
@@ -427,14 +433,49 @@ def find_conjunctions(
         
         risk = _classify_risk(P_c) if P_c is not None else "UNKNOWN"
         
-        # Determine provenance
-        if cov_map and A in cov_map and B in cov_map:
-            covariance_src = "CDM"
-        elif cov_A is not None and cov_B is not None:
-            # If both covariances came from Spacebook (or at least one did while the other was synthetic/mapped)
-            covariance_src = "COMSPOC_SYNTHETIC"
+        # DEF-007: Determine covariance source per object, then combine.
+        # Previously, any non-CDM pair was labeled "COMSPOC_SYNTHETIC" even when
+        # only one object had Spacebook data; the other may have been SYNTHETIC.
+        def _cov_src(obj_id, from_cov_map: bool, cov_val) -> str:
+            if from_cov_map:
+                return "CDM"
+            # Distinguish Spacebook from heuristic by checking object attribute
+            # load_spacebook_covariance succeeded if cov_val is not None and
+            # the object has a spacebook-related covariance (non-trivial check).
+            # We use a sentinel approach: tag at assignment time (see below).
+            return "COMSPOC_SYNTHETIC" if getattr(obj_id, "_sb_cov", False) else "SYNTHETIC"
+
+        src_A = "CDM" if (cov_map and A in cov_map) else (
+            "COMSPOC_SYNTHETIC" if (cov_A is not None and not (
+                (cov_map and A not in cov_map) and
+                cov_A is not None
+            ) and _spacebook_cov_a) else "SYNTHETIC"
+        )
+        # Simplified, readable version using flags set during covariance loading:
+        if cov_map and A in cov_map:
+            src_A = "CDM"
+        elif _spacebook_cov_a:
+            src_A = "COMSPOC_SYNTHETIC"
+        elif cov_A is not None:
+            src_A = "SYNTHETIC"
         else:
+            src_A = "UNAVAILABLE"
+
+        if cov_map and B in cov_map:
+            src_B = "CDM"
+        elif _spacebook_cov_b:
+            src_B = "COMSPOC_SYNTHETIC"
+        elif cov_B is not None:
+            src_B = "SYNTHETIC"
+        else:
+            src_B = "UNAVAILABLE"
+
+        if src_A == src_B:
+            covariance_src = src_A
+        elif "UNAVAILABLE" in (src_A, src_B):
             covariance_src = "UNAVAILABLE"
+        else:
+            covariance_src = f"MIXED({src_A}+{src_B})"
             
         return ConjunctionEvent(
             object_a_id=A,

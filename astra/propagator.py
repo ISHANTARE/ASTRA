@@ -72,6 +72,7 @@ from astra.constants import (
     EARTH_MU_KM3_S2,
     EARTH_OMEGA_RAD_S,
     J2, J3, J4,
+    SECONDS_PER_DAY,
     SUN_MU_KM3_S2,
     MOON_MU_KM3_S2,
 )
@@ -452,6 +453,7 @@ def _acceleration(
     drag_mass_kg: float,
     drag_rho: float,
     drag_H_km: float,
+    drag_ref_alt_km: float,
     include_third_body: bool,
     t_jd0: float,
     duration_d: float,
@@ -516,8 +518,10 @@ def _acceleration(
     # --- Atmospheric Drag (PHY-B Standardized) ---
     alt_km = r_mag - Re
     if use_drag and alt_km < 1500.0 and drag_rho > 0.0:
-        # Per-substep exponential density correction
-        rho_instant = drag_rho * math.exp(-(alt_km - 400.0) / drag_H_km)
+        # DEF-001 (Strategy A): drag_rho is initialized at drag_ref_alt_km
+        # (the actual initial orbit altitude, not a hardcoded 400 km constant).
+        # The exponential corrects for altitude deviations during integration.
+        rho_instant = drag_rho * math.exp(-(alt_km - drag_ref_alt_km) / drag_H_km)
         
         # Atmosphere co-rotates with Earth
         omega_earth = np.array([0.0, 0.0, EARTH_OMEGA_RAD_S])
@@ -534,9 +538,8 @@ def _acceleration(
     if include_third_body:
         t_norm = 2.0 * (t_jd - t_jd0) / duration_d - 1.0
         t_norm = max(-1.0, min(1.0, t_norm))
-        
-        # Use Python-native evaluate for parity
-        from astra.propagator import _eval_cheb_3d_njit
+
+        # DEF-009: removed self-import — _eval_cheb_3d_njit is defined in this module
         sun_pos = _eval_cheb_3d_njit(t_norm, sun_coeffs)
         moon_pos = _eval_cheb_3d_njit(t_norm, moon_coeffs)
         
@@ -613,7 +616,7 @@ def _coast_derivative(
     """
     r = y[:3]
     v = y[3:6]
-    t_jd = t_jd0_segment + t_sec / 86400.0
+    t_jd = t_jd0_segment + t_sec / SECONDS_PER_DAY
     a = _acceleration(
         t_jd, r, v, use_drag, drag_cd, drag_area_m2, drag_mass_kg, drag_rho, drag_H_km,
         include_third_body, global_t_jd0, duration_d, sun_coeffs, moon_coeffs,
@@ -663,7 +666,7 @@ def _powered_derivative(
     r = y[:3]
     v = y[3:6]
     m = y[6]
-    t_jd = t_jd0_segment + t_sec / 86400.0
+    t_jd = t_jd0_segment + t_sec / SECONDS_PER_DAY
 
     # Gravitational + drag acceleration
     a_grav = _acceleration(
@@ -734,6 +737,7 @@ def _acceleration_njit(
     drag_mass_kg: float,
     drag_rho: float,
     drag_H_km: float,
+    drag_ref_alt_km: float,
     include_third_body: bool,
     t_jd0: float,
     duration_d: float,
@@ -798,11 +802,11 @@ def _acceleration_njit(
     a_total[2] += a_j2_z + a_j3_z + a_j4_z
 
     # --- Atmospheric Drag (PHY-B) ---
-    # Performs per-substep altitude sampling of the density model.
-    # Density: drag_rho_ref * exp(-(alt - 400 km) / drag_H_km)
+    # DEF-001 (Strategy A): drag_rho is initialized at drag_ref_alt_km
+    # (the actual initial orbit altitude from propagate_cowell, not 400 km).
+    # The exponential profile corrects deviations during the integration substep.
     if use_drag and alt_km < 1500.0 and drag_rho > 0.0:
-        # Exponential density correction for instantaneous altitude
-        rho_instant = drag_rho * math.exp(-(alt_km - 400.0) / drag_H_km)
+        rho_instant = drag_rho * math.exp(-(alt_km - drag_ref_alt_km) / drag_H_km)
         
         omega_earth = np.array([0.0, 0.0, 7.292115146706979e-5])
         v_rel = v - np.cross(omega_earth, r)
@@ -864,6 +868,7 @@ def _coast_derivative_njit(
     drag_mass_kg: float,
     drag_rho: float,
     drag_H_km: float,
+    drag_ref_alt_km: float,
     include_third_body: bool,
     global_t_jd0: float,
     duration_d: float,
@@ -876,10 +881,10 @@ def _coast_derivative_njit(
     """State derivative for unpowered (coast) arcs using Numba."""
     r = y[:3]
     v = y[3:6]
-    t_jd = t_jd0 + t_sec / 86400.0
+    t_jd = t_jd0 + t_sec / SECONDS_PER_DAY
     a = _acceleration_njit(
         t_jd, r, v, use_drag, drag_cd, drag_area_m2, drag_mass_kg, drag_rho, drag_H_km,
-        include_third_body, global_t_jd0, duration_d, sun_coeffs, moon_coeffs,
+        drag_ref_alt_km, include_third_body, global_t_jd0, duration_d, sun_coeffs, moon_coeffs,
         use_srp, srp_cr, srp_use_shadow,
     )
     dy = np.empty(6)
@@ -898,6 +903,7 @@ def _powered_derivative_njit(
     drag_mass_kg: float,
     drag_rho: float,
     drag_H_km: float,
+    drag_ref_alt_km: float,
     include_third_body: bool,
     global_t_jd0: float,
     duration_d: float,
@@ -915,11 +921,11 @@ def _powered_derivative_njit(
     r = y[:3]
     v = y[3:6]
     m = y[6]
-    t_jd = t_jd0 + t_sec / 86400.0
+    t_jd = t_jd0 + t_sec / SECONDS_PER_DAY
 
     a_grav = _acceleration_njit(
         t_jd, r, v, use_drag, drag_cd, drag_area_m2, drag_mass_kg, drag_rho, drag_H_km,
-        include_third_body, global_t_jd0, duration_d, sun_coeffs, moon_coeffs,
+        drag_ref_alt_km, include_third_body, global_t_jd0, duration_d, sun_coeffs, moon_coeffs,
         use_srp, srp_cr, srp_use_shadow,
     )
 
@@ -1032,7 +1038,7 @@ def propagate_cowell(
     powered_rtol: float = 1e-12,
     powered_atol: float = 1e-12,
 ) -> list[NumericalState]:
-    """Propagate an orbit using segmented Cowell's method with RK8(7).
+    """Propagate an orbit using segmented Cowell's method with DOP853.
 
     This is a mission-operations–grade numerical propagator that
     automatically segments the integration timeline at engine
@@ -1127,20 +1133,27 @@ def propagate_cowell(
     drag_rho = 0.0
     drag_H_km = 58.515  # default static scale height (fallback)
 
+    # DEF-001 (Strategy A): compute drag_ref_alt_km from the actual initial orbit altitude
+    # so that drag_rho is physically correct, not anchored to a hardcoded 400 km.
+    drag_ref_alt_km = 400.0  # safe default (updated below when drag is active)
     if use_drag:
         from astra.data_pipeline import get_space_weather, atmospheric_density_empirical
+        from astra.constants import DRAG_MIN_ALTITUDE_KM
+        r0_mag = float(np.linalg.norm(state0.position_km))
+        drag_ref_alt_km = max(r0_mag - EARTH_EQUATORIAL_RADIUS_KM, DRAG_MIN_ALTITUDE_KM)
         if use_empirical_drag:
             try:
                 f107_obs, f107_adj, ap_daily = get_space_weather(t_jd0)
-                # Reference density at 400 km for scale-height interpolation
-                drag_rho = atmospheric_density_empirical(400.0, f107_obs, f107_adj, ap_daily)
+                # DEF-001: density at initial orbit altitude (not hardcoded 400 km)
+                drag_rho = atmospheric_density_empirical(drag_ref_alt_km, f107_obs, f107_adj, ap_daily)
                 drag_H_km = _compute_scale_height(f107_obs, f107_adj, ap_daily)
             except (ImportError, ValueError, OSError):
                 drag_rho = 0.0
         if drag_rho == 0.0:
             from astra.constants import DRAG_REF_DENSITY_KG_M3, DRAG_SCALE_HEIGHT_KM
-            drag_rho = DRAG_REF_DENSITY_KG_M3  # reference density at 400 km
+            drag_rho = DRAG_REF_DENSITY_KG_M3  # static fallback density (400 km reference)
             drag_H_km = DRAG_SCALE_HEIGHT_KM
+            drag_ref_alt_km = 400.0  # static profile anchored at 400 km
 
     use_srp = bool(
         drag_config is not None
@@ -1207,10 +1220,10 @@ def propagate_cowell(
             
             def powered_deriv(t_sec, y):
                 return _powered_derivative_njit(
-                    t_sec, y, t_jd0 + seg_start_s / 86400.0,
+                    t_sec, y, t_jd0 + seg_start_s / SECONDS_PER_DAY,
                     use_drag, drag_cd, drag_area_m2, drag_mass_kg, drag_rho, drag_H_km,
-                    include_third_body, t_jd0_global, duration_d, sun_coeffs, moon_coeffs,
-                    use_srp, srp_cr, srp_use_shadow,
+                    drag_ref_alt_km, include_third_body, t_jd0_global, duration_d,
+                    sun_coeffs, moon_coeffs, use_srp, srp_cr, srp_use_shadow,
                     b_thrust, b_isp, b_dir, b_idx,
                 )
 
@@ -1241,13 +1254,13 @@ def propagate_cowell(
                 if config.ASTRA_STRICT_MODE:
                     raise PropagationError(
                         f"Cowell powered integration failed: {sol.message}",
-                        t_jd=t_jd0 + seg_start_s / 86400.0,
+                        t_jd=t_jd0 + seg_start_s / SECONDS_PER_DAY,
                     )
                 break
 
             for i in range(len(sol.t)):
                 all_states.append(NumericalState(
-                    t_jd=t_jd0 + (seg_start_s + sol.t[i]) / 86400.0,
+                    t_jd=t_jd0 + (seg_start_s + sol.t[i]) / SECONDS_PER_DAY,
                     position_km=sol.y[:3, i].copy(),
                     velocity_km_s=sol.y[3:6, i].copy(),
                     mass_kg=float(sol.y[6, i]),
@@ -1264,10 +1277,10 @@ def propagate_cowell(
 
             def coast_deriv(t_sec, y):
                 return _coast_derivative_njit(
-                    t_sec, y, t_jd0 + seg_start_s / 86400.0,
+                    t_sec, y, t_jd0 + seg_start_s / SECONDS_PER_DAY,
                     use_drag, drag_cd, drag_area_m2, drag_mass_kg, drag_rho, drag_H_km,
-                    include_third_body, t_jd0_global, duration_d, sun_coeffs, moon_coeffs,
-                    use_srp, srp_cr, srp_use_shadow,
+                    drag_ref_alt_km, include_third_body, t_jd0_global, duration_d,
+                    sun_coeffs, moon_coeffs, use_srp, srp_cr, srp_use_shadow,
                 )
 
             sol = solve_ivp(
@@ -1288,13 +1301,13 @@ def propagate_cowell(
                 if config.ASTRA_STRICT_MODE:
                     raise PropagationError(
                         f"Cowell coast integration failed: {sol.message}",
-                        t_jd=t_jd0 + seg_start_s / 86400.0,
+                        t_jd=t_jd0 + seg_start_s / SECONDS_PER_DAY,
                     )
                 break
 
             for i in range(len(sol.t)):
                 all_states.append(NumericalState(
-                    t_jd=t_jd0 + (seg_start_s + sol.t[i]) / 86400.0,
+                    t_jd=t_jd0 + (seg_start_s + sol.t[i]) / SECONDS_PER_DAY,
                     position_km=sol.y[:3, i].copy(),
                     velocity_km_s=sol.y[3:6, i].copy(),
                     mass_kg=current_mass,

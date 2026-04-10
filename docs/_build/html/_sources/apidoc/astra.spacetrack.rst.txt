@@ -1,7 +1,0 @@
-astra.spacetrack module
-=======================
-
-.. automodule:: astra.spacetrack
-   :members:
-   :show-inheritance:
-   :undoc-members:

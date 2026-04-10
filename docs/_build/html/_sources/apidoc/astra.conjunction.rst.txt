@@ -1,7 +1,0 @@
-astra.conjunction module
-========================
-
-.. automodule:: astra.conjunction
-   :members:
-   :show-inheritance:
-   :undoc-members:

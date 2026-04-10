@@ -313,46 +313,14 @@ def ground_track(
     if len(times_jd) == 0:
         return []
 
-    # Managed Skyfield loader (shared cache / IERS), not ad-hoc ``load()``.
-    # This prevents a second IERS data download into ~/.skyfield/ alongside ~/.astra/data/
-    from astra import data_pipeline
-    data_pipeline._ensure_skyfield()
-    ts = data_pipeline._skyfield_ts
-    from astra.jdutil import jd_utc_to_datetime
-    t = ts.utc(jd_utc_to_datetime(times_jd))
+    from astra.frames import teme_to_ecef, ecef_to_geodetic_wgs84
     
-    # 1. Convert positions to AU for skyfield operations. shape (3, T)
-    r_teme_au = positions_teme.T / AU_KM
+    r_itrs_km = teme_to_ecef(positions_teme, times_jd, use_spacebook_eop=True)
     
-    # R computes TEME -> GCRS (which is standard Geocentric frame)
-    rot_raw = TEME.rotation_at(t)
-    try:
-        if rot_raw.ndim == 2:
-            # Scalar time: shape (3, 3)
-            R_teme_to_gcrs = rot_raw.T
-            r_gcrs_au = R_teme_to_gcrs @ r_teme_au
-        else:
-            # Array time: handle different skyfield backend shapes
-            if rot_raw.shape == (len(times_jd), 3, 3):
-                R_teme_to_gcrs = np.transpose(rot_raw, axes=(0, 2, 1))
-                r_gcrs_au = np.einsum('tij,jt->it', R_teme_to_gcrs, r_teme_au)
-            else:
-                # typical shape (3, 3, T)
-                R_teme_to_gcrs = np.transpose(rot_raw, axes=(2, 1, 0))
-                r_gcrs_au = np.einsum('tij,jt->it', R_teme_to_gcrs, r_teme_au)
-    except (ValueError, TypeError) as e:
-        raise AstraError(f"Coordinate error in ground_track: {e}") from e
+    x, y, z = r_itrs_km.T
+    lat_deg, lon_deg, alt_km = ecef_to_geodetic_wgs84(x, y, z)
     
-    # 3. Use skyfield API (Geocentric + wgs84 subpoint)
-    from skyfield.api import wgs84
-    pos = Geocentric(r_gcrs_au, t=t)
-    sub = wgs84.subpoint(pos)
-    
-    lat_deg = sub.latitude.degrees
-    lon_deg = sub.longitude.degrees
-    alt_km = sub.elevation.km
-    
-    if np.isscalar(lat_deg):
+    if np.isscalar(lat_deg) or getattr(lat_deg, 'ndim', 0) == 0:
         return [(float(lat_deg), float(lon_deg), float(alt_km))]
     
-    return list(zip(lat_deg, lon_deg, alt_km))
+    return list(zip(lat_deg.tolist(), lon_deg.tolist(), alt_km.tolist()))

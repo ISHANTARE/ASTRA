@@ -1,7 +1,0 @@
-astra.visibility module
-=======================
-
-.. automodule:: astra.visibility
-   :members:
-   :show-inheritance:
-   :undoc-members:

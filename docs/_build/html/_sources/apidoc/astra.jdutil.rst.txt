@@ -1,7 +1,0 @@
-astra.jdutil module
-===================
-
-.. automodule:: astra.jdutil
-   :members:
-   :show-inheritance:
-   :undoc-members:

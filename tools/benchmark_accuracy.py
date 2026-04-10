@@ -31,7 +31,10 @@ def run_benchmark():
         from astra.spacebook import fetch_tle_catalog
         std_catalog = fetch_tle_catalog()
         std_map = {int(tle.norad_id): tle for tle in std_catalog}
-    except:
+    except Exception as e:
+        # DEF-004: bare except replaced — never swallow KeyboardInterrupt/SystemExit
+        import logging
+        logging.getLogger(__name__).warning("Standard TLE backup catalog unavailable: %s", e)
         std_map = {}
     
     print("\n--- ASTRA-CORE vs COMSPOC REFERENCE EPHEMERIS BENCHMARK ---")

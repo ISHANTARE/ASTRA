@@ -1,7 +1,0 @@
-astra.errors module
-===================
-
-.. automodule:: astra.errors
-   :members:
-   :show-inheritance:
-   :undoc-members:

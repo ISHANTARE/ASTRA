@@ -34,7 +34,7 @@ def test_j4_python_and_numba_paths_agree():
     empty_coeffs = np.zeros((2, 3))
     a_py = _acceleration(
         t_jd, r, v,
-        False, 2.2, 10.0, 1000.0, 0.0, 50.0,           # use_drag=False
+        False, 2.2, 10.0, 1000.0, 0.0, 50.0, 400.0,    # use_drag=False, drag_ref_alt_km=400.0
         False, t_jd, 1.0, empty_coeffs, empty_coeffs,  # 3rd body off
         False, 1.5, True,                              # SRP off
     )
@@ -42,7 +42,7 @@ def test_j4_python_and_numba_paths_agree():
     # Numba path: disable drag (rho=0), disable 3rd body, disable SRP
     a_nb = _acceleration_njit(
         t_jd, r, v,
-        False, 2.2, 10.0, 1000.0, 0.0, 50.0,           # use_drag=False
+        False, 2.2, 10.0, 1000.0, 0.0, 50.0, 400.0,    # use_drag=False, drag_ref_alt_km=400.0
         False, t_jd, 1.0, empty_coeffs, empty_coeffs,  # 3rd body off
         False, 1.5, True,                              # SRP off
     )

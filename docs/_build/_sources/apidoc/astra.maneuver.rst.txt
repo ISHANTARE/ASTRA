@@ -1,7 +1,0 @@
-astra.maneuver module
-=====================
-
-.. automodule:: astra.maneuver
-   :members:
-   :show-inheritance:
-   :undoc-members:

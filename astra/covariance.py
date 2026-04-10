@@ -420,7 +420,7 @@ except ImportError:
 from astra.constants import J3, J4
 
 @njit(fastmath=True, cache=True)
-def _acceleration_njit(r: np.ndarray, v: np.ndarray, Bc: float, rho_ref: float, H_km: float) -> np.ndarray:
+def _acceleration_njit(r: np.ndarray, v: np.ndarray, Bc: float, rho_ref: float, H_km: float, rho_ref_alt_km: float) -> np.ndarray:
     x, y, z = r[0], r[1], r[2]
     r_mag = np.linalg.norm(r)
     r2 = r_mag**2
@@ -456,20 +456,30 @@ def _acceleration_njit(r: np.ndarray, v: np.ndarray, Bc: float, rho_ref: float, 
     # --- Atmospheric Drag (LEO Only) ---
     alt = r_mag - Re
     if alt < 1500.0 and Bc > 0.0:
-        # Standard exponential model: rho = rho_ref * exp(-(alt - h0)/H)
-        # where h0 is 400 km matching the empirical reference.
-        rho = rho_ref * math.exp(-(alt - 400.0) / H_km)
-        v_mag = np.linalg.norm(v)
-        if v_mag > 1e-6:
-            # 1e-6 (m^2 to km^2) * 1e9 (kg/m^3 to kg/km^3) = 1e3
-            # Bc is m^2/kg.
-            a_drag = -0.5 * rho * 1e3 * Bc * v_mag * v
+        # DEF-001: reference density at rho_ref_alt_km (initial orbit altitude, not hardcoded 400 km)
+        rho = rho_ref * math.exp(-(alt - rho_ref_alt_km) / H_km)
+
+        # DEF-002: co-rotating atmosphere correction (CRITICAL FIX)
+        # v_rel = v - omega_earth x r  subtracts the ~0.46 km/s equatorial rotation.
+        # Using inertial velocity v directly introduced ~6% systematic error in
+        # drag partial derivatives (identified defect DEF-002 in audit).
+        EARTH_OMEGA = 7.292115146706979e-5   # rad/s — IAU/IERS 2010
+        # Manual cross product for Numba compatibility: omega x r = [0,0,w] x [x,y,z]
+        # = [0*z - w*y, w*x - 0*z, 0*y - 0*x] = [-w*y, w*x, 0]
+        vx_rel = v[0] - (-EARTH_OMEGA * r[1])
+        vy_rel = v[1] - ( EARTH_OMEGA * r[0])
+        vz_rel = v[2]  # no z-component from Earth rotation
+        v_rel = np.array([vx_rel, vy_rel, vz_rel])
+        v_rel_mag = np.linalg.norm(v_rel)
+        if v_rel_mag > 1e-6:
+            # 1e-6 (m^2 to km^2) * 1e9 (kg/m^3 to kg/km^3) = 1e3; Bc is m^2/kg
+            a_drag = -0.5 * rho * 1e3 * Bc * v_rel_mag * v_rel
             a_total += a_drag
 
     return a_total
 
 @njit(fastmath=True, cache=True)
-def _stm_jacobian_njit(r: np.ndarray, v: np.ndarray, Bc: float, rho_ref: float, H_km: float) -> np.ndarray:
+def _stm_jacobian_njit(r: np.ndarray, v: np.ndarray, Bc: float, rho_ref: float, H_km: float, rho_ref_alt_km: float) -> np.ndarray:
     # Central-difference Jacobian step (km)
     eps_r = 1e-4
     eps_v = 1e-4
@@ -486,30 +496,30 @@ def _stm_jacobian_njit(r: np.ndarray, v: np.ndarray, Bc: float, rho_ref: float, 
         r_minus = r.copy()
         r_plus[i] += eps_r
         r_minus[i] -= eps_r
-        a_plus = _acceleration_njit(r_plus, v, Bc, rho_ref, H_km)
-        a_minus = _acceleration_njit(r_minus, v, Bc, rho_ref, H_km)
+        a_plus = _acceleration_njit(r_plus, v, Bc, rho_ref, H_km, rho_ref_alt_km)
+        a_minus = _acceleration_njit(r_minus, v, Bc, rho_ref, H_km, rho_ref_alt_km)
         J[3:, i] = (a_plus - a_minus) / (2.0 * eps_r)
         
-    # Lower-right: da/dv (mainly for drag)
+    # Lower-right: da/dv (mainly for drag; captures co-rotation effect too)
     for i in range(3):
         v_plus = v.copy()
         v_minus = v.copy()
         v_plus[i] += eps_v
         v_minus[i] -= eps_v
-        a_plus = _acceleration_njit(r, v_plus, Bc, rho_ref, H_km)
-        a_minus = _acceleration_njit(r, v_minus, Bc, rho_ref, H_km)
+        a_plus = _acceleration_njit(r, v_plus, Bc, rho_ref, H_km, rho_ref_alt_km)
+        a_minus = _acceleration_njit(r, v_minus, Bc, rho_ref, H_km, rho_ref_alt_km)
         J[3:, 3+i] = (a_plus - a_minus) / (2.0 * eps_v)
         
     return J
 
 @njit(fastmath=True, cache=True)
-def _stm_derivatives_njit(t: float, y: np.ndarray, Bc: float, rho_ref: float, H_km: float) -> np.ndarray:
+def _stm_derivatives_njit(t: float, y: np.ndarray, Bc: float, rho_ref: float, H_km: float, rho_ref_alt_km: float) -> np.ndarray:
     r = y[:3]
     v = y[3:6]
     Phi = y[6:].reshape((6, 6))
     
-    a_total = _acceleration_njit(r, v, Bc, rho_ref, H_km)
-    A = _stm_jacobian_njit(r, v, Bc, rho_ref, H_km)
+    a_total = _acceleration_njit(r, v, Bc, rho_ref, H_km, rho_ref_alt_km)
+    A = _stm_jacobian_njit(r, v, Bc, rho_ref, H_km, rho_ref_alt_km)
     
     dPhi = A @ Phi
     
@@ -528,7 +538,7 @@ def propagate_covariance_stm(
     v0_km_s: np.ndarray,
     cov0_6x6: np.ndarray,
     duration_s: float,
-    drag_config: Optional[any] = None,
+    drag_config: Optional['DragConfig'] = None,
 ) -> np.ndarray:
     """Propagate a full 6x6 covariance matrix using the State Transition Matrix.
 
@@ -552,18 +562,30 @@ def propagate_covariance_stm(
     Bc = 0.0
     rho_ref = 0.0
     H_km = 50.0  # Default scale height (km)
-    
+
+    # DEF-001 (Strategy A): compute rho_ref at actual initial orbit altitude, not 400 km
+    from astra.constants import EARTH_EQUATORIAL_RADIUS_KM as _Re, DRAG_MIN_ALTITUDE_KM as _min_alt
+    r0_mag = float(np.linalg.norm(r0_km))
+    rho_ref_alt_km = max(r0_mag - _Re, _min_alt)
+
     if drag_config:
         Bc = float(drag_config.cd * drag_config.area_m2 / drag_config.mass_kg)
         from astra.constants import DRAG_REF_DENSITY_KG_M3, DRAG_SCALE_HEIGHT_KM
-        rho_ref = DRAG_REF_DENSITY_KG_M3
+        # Initialize density at actual orbit altitude for physical accuracy (DEF-001)
+        try:
+            from astra.data_pipeline import atmospheric_density_empirical, get_space_weather
+            f107_obs, f107_adj, ap = get_space_weather(t_jd0)
+            rho_ref = atmospheric_density_empirical(rho_ref_alt_km, f107_obs, f107_adj, ap)
+        except Exception:
+            rho_ref = DRAG_REF_DENSITY_KG_M3  # fallback
+            rho_ref_alt_km = 400.0
         H_km = DRAG_SCALE_HEIGHT_KM
 
     sol = solve_ivp(
         _stm_derivatives_njit,
         t_span=(0.0, duration_s),
         y0=y0,
-        args=(Bc, rho_ref, H_km),
+        args=(Bc, rho_ref, H_km, rho_ref_alt_km),
         method='DOP853',
         rtol=1e-10,
         atol=1e-12,

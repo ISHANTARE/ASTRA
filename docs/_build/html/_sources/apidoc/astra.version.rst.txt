@@ -1,7 +1,0 @@
-astra.version module
-====================
-
-.. automodule:: astra.version
-   :members:
-   :show-inheritance:
-   :undoc-members:

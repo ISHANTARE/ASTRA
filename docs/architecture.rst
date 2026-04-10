@@ -21,7 +21,7 @@ Two Propagation Tiers
    - **Gravity**: WGS-84 Zonal Harmonics ($J_2$, $J_3$, $J_4$).
    - **Atmospheric Drag**: Jacchia-class empirical atmospheric density models driven by live Space Weather indicators (F10.7, Ap).
    - **Third-Body Dynamics**: Lunar & Solar gravitational perturbations computed directly from JPL DE421 planetary ephemeris.
-   - **SRP**: Optional cannonball solar radiation pressure with **cylindrical Earth umbra** (no penumbra).
+   - **SRP**: Optional cannonball solar radiation pressure with high-fidelity **conical Earth umbra** and continuous penumbra modeling.
 
 Numba JIT Acceleration
 ----------------------

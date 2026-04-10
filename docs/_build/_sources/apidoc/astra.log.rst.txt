@@ -1,7 +1,0 @@
-astra.log module
-================
-
-.. automodule:: astra.log
-   :members:
-   :show-inheritance:
-   :undoc-members:

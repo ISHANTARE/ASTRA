@@ -20,7 +20,7 @@ SIMULATION_STEPS: int = 288  # 24 * 60 / 5
 EARTH_RADIUS_KM: float = 6371.0
 EARTH_EQUATORIAL_RADIUS_KM: float = 6378.137
 EARTH_MU_KM3_S2: float = 398600.4418  # gravitational parameter (km³/s²)
-EARTH_OMEGA_RAD_S: float = 7.2921159e-5  # Earth rotation rate (rad/s)
+EARTH_OMEGA_RAD_S: float = 7.292115146706979e-5  # Earth sidereal rotation rate (rad/s) — IAU/IERS 2010
 
 # ---------------------------------------------------------------------------
 # Geopotential Zonal Harmonics (WGS84)
@@ -55,7 +55,10 @@ LEO_MAX_KM: float = 2000.0
 MEO_MIN_KM: float = 2000.0
 MEO_MAX_KM: float = 35786.0
 GEO_ALTITUDE_KM: float = 35786.0
-HEO_MIN_KM: float = 35786.0
+# HEO is defined by eccentricity, not altitude. Use HEO_ECCENTRICITY_THRESHOLD.
+# HEO_MIN_KM is retained for backward compatibility but is DEPRECATED.
+HEO_MIN_KM: float = 35786.0  # DEPRECATED — conflatess GEO altitude with HEO; use HEO_ECCENTRICITY_THRESHOLD
+HEO_ECCENTRICITY_THRESHOLD: float = 0.25  # e > 0.25 classifies an orbit as Highly Elliptical (Molniya etc.)
 
 # ---------------------------------------------------------------------------
 # Conjunction thresholds
@@ -79,3 +82,10 @@ TLE_AGE_DEFAULT_MAX_DAYS: float = 14.0
 # ---------------------------------------------------------------------------
 GRID_ALTITUDE_CELL_KM: float = 100.0
 GRID_ANGLE_CELL_DEG: float = 10.0
+
+# ---------------------------------------------------------------------------
+# Commonly-used physical and time scalars (eliminates magic-number literals)
+# ---------------------------------------------------------------------------
+SECONDS_PER_DAY: float = 86400.0
+MINUTES_PER_DAY: float = 1440.0
+G0_STD: float = 9.80665  # Standard gravitational acceleration at sea level (m/s²) — IAU

@@ -1,7 +1,0 @@
-astra.propagator module
-=======================
-
-.. automodule:: astra.propagator
-   :members:
-   :show-inheritance:
-   :undoc-members:

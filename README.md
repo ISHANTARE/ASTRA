@@ -98,9 +98,9 @@ If credentials are missing, ASTRA raises a clear error with setup hints.
 * **Spacebook Integration:** Direct streaming of Spacebook XP-TLEs, true observational covariance matrices, and live Space Weather priorities—bypassing heuristic estimation models for flight-grade accuracy.
 * **Dual format (TLE + OMM):** One API surface for parsing, propagation, filtering, and conjunctions.
 * **SGP4 at scale:** Vectorized propagation (`propagate_many`, generators) with UT1-aware handling where ephemeris data are available.
-* **Cowell propagation:** Dormand–Prince integration with **J₂–J₄**, empirical **drag** (space weather), **Sun/Moon** third-body gravity (**JPL DE421**), optional **solar radiation pressure** with **cylindrical Earth shadow** (umbra only; no penumbra), and **7-DOF** finite burns with mass flow.
-* **Conjunction screening:** KD-tree prefilter over time steps, spline refinement for TCA, dynamic effective radius from metadata when available.
-* **Collision probability:** Analytical (Chan/Foster lineage) and **6D Monte Carlo** paths when full covariances are supplied; Seamless integration with Spacebook synthetic covariance matrices.
+* **Cowell propagation:** Dormand–Prince integration with **J₂–J₄**, empirical **drag** (space weather), **Sun/Moon** third-body gravity (**JPL DE421**), high-fidelity **solar radiation pressure** with **conical Earth shadow** (continuous penumbra modeling), and **7-DOF** finite burns with mass flow.
+* **Conjunction screening:** KD-tree prefilter over time steps (~14.8x speedup), spline refinement for TCA, Spacebook EOP coordinate mapping, and dynamic effective radius from metadata when available.
+* **Collision probability:** Analytical (Chan/Foster lineage), exact **2D Gaussian Quadrature** (`dblquad`), and **6D Monte Carlo** paths when full covariances are supplied; Seamless integration with Spacebook synthetic covariance matrices.
 * **Catalog ingestion:** CelesTrak and Space-Track helpers plus local **OMM** files.
 * **Pass prediction:** TEME → ground observer pipeline (ENU), coarse grid + refinement for AOS/TCA/LOS.
 * **Optional 3D plots:** Interactive Plotly figures via the **`[viz]`** extra—core install stays lean for servers and CI.
@@ -141,7 +141,7 @@ ASTRA-Core implements widely used models suitable for **research, education, int
 |-------|----------------|
 | **Sun/Moon ephemeris** | Default kernel is **DE421** (roughly **1900–2050**). Very long or future-dated studies may need another ephemeris (e.g. DE440) and your own validation. |
 | **Atmosphere** | Empirical **Jacchia-class** density, not NRLMSISE. Not intended for detailed re-entry or the densest LEO regimes alone. |
-| **SRP** | Simple **cannonball** model; optional **cylindrical** shadow (full sun or full shadow in umbra). **Penumbra is not modeled.** |
+| **SRP** | Simple **cannonball** model; enhanced with high-fidelity **conical Earth shadow** capable of smoothly modeling fractional illumination through the penumbra. |
 | **P_c** | Depends on **covariance quality**. Built-in `estimate_covariance()` is a **rough heuristic**—for serious thresholds, use **CDM-class covariances**. Turn on **strict mode** to avoid silent fallbacks. |
 | **Monte Carlo P_c** | Uses a **straight-line** relative-motion model per sample; very **slow** co-orbital encounters need careful interpretation and finer time sampling. |
 | **Catalog quality** | Stale or poor elements dominate error—always check epoch and data source. |

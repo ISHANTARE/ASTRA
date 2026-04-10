@@ -248,16 +248,52 @@ _sw_fetch_thread: Optional[threading.Thread] = None
 
 
 def _download_space_weather(data_dir: Optional[str] = None) -> str:
-    """Download SW-All.csv from CelesTrak and cache locally."""
+    """Download SW-All.csv from CelesTrak and cache locally.
+    
+    Includes robust retry headers and post-download integrity checks.
+    """
     path = pathlib.Path(data_dir or _DEFAULT_DATA_DIR)
     path.mkdir(parents=True, exist_ok=True)
     local_file = path / "SW-All.csv"
 
     logger.info(f"Downloading CelesTrak SW-All.csv → {local_file}")
-    resp = requests.get(_CELESTRAK_SW_URL, timeout=60)
-    resp.raise_for_status()
-    local_file.write_text(resp.text, encoding="utf-8")
-    return resp.text
+    
+    # DEF-013: Add robust retries for network unreliability
+    import requests
+    from requests.adapters import HTTPAdapter
+    from urllib3.util.retry import Retry
+    
+    session = requests.Session()
+    retries = Retry(
+        total=3,
+        backoff_factor=1,
+        status_forcelist=[429, 500, 502, 503, 504]
+    )
+    session.mount("https://", HTTPAdapter(max_retries=retries))
+    
+    try:
+        resp = session.get(_CELESTRAK_SW_URL, timeout=30)
+        resp.raise_for_status()
+    except Exception as e:
+        from astra import config
+        if getattr(config, "ASTRA_STRICT_MODE", False):
+            raise ValueError(f"[ASTRA STRICT] Space weather fetch failed: {e}") from e
+        logger.warning(f"Space weather fetch failed: {e}. Falling back to default data if cache empty.")
+        raise
+        
+    text = resp.text
+    
+    # DEF-019: Proxy sanity check to avoid caching HTML login portals
+    if not text.startswith("DATE") and not text.startswith("#"):
+        from astra import config
+        msg = f"Invalid space weather payload from CelesTrak (starts with: {text[:20]!r}). Likely a proxy or firewall."
+        if getattr(config, "ASTRA_STRICT_MODE", False):
+            raise ValueError(f"[ASTRA STRICT] {msg}")
+        logger.warning(msg)
+        raise ValueError("Invalid CSV payload")
+
+    local_file.write_text(text, encoding="utf-8")
+    return text
 
 
 def _parse_sw_csv(text: str) -> None:
@@ -412,7 +448,13 @@ def get_space_weather(t_jd: float, data_dir: Optional[str] = None) -> tuple[floa
             )
 
     # ── 2. CelesTrak (Fallback) ──
-    load_space_weather(data_dir)
+    try:
+        load_space_weather(data_dir)
+    except Exception as exc:
+        from astra import config
+        if getattr(config, 'ASTRA_STRICT_MODE', False):
+            raise ValueError(f"[ASTRA STRICT] Required CelesTrak space-weather fetch failed: {exc}")
+        logger.warning("Falling back to synthetic space weather parameters (150/150/15).")
 
     # Stale cache: background refresh if > 48 h since last successful load
     global _sw_fetch_thread
@@ -427,22 +469,13 @@ def get_space_weather(t_jd: float, data_dir: Optional[str] = None) -> tuple[floa
                 _sw_fetch_thread.start()
 
     # JD → calendar date via integer-split day/fraction (stable vs float drift)
-    from datetime import timedelta
-    days_offset = t_jd - 2451545.0
-    whole_days = int(days_offset)
-    frac_day = days_offset - whole_days
-    whole_sec = int(frac_day * 86400.0)
-    micro_sec = round((frac_day * 86400.0 - whole_sec) * 1e6)
-    dt = datetime(2000, 1, 1, 12, 0, 0, tzinfo=timezone.utc) + timedelta(
-        days=whole_days, seconds=whole_sec, microseconds=micro_sec
-    )
-    date_str = dt.strftime("%Y-%m-%d")
+    from astra.jdutil import jd_utc_to_datetime
+    dt = jd_utc_to_datetime(t_jd)
+    date_str = f"{dt.year:04d}-{dt.month:02d}-{dt.day:02d}"
 
     with _SW_LOCK:
         if date_str in _sw_cache:
             return _sw_cache[date_str]
-
-    # ── 3. Synthetic Defaults ──
     from astra import config
     from astra.errors import SpaceWeatherError
     if config.ASTRA_STRICT_MODE:

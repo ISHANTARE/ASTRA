@@ -1,7 +1,0 @@
-astra.plot module
-=================
-
-.. automodule:: astra.plot
-   :members:
-   :show-inheritance:
-   :undoc-members:
