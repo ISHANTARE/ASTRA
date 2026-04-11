@@ -271,6 +271,11 @@ class SatelliteOMM:
     rcs_m2: Optional[float] = None  # Radar Cross Section in **m²**.
     mass_kg: Optional[float] = None  # Spacecraft mass in **kg**. Mandatory for powered maneuvers.
     cd_area_over_mass: Optional[float] = None
+    
+    # AUDIT-B-08 Fix: Added null structural properties for line1/line2 to prevent 
+    # AttributeError when user-code blindly passes OMM sources to legacy 'tle' handlers.
+    line1: Optional[str] = None
+    line2: Optional[str] = None
 
     @classmethod
     def from_dict(cls, record: dict) -> "SatelliteOMM":

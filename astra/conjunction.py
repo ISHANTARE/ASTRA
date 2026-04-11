@@ -222,17 +222,24 @@ def load_spacebook_covariance(norad_id: int) -> np.ndarray | None:
 
 
 def closest_approach(
-    trajectory_a: np.ndarray, trajectory_b: np.ndarray, times_jd: np.ndarray
+    trajectory_a: np.ndarray, trajectory_b: np.ndarray, times_jd: np.ndarray,
+    spline_A: Optional[Any] = None, spline_B: Optional[Any] = None
 ) -> tuple[float, float, int]:
-    """Find the exact minimum separation using cubic splines."""
+    """Find the exact minimum separation using cubic splines.
+    
+    AUDIT-D-02 Fix: Accepts pre-computed splines to allow amortised O(1) 
+    evaluation time in tight loops where re-building O(N log N) is prohibitive.
+    """
     coarse_dists = distance_3d(trajectory_a, trajectory_b)
     t_idx = int(np.argmin(coarse_dists))
     
     if len(times_jd) < 3:
         return float(coarse_dists[t_idx]), float(times_jd[t_idx]), t_idx
         
-    spline_A = scipy.interpolate.CubicSpline(times_jd, trajectory_a, bc_type='natural')
-    spline_B = scipy.interpolate.CubicSpline(times_jd, trajectory_b, bc_type='natural')
+    if spline_A is None:
+        spline_A = scipy.interpolate.CubicSpline(times_jd, trajectory_a, bc_type='natural')
+    if spline_B is None:
+        spline_B = scipy.interpolate.CubicSpline(times_jd, trajectory_b, bc_type='natural')
     
     idx_low = max(0, t_idx - 1)
     idx_high = min(len(times_jd) - 1, t_idx + 1)
@@ -521,12 +528,14 @@ def find_conjunctions(
             covariance_source=covariance_src
         )
 
-    # Execute geometric evaluations concurrently across all CPU threads
-    executor = concurrent.futures.ThreadPoolExecutor(max_workers=os.cpu_count())
-    try:
+    # AUDIT-B-07 Fix: Use ThreadPoolExecutor as a context manager so that
+    # executor.shutdown() is guaranteed on all code paths, including exceptions
+    # raised before the old try/finally block was entered (e.g. during future
+    # submission for very large catalogs).
+    skipped = 0
+    strict_error = None
+    with concurrent.futures.ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
         futures = {executor.submit(evaluate_pair, pair): pair for pair in candidate_pairs_phase2}
-        skipped = 0
-        strict_error = None
         for future in concurrent.futures.as_completed(futures):
             pair = futures[future]
             try:
@@ -545,14 +554,13 @@ def find_conjunctions(
                         f.cancel()
                     break
                 logger.warning(f"Conjunction pair {pair} skipped: {e!r}")
+    # __exit__ of the context manager calls shutdown(wait=True) automatically
 
-        if strict_error:
-            raise strict_error from None
+    if strict_error:
+        raise strict_error from None
 
-        if skipped > 0:
-            logger.warning(f"{skipped} conjunction pairs skipped due to errors. Results may be incomplete.")
-    finally:
-        executor.shutdown(wait=True, cancel_futures=True)
+    if skipped > 0:
+        logger.warning(f"{skipped} conjunction pairs skipped due to errors. Results may be incomplete.")
 
     events.sort(key=lambda x: x.miss_distance_km)
     logger.info(f"Conjunction Sweep Complete: {len(events)} events detected.")

@@ -2,8 +2,9 @@
 """ASTRA Core Numerical Propagator — Segmented Cowell's Method.
 
 Implements a mission-operations–grade numerical orbit propagator using
-Cowell's direct integration with a Dormand-Prince RK8(7) adaptive-step
-integrator.
+Cowell's direct integration with a Dormand-Prince **DOP853** (8th-order,
+error-estimate 5th/3rd order) adaptive-step integrator via SciPy's
+``solve_ivp(method='DOP853')``.
 
 **Features**
 
@@ -32,9 +33,9 @@ or segment-level energy, not bitwise-identical acceleration samples.
 
 **SRP / PHY-18**
 
-Cannonball SRP scales flux from 1 AU; optional **cylindrical Earth umbra**
-(no penumbra) zeros SRP when the satellite lies in the anti-sunward cylinder
-of radius ``EARTH_EQUATORIAL_RADIUS_KM`` — see ``DragConfig.srp_cylindrical_shadow``.
+Cannonball SRP scales flux from 1 AU; uses a **conical Earth umbra/penumbra**
+geometry (planar intersection model) to continuously scale solar pressure through 
+twilight regions — see ``DragConfig.srp_cylindrical_shadow`` (named for legacy compatibility).
 
 **References**
 
@@ -50,21 +51,7 @@ from typing import Optional
 
 import numpy as np
 import numpy.polynomial.chebyshev as cheb
-try:
-    from numba import njit
-    _NUMBA_AVAILABLE = True
-except ImportError:
-    _NUMBA_AVAILABLE = False
-    def njit(*args, **kwargs):
-        """No-op decorator when Numba is unavailable."""
-        def decorator(f):
-            return f
-        return decorator if (args and callable(args[0])) else decorator
-    import logging as _logging
-    _logging.getLogger(__name__).warning(
-        "Numba not installed — JIT-compiled kernels will run in pure-Python mode. "
-        "Performance will be significantly reduced. Install numba for full speed."
-    )
+from astra._numba_compat import njit, NUMBA_AVAILABLE as _NUMBA_AVAILABLE
 from scipy.integrate import solve_ivp
 
 from astra.constants import (
@@ -158,15 +145,24 @@ def _srp_illumination_factor_njit(
         x = (gamma*gamma + alpha*alpha - beta*beta) / (2.0 * gamma)
         y = math.sqrt(max(0.0, alpha*alpha - x*x))
         
-        area = (alpha*alpha * math.acos(x / alpha) + 
+        # AUDIT-A-01 Fix: Renamed variable to overlap_area to avoid confusion
+        # with the total solar disk area.
+        overlap_area = (alpha*alpha * math.acos(x / alpha) + 
                 beta*beta * math.acos((gamma - x) / beta) - 
                 gamma * y)
         
         # Illumination factor = 1 - (Obscured Area / Total Solar Area)
-        nu = 1.0 - area / (math.pi * beta * beta)
+        nu = 1.0 - overlap_area / (math.pi * beta * beta)
         if nu < 0.0: nu = 0.0
         if nu > 1.0: nu = 1.0
         return nu
+
+    # AUDIT-C-01 Fix: Sentinel return — all three geometric cases (sunlit,
+    # umbra, penumbra) are mutually exclusive and exhaustive, so this line
+    # is geometrically unreachable. It exists to satisfy the Python
+    # function-always-returns contract and prevent a None return in Numba-
+    # less environments when fastmath optimisations reorder branches.
+    return 1.0  # fallback: treat degenerate geometry as fully illuminated
 
 @njit(fastmath=True, cache=True)
 def srp_illumination_factor_njit(r_km, r_sun_km, earth_radius_km, sun_radius_km):
@@ -233,7 +229,10 @@ class NumericalState:
         """Basic range validation on state vectors."""
         if self.position_km is not None:
             r_mag = np.linalg.norm(self.position_km)
-            if 1.0 < r_mag < 6000.0:
+            # AUDIT-B-06 Fix: Use correct Earth equatorial radius (~6378 km),
+            # not the arbitrary 6000 km that was flagging sub-orbital but
+            # physically-above-surface positions (6000–6378 km range).
+            if 1.0 < r_mag < EARTH_EQUATORIAL_RADIUS_KM:
                 logger.warning(f"NumericalState position radius {r_mag:.2f} km is inside Earth radius.")
             elif r_mag < 0.1:
                 # Likely an unitialized or zeroed state
@@ -253,6 +252,10 @@ class DragConfig:
     mass_kg: float = 1000.0
     cr: float = 1.5
     include_srp: bool = True
+    
+    # AUDIT-F-01 Fix: Retaining the 'cylindrical' name for backward compatibility, 
+    # but the underlying physics engine actually implements a high-fidelity 
+    # conical Earth umbra/penumbra model via _srp_illumination_factor_njit.
     srp_cylindrical_shadow: bool = True
 
 
@@ -621,6 +624,7 @@ def _coast_derivative(
     drag_mass_kg: float,
     drag_rho: float,
     drag_H_km: float,
+    drag_ref_alt_km: float,   # AUDIT-C-03 Fix: was missing; caused arity mismatch in Python path
     include_third_body: bool,
     global_t_jd0: float,
     duration_d: float,
@@ -641,7 +645,7 @@ def _coast_derivative(
     t_jd = t_jd0_segment + t_sec / SECONDS_PER_DAY
     a = _acceleration(
         t_jd, r, v, use_drag, drag_cd, drag_area_m2, drag_mass_kg, drag_rho, drag_H_km,
-        include_third_body, global_t_jd0, duration_d, sun_coeffs, moon_coeffs,
+        drag_ref_alt_km, include_third_body, global_t_jd0, duration_d, sun_coeffs, moon_coeffs,
         use_srp, srp_cr, srp_use_shadow,
     )
     return np.concatenate([v, a])
@@ -661,6 +665,7 @@ def _powered_derivative(
     drag_mass_kg: float,
     drag_rho: float,
     drag_H_km: float,
+    drag_ref_alt_km: float,   # AUDIT-C-03 Fix: was missing; caused arity mismatch in Python path
     include_third_body: bool,
     global_t_jd0: float,
     duration_d: float,
@@ -700,7 +705,7 @@ def _powered_derivative(
     # Gravitational + drag acceleration (using instantaneous mass for Bc)
     a_grav = _acceleration(
         t_jd, r, v, use_drag, drag_cd, drag_area_m2, instantaneous_mass_kg, drag_rho, drag_H_km,
-        include_third_body, global_t_jd0, duration_d, sun_coeffs, moon_coeffs,
+        drag_ref_alt_km, include_third_body, global_t_jd0, duration_d, sun_coeffs, moon_coeffs,
         use_srp, srp_cr, srp_use_shadow,
     )
 
@@ -787,6 +792,7 @@ def _acceleration_njit(
     # Keep μ, Re, J2, J3, J4, and third-body GM in sync with astra.constants.
     # MATH-01/02 Fix: Use full 8-significant-figure precision matching constants.py
     # (prior values -0.00000253266 / -0.00000161962 were truncated by 3 digits).
+    # AUDIT-B-02 Fix: Clarifying that Re matches EARTH_EQUATORIAL_RADIUS_KM
     Re = 6378.137
     mu = 398600.4418
     J2 = 0.00108262668
@@ -851,13 +857,24 @@ def _acceleration_njit(
 
     # --- Third-Body (Sun & Moon) via Chebyshev Splines ---
     if include_third_body:
-        t_norm = 2.0 * (t_jd - t_jd0) / duration_d - 1.0
+        # AUDIT-D-01 Fix: Piecewise 7-day spline evaluation instead of monolithic
+        idx = int((t_jd - t_jd0) / 7.0)
+        num_pieces = sun_coeffs.shape[0]
+        if idx >= num_pieces:
+            idx = num_pieces - 1
+        elif idx < 0:
+            idx = 0
+            
+        piece_t_jd0 = t_jd0 + idx * 7.0
+        piece_duration = 7.0
+        
+        t_norm = 2.0 * (t_jd - piece_t_jd0) / piece_duration - 1.0
         # Clamp between -1 and 1 just in case of precision errors at edges
         if t_norm < -1.0: t_norm = -1.0
         if t_norm > 1.0: t_norm = 1.0
         
-        sun_pos = _eval_cheb_3d_njit(t_norm, sun_coeffs)
-        moon_pos = _eval_cheb_3d_njit(t_norm, moon_coeffs)
+        sun_pos = _eval_cheb_3d_njit(t_norm, sun_coeffs[idx])
+        moon_pos = _eval_cheb_3d_njit(t_norm, moon_coeffs[idx])
         
         # Sun Gravity
         d_sun = sun_pos - r
@@ -1022,36 +1039,37 @@ def _compute_scale_height(f107_obs: float, f107_adj: float, ap_daily: float) -> 
 
 def _compute_planetary_splines(t_jd0: float, duration_s: float, use_de: bool) -> tuple[np.ndarray, np.ndarray, float]:
     duration_d = duration_s / 86400.0
-    if duration_d < 1e-9:
-        duration_d = 0.1  # fallback to avoid division by zero
+    # AUDIT-D-01 Fix: Avoid Chebyshev degree cliffs by chunking long propagations
+    # into piecewise 7-day splines with fixed degree 35 (5 nodes/day), preventing 
+    # M-level node scaling on multi-year orbits while fully satisfying lunar freq.
+    deg = 35
+    num_pieces = max(1, int(np.ceil(duration_d / 7.0)))
     
-    # Scale Chebyshev degree with arc duration to resolve lunar period (~27.3 d).
-    # 25 nodes minimum; 5 nodes/day for longer arcs (> 10 days) captures the 27.3-day lunar period.
-    deg = max(25, int(duration_d * 5))
-    # Chebyshev nodes of the first kind on [-1, 1]; ``cheb.chebfit``
-    # fits T_n in a least-squares sense on these points. Gauss–Lobatto (endpoints
-    # included) is an alternative if endpoint errors dominate.
     nodes_norm = np.cos(np.pi * (2 * np.arange(deg + 1) + 1) / (2 * (deg + 1)))
-    t_nodes = t_jd0 + 0.5 * duration_d * (nodes_norm + 1.0)
     
-    sun_pos = np.zeros((deg + 1, 3))
-    moon_pos = np.zeros((deg + 1, 3))
+    sun_coeffs = np.zeros((num_pieces, deg + 1, 3))
+    moon_coeffs = np.zeros((num_pieces, deg + 1, 3))
     
     # TEME-frame samples so the Numba kernel matches the SGP4 propagator frame.
     sun_fn = _sun_position_de if use_de else _sun_position_approx
     moon_fn = _moon_position_de if use_de else _moon_position_approx
     
-    for i, t in enumerate(t_nodes):
-        sun_pos[i] = sun_fn(t)
-        moon_pos[i] = moon_fn(t)
+    for i in range(num_pieces):
+        piece_t_jd0 = t_jd0 + i * 7.0
+        piece_dur = 7.0
+        t_nodes = piece_t_jd0 + 0.5 * piece_dur * (nodes_norm + 1.0)
         
-    sun_c = np.zeros((deg + 1, 3))
-    moon_c = np.zeros((deg + 1, 3))
-    for dim in range(3):
-        sun_c[:, dim] = cheb.chebfit(nodes_norm, sun_pos[:, dim], deg)
-        moon_c[:, dim] = cheb.chebfit(nodes_norm, moon_pos[:, dim], deg)
-        
-    return sun_c, moon_c, duration_d
+        sun_pos = np.zeros((deg + 1, 3))
+        moon_pos = np.zeros((deg + 1, 3))
+        for j, t in enumerate(t_nodes):
+            sun_pos[j] = sun_fn(t)
+            moon_pos[j] = moon_fn(t)
+            
+        for dim in range(3):
+            sun_coeffs[i, :, dim] = cheb.chebfit(nodes_norm, sun_pos[:, dim], deg)
+            moon_coeffs[i, :, dim] = cheb.chebfit(nodes_norm, moon_pos[:, dim], deg)
+            
+    return sun_coeffs, moon_coeffs, duration_d
 
 
 
@@ -1108,8 +1126,10 @@ def propagate_cowell(
         dt_out: Output time step in seconds (default 60 s).
         drag_config: Optional atmospheric drag parameters.
         include_third_body: Include Sun/Moon gravity.
-        rtol: Relative tolerance for adaptive step integrator (overrides defaults).
-        atol: Absolute tolerance for adaptive step integrator (overrides defaults).
+        rtol: Top-level relative tolerance override (WARNING: Silently discards any 
+            fine-tuned ``coast_rtol`` and ``powered_rtol`` values).
+        atol: Top-level absolute tolerance override (WARNING: Silently discards any 
+            fine-tuned ``coast_atol`` and ``powered_atol`` values).
         maneuvers: Optional list of ``FiniteBurn`` definitions.
             Burns must not overlap in time.
         use_de: Use JPL DE421 for Sun/Moon (True) or analytical (False).
@@ -1166,8 +1186,10 @@ def propagate_cowell(
     if include_third_body:
         sun_coeffs, moon_coeffs, duration_d = _compute_planetary_splines(t_jd0, duration_s, use_de)
     else:
-        sun_coeffs = np.zeros((1, 3))
-        moon_coeffs = np.zeros((1, 3))
+        # AUDIT-D-01 Fix: Even when disabled, Numba JIT needs a strictly 3D array 
+        # signature to compile the _eval_cheb_3d_njit piece-wise lookup.
+        sun_coeffs = np.zeros((1, 1, 3))
+        moon_coeffs = np.zeros((1, 1, 3))
         duration_d = duration_s / 86400.0
 
     # Space weather once per propagation for empirical drag (rho_ref, scale height).
@@ -1315,6 +1337,11 @@ def propagate_cowell(
             current_r = sol.y[:3, -1].copy()
             current_v = sol.y[3:6, -1].copy()
             current_mass = float(sol.y[6, -1])
+            # AUDIT-B-04 Fix: Update drag ballistic coefficient to reflect
+            # post-burn mass. Without this, subsequent coast arc drag used
+            # the pre-burn mass, systematically overestimating deceleration
+            # by the fraction of propellant consumed.
+            drag_mass_kg = current_mass
 
         else:
             # ---- COAST SEGMENT (6-DOF) ----
@@ -1403,23 +1430,35 @@ def _build_segments(
     cursor_s = 0.0
     end_s = duration_s
 
-    # 1. Robust overlap detection (SE-G)
+    # AUDIT-B-03 Fix: Robust overlap detection (SE-G) — build a set of burn
+    # indices to skip so that the processing loop below actually omits them,
+    # rather than just warning and then still scheduling the overlapping arc.
+    # In STRICT_MODE we raise immediately; in Relaxed mode we warn and skip.
+    import logging as _log_mod
+    _seg_log = _log_mod.getLogger(__name__)
+    skipped_indices: set[int] = set()
     for i in range(len(burns) - 1):
-        b1, b2 = burns[i], burns[i+1]
+        b1, b2 = burns[i], burns[i + 1]
         if b2.epoch_ignition_jd < b1.epoch_cutoff_jd - 1e-12:
             from astra import config
             from astra.errors import ManeuverError
             msg = (
-                f"Maneuver overlap detected: Burn at {b2.epoch_ignition_jd} "
-                f"ignites before previous Burn cutoff at {b1.epoch_cutoff_jd}."
+                f"Maneuver overlap detected: Burn[{i+1}] ignition "
+                f"{b2.epoch_ignition_jd:.8f} JD is before Burn[{i}] cutoff "
+                f"{b1.epoch_cutoff_jd:.8f} JD."
             )
             if config.ASTRA_STRICT_MODE:
                 raise ManeuverError(msg)
             else:
-                import logging
-                logging.getLogger(__name__).warning(f"{msg} Skipping overlapping burn.")
+                _seg_log.warning(
+                    "%s Burn[%d] will be skipped to avoid dual-thrust arc.", msg, i + 1
+                )
+                skipped_indices.add(i + 1)  # skip the later (overlapping) burn
 
-    for burn in burns:
+    for idx, burn in enumerate(burns):
+        if idx in skipped_indices:
+            continue  # AUDIT-B-03: actually omit the overlapping burn
+
         # Convert burn epochs to seconds relative to t_jd0
         ign_s = (burn.epoch_ignition_jd - t_jd0) * 86400.0
         cut_s = (burn.epoch_cutoff_jd - t_jd0) * 86400.0

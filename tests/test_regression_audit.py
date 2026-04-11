@@ -31,7 +31,7 @@ def test_j4_python_and_numba_paths_agree():
     t_jd = 2451545.0
 
     # Python path (high-level, no drag, no 3rd body, no SRP)
-    empty_coeffs = np.zeros((2, 3))
+    empty_coeffs = np.zeros((1, 2, 3))
     a_py = _acceleration(
         t_jd, r, v,
         False, 2.2, 10.0, 1000.0, 0.0, 50.0, 400.0,    # use_drag=False, drag_ref_alt_km=400.0

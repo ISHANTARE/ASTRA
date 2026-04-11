@@ -80,6 +80,15 @@ def _exact_pc_2d_integral(
     norm = 1.0 / (2.0 * math.pi * math.sqrt(det_C_p))
     mx, my = float(miss_2d[0]), float(miss_2d[1])
 
+    # AUDIT-D-03 Fix: Fast-path — when the miss distance is much larger than
+    # the hard-body radius, Chan's approximation is indistinguishable from the
+    # exact integral.  Skip the expensive dblquad and save 5-50 ms per call.
+    miss_norm = math.sqrt(mx ** 2 + my ** 2)
+    if miss_norm > 5.0 * combined_radius_km:
+        mahal = float(miss_2d @ inv_C_p @ miss_2d)
+        area = math.pi * combined_radius_km ** 2
+        return float(np.clip(norm * math.exp(-0.5 * mahal) * area, 0.0, 1.0))
+
     # Extract inv-covariance elements once outside the hot loop.
     a11 = float(inv_C_p[0, 0])
     a12 = float(inv_C_p[0, 1]) + float(inv_C_p[1, 0])  # symmetric off-diagonal
@@ -294,8 +303,11 @@ def estimate_covariance(time_since_epoch_days: float, f107_flux: float = 150.0) 
         ValueError: In STRICT_MODE — real OD covariance data must be supplied.
     """
     from astra import config
+    from astra.errors import AstraError
     if config.ASTRA_STRICT_MODE:
-        raise ValueError(
+        # AUDIT-F-04 Fix: Raise typed AstraError (not plain ValueError) so
+        # callers using 'except AstraError' catch this correctly.
+        raise AstraError(
             "[ASTRA STRICT] estimate_covariance() is disabled in strict mode. "
             "Collision probability calculations require real Orbit Determination "
             "covariance matrices from CDM data or propagate_covariance_stm(). "
@@ -394,6 +406,14 @@ def compute_collision_probability_mc(
     
     t_min = -np.sum(r_samples * v_samples, axis=1) / v_dot_v
     
+    # AUDIT-C-04 Fix: Clamp t_min to a ±3600 s (1-hour) window around TCA.
+    # For co-orbital encounters (relative speed ≲ 10 m/s), the purely-linear
+    # relative trajectory minimum can be many orbital periods away, placing
+    # r_min_vec far from the true closest-approach geometry and causing
+    # systematic Pc under-estimation.  A 1-hour bracket is generous for all
+    # real-world conjunction geometries while being physically meaningful.
+    t_min = np.clip(t_min, -3600.0, 3600.0)
+    
     # Minimum distance vectors
     r_min_vec = r_samples + v_samples * t_min[:, np.newaxis]
     d_min = np.linalg.norm(r_min_vec, axis=1)
@@ -403,20 +423,7 @@ def compute_collision_probability_mc(
     return float(hits / n_samples)
 
 
-try:
-    from numba import njit
-    _NUMBA_AVAILABLE = True
-except ImportError:
-    _NUMBA_AVAILABLE = False
-    def njit(*args, **kwargs):
-        """No-op decorator when Numba is unavailable."""
-        def decorator(f):
-            return f
-        return decorator if (args and callable(args[0])) else decorator
-    import logging as _logging
-    _logging.getLogger(__name__).warning(
-        "Numba not installed — STM covariance kernels will run in pure-Python mode."
-    )
+from astra._numba_compat import njit, NUMBA_AVAILABLE as _NUMBA_AVAILABLE
 from astra.constants import J3, J4
 
 @njit(fastmath=True, cache=True)

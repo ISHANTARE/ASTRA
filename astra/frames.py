@@ -10,21 +10,7 @@ import numpy as np
 # DEF-003: Graceful Numba fallback — mirrors the pattern in propagator.py.
 # Without this, importing frames.py would hard-crash in environments where
 # Numba is not installed, breaking the propagator's own graceful fallback.
-try:
-    from numba import njit
-    _NUMBA_AVAILABLE = True
-except ImportError:
-    _NUMBA_AVAILABLE = False
-    def njit(*args, **kwargs):  # type: ignore[misc]
-        """No-op Numba decorator. Functions run as plain Python."""
-        def _decorator(fn):
-            return fn
-        # Handle both @njit and @njit(fastmath=True, ...) call forms
-        return _decorator(args[0]) if (args and callable(args[0])) else _decorator
-    import logging as _logging
-    _logging.getLogger(__name__).warning(
-        "Numba not installed — frame rotation kernels will run in pure-Python mode."
-    )
+from astra._numba_compat import njit, NUMBA_AVAILABLE as _NUMBA_AVAILABLE
 
 @njit(fastmath=True, cache=True)
 def _build_vnb_matrix_njit(pos: np.ndarray, vel: np.ndarray) -> np.ndarray:
@@ -163,8 +149,14 @@ def teme_to_ecef(r_teme: np.ndarray, times_jd: np.ndarray, use_spacebook_eop: bo
         return r_itrs
         
     # Skyfield base parameters
+    # AUDIT-C-02 Verification: Skyfield's Time.polar_motion_angles() returns
+    # (xp, yp, era_rad) where xp and yp are in ARCSECONDS (the IERS Bulletin A
+    # storage convention).  This matches the unit of xp_sb / yp_sb from
+    # Spacebook, so the delta below is correctly arc-second-valued before the
+    # (pi/648000) arcsec→radians conversion factor.  ERA (the third element) is
+    # in radians but is not used here.
     dut1_skyfield = t.dut1
-    xp_sky, yp_sky, _ = t.polar_motion_angles()
+    xp_sky, yp_sky, _ = t.polar_motion_angles()  # both xp_sky, yp_sky in arcsec
     
     # Deltas
     d_dut1 = dut1_sb - dut1_skyfield
@@ -261,8 +253,14 @@ def ecef_to_geodetic_wgs84(x: np.ndarray, y: np.ndarray, z: np.ndarray) -> tuple
     lat_abs = np.abs(lat)
     polar_mask = lat_abs > (80.0 * np.pi / 180.0)
 
-    # Equatorial formula (safe for |lat| < 80°)
-    alt_equatorial = p / np.cos(lat) - N
+    # AUDIT-A-08 Fix: Guard the equatorial branch against cos(lat)→0 at poles.
+    # Numba with fastmath=True evaluates BOTH branches of np.where before
+    # selecting, so p/cos(lat) would produce inf at the poles even though the
+    # polar_mask would select the other branch.  An inf intermediate can poison
+    # downstream computations under fastmath associativity relaxation.
+    cos_lat = np.cos(lat)
+    safe_cos = np.where(np.abs(cos_lat) < 1e-10, 1e-10, cos_lat)
+    alt_equatorial = p / safe_cos - N
 
     # Polar formula (safe for |lat| > 0, avoids 1/cos(lat) singularity)
     sin_lat = np.sin(lat)

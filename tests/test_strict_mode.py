@@ -119,7 +119,8 @@ class TestSpaceWeatherStrict:
 class TestEstimateCovarianceStrict:
     def test_raises_in_strict_mode(self):
         with _StrictMode(True):
-            with pytest.raises(ValueError, match=r"STRICT"):
+            from astra.errors import AstraError
+            with pytest.raises(AstraError, match=r"STRICT"):
                 estimate_covariance(3.0)
 
     def test_returns_matrix_in_relaxed_mode(self, caplog):

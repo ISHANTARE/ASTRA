@@ -375,12 +375,22 @@ def __getattr__(name: str):
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
+import os
+
 _BANNER_SHOWN = False
 
 def _show_banner() -> None:
-    """Print ASTRA startup banner to stderr. Fires once per process."""
+    """Print ASTRA startup banner to stderr. Fires once per process.
+
+    AUDIT-F-03 Fix: Suppressed when ``ASTRA_NO_BANNER=1`` is set, preventing
+    log pollution in production worker pools where each subprocess would
+    otherwise emit the banner independently.
+    """
     global _BANNER_SHOWN
     if _BANNER_SHOWN:
+        return
+    if os.environ.get("ASTRA_NO_BANNER", "0").strip() == "1":
+        _BANNER_SHOWN = True
         return
     mode = "STRICT (Flight-Grade)" if config.ASTRA_STRICT_MODE else "Relaxed (Beginner-Friendly)"
     print(f"[ASTRA-Core v{__version__}] Mode: {mode}", file=sys.stderr)

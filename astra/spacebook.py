@@ -137,6 +137,10 @@ _SW_DOWNLOAD_LOCK = threading.Lock()
 _eop_cache: dict[int, tuple[float, float, float]] = {}
 _eop_loaded: bool = False
 _EOP_LOCK = threading.RLock()
+# AUDIT-C-S02 Fix: Add a dedicated download-serialisation lock (non-reentrant)
+# so two threads that both observe _eop_loaded=False do not trigger two
+# simultaneous network downloads.  Mirrors the SW and GUID DCL patterns.
+_EOP_DOWNLOAD_LOCK = threading.Lock()
 
 # Satellite catalog: norad_id (int) → comspoc_guid (str UUID)
 _guid_map: dict[int, str] = {}
@@ -561,7 +565,14 @@ def get_eop_sb(t_jd: float) -> tuple[float, float, float]:
         loaded = _eop_loaded
 
     if not loaded:
-        _load_eop()
+        # AUDIT-C-S02 Fix: Double-checked locking — serialise the initial
+        # download so two threads that both see _eop_loaded=False concurrently
+        # don't issue two network requests.  Same pattern as SW and GUID caches.
+        with _EOP_DOWNLOAD_LOCK:
+            with _EOP_LOCK:
+                loaded = _eop_loaded
+            if not loaded:
+                _load_eop()
 
     # JD → MJD
     mjd = int(t_jd - 2400000.5)
@@ -674,22 +685,55 @@ def _load_satcat_guid_map() -> None:
         "Spacebook satcat: GUID map loaded — %d objects.", len(_guid_map)
     )
 
-    # If it was stale, spin a background thread to refresh
+    # AUDIT-C-05 Fix: The old code recursively called _load_satcat_guid_map()
+    # from the background thread, but because the parent call already wrote the
+    # fresh cache file, the recursive call found age_h ≈ 0 and short-circuited
+    # with a local read — i.e. it did NOT perform a network refresh.  This
+    # background thread is supposed to asynchronously download a FRESH copy.
+    # Fix: extract a dedicated _download_satcat_fresh() helper that forces a
+    # network download and merges the result into the existing in-memory map,
+    # then clear the sentinel in a guaranteed finally block.
     if stale:
-        def _bg_refresh():
+        def _bg_satcat_refresh():
             global _guid_refresh_thread
             try:
-                _load_satcat_guid_map()
+                logger.info("Spacebook satcat: background refresh starting download.")
+                resp = _sb_get(_SB_SATCAT_JSON_URL, timeout=60)
+                import json as _json
+                cache_path.write_text(resp.text, encoding="utf-8")
+                data_fresh = _json.loads(resp.text)
+                new_map: dict[int, str] = {}
+                if isinstance(data_fresh, list):
+                    for rec in data_fresh:
+                        if not isinstance(rec, dict):
+                            continue
+                        nid = rec.get("noradId")
+                        guid = rec.get("id")
+                        if nid is not None and guid:
+                            try:
+                                new_map[int(nid)] = str(guid)
+                            except (ValueError, TypeError):
+                                continue
+                with _GUID_LOCK:
+                    _guid_map.clear()
+                    _guid_map.update(new_map)
+                    _guid_last_success = datetime.now(timezone.utc)
+                logger.info(
+                    "Spacebook satcat: background refresh complete — %d objects.",
+                    len(new_map),
+                )
             except Exception as exc:
                 logger.warning("Background satcat refresh failed: %s", exc)
             finally:
+                # AUDIT-C-05: Always clear the sentinel so future stale
+                # checks can schedule a new refresh thread.
                 with _GUID_LOCK:
                     _guid_refresh_thread = None
 
         with _GUID_LOCK:
             if _guid_refresh_thread is None:
                 _guid_refresh_thread = threading.Thread(
-                    target=_bg_refresh, daemon=True
+                    target=_bg_satcat_refresh, daemon=True
                 )
                 _guid_refresh_thread.start()
 

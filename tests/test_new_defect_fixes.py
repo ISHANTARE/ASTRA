@@ -17,7 +17,7 @@ def test_drag_altitude_initialization():
     r = np.array([7000.0, 0.0, 500.0])
     v = np.array([0.0, 7.5, 0.0])
     t_jd = 2451545.0
-    empty_coeffs = np.zeros((2, 3))
+    empty_coeffs = np.zeros((1, 2, 3))
     
     # Static density vs actual reference density check
     a_nb = _acceleration_njit(
