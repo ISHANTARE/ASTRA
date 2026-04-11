@@ -128,12 +128,18 @@ def load_spacebook_covariance(norad_id: int) -> np.ndarray | None:
     Extracts the first 6x6 positional/velocity covariance matrix from the
     satellite's SynCoPate STK ephemeris.
 
+    DATA-03 Fix: Validates that the covariance units header specifies km/km/s.
+    STK files can declare either m/m/s or km/km/s units; accepting the wrong
+    unit silently would produce Pc values off by a factor of ~10^6.
+    Undeclared units default to km per STK spec §5.3.6.
+
     Args:
         norad_id: NORAD Catalog ID.
 
     Returns:
         (6, 6) covariance matrix in TEME Of Date (km, km/s), or None if
-        download fails, parsing fails, or Spacebook is disabled.
+        download fails, parsing fails, unit mismatch is detected, or Spacebook
+        is disabled.
     """
     if not SPACEBOOK_ENABLED:
         return None
@@ -144,19 +150,60 @@ def load_spacebook_covariance(norad_id: int) -> np.ndarray | None:
         logger.warning(f"Failed to fetch Spacebook covariance for NORAD {norad_id}: {exc}")
         return None
 
+    # DATA-03: Track declared units (km vs m) before accepting any numeric values.
+    _unit_str: str | None = None
     in_cov_block = False
+
     for line in stk_text.splitlines():
         line = line.strip()
         if not line:
             continue
-        if line.lower().startswith("covariancetimeposvel"):
+        lower = line.lower()
+
+        if lower.startswith("covariancetimeposvel"):
             in_cov_block = True
+            # Check for inline units on the header keyword line:
+            # e.g.  "CovarianceTimePosVel  Units km"
+            tokens = line.split()
+            for i, tok in enumerate(tokens):
+                if tok.lower() == "units" and i + 1 < len(tokens):
+                    _unit_str = tokens[i + 1].lower()
             continue
-        
+
         if in_cov_block:
+            # Separate "Units km" line inside the block
+            if lower.startswith("units"):
+                tokens = line.split()
+                if len(tokens) >= 2:
+                    _unit_str = tokens[1].lower()
+                continue
+
             fields = line.split()
             if len(fields) == 22:
-                # First valid row! Time + 21 lower-triangular elements
+                # DATA-03: Validate units before accepting the matrix.
+                # Per STK spec §5.3.6, omitted units imply km — emit a debug note.
+                if _unit_str is None:
+                    logger.debug(
+                        "Spacebook covariance for NORAD %d: no explicit units declaration; "
+                        "assuming km/km/s per STK default.",
+                        norad_id,
+                    )
+                elif _unit_str in ("m", "meters", "metre", "metres"):
+                    logger.error(
+                        "Spacebook covariance for NORAD %d declares unit='%s'. "
+                        "ASTRA requires km/km/s units. Rejecting to prevent "
+                        "silent x10^6 Pc errors (DATA-03).",
+                        norad_id, _unit_str,
+                    )
+                    return None
+                elif _unit_str not in ("km", "kilometers", "kilometre", "kilometres"):
+                    logger.warning(
+                        "Spacebook covariance for NORAD %d has unrecognised unit='%s'. "
+                        "Proceeding, but Pc values may be incorrect if units are not km/km/s.",
+                        norad_id, _unit_str,
+                    )
+
+                # First valid row — Time + 21 lower-triangular elements
                 cov = np.zeros((6, 6))
                 idx = 1
                 for i in range(6):
@@ -433,25 +480,8 @@ def find_conjunctions(
         
         risk = _classify_risk(P_c) if P_c is not None else "UNKNOWN"
         
-        # DEF-007: Determine covariance source per object, then combine.
-        # Previously, any non-CDM pair was labeled "COMSPOC_SYNTHETIC" even when
-        # only one object had Spacebook data; the other may have been SYNTHETIC.
-        def _cov_src(obj_id, from_cov_map: bool, cov_val) -> str:
-            if from_cov_map:
-                return "CDM"
-            # Distinguish Spacebook from heuristic by checking object attribute
-            # load_spacebook_covariance succeeded if cov_val is not None and
-            # the object has a spacebook-related covariance (non-trivial check).
-            # We use a sentinel approach: tag at assignment time (see below).
-            return "COMSPOC_SYNTHETIC" if getattr(obj_id, "_sb_cov", False) else "SYNTHETIC"
-
-        src_A = "CDM" if (cov_map and A in cov_map) else (
-            "COMSPOC_SYNTHETIC" if (cov_A is not None and not (
-                (cov_map and A not in cov_map) and
-                cov_A is not None
-            ) and _spacebook_cov_a) else "SYNTHETIC"
-        )
-        # Simplified, readable version using flags set during covariance loading:
+        # SE-DEF-001 Fix: Removed dead _cov_src() function (was defined here but never called).
+        # Determine covariance source per object using sentinel flags set during loading:
         if cov_map and A in cov_map:
             src_A = "CDM"
         elif _spacebook_cov_a:
@@ -469,6 +499,7 @@ def find_conjunctions(
             src_B = "SYNTHETIC"
         else:
             src_B = "UNAVAILABLE"
+
 
         if src_A == src_B:
             covariance_src = src_A

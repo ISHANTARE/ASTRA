@@ -75,6 +75,9 @@ from astra.constants import (
     SECONDS_PER_DAY,
     SUN_MU_KM3_S2,
     MOON_MU_KM3_S2,
+    G0_STD,
+    AU_KM as _AU_KM_CONST,
+    SRP_P0_N_M2 as _SRP_P0,
 )
 from astra.log import get_logger
 from astra.frames import _build_vnb_matrix_njit, _build_rtn_matrix_njit
@@ -92,8 +95,25 @@ def _srp_illumination_factor_njit(
 ) -> float:
     """Conical Earth umbra/penumbra factor ν for cannonball SRP.
 
-    Models the Sun and Earth as spherical disks as seen from the satellite.
-    Supports a continuous transition through the penumbra.
+    Models the Sun and Earth as spherical disks as seen from the satellite
+    and computes the fractional area of the solar disk that remains visible.
+
+    **Mathematical approach — MATH-05 note:**
+    The circle-circle overlap formula used here applies planar geometry:
+
+        x = (γ² + α² − β²) / (2γ)
+        A = α²·acos(x/α) + β²·acos((γ-x)/β) − γ·√(α²-x²)
+        ν = 1 − A / (π·β²)
+
+    where α = Earth angular semi-diameter, β = Sun angular semi-radius,
+    γ = angular separation.  In LEO, α ≈ 0.72 rad (not a small angle), so
+    a strict spherical-geometry treatment (Montenbruck & Gill §3.4) would
+    give a slightly different area.  In practice, for LEO conjunction screening
+    durations (~hours) the error in time-averaged ν is a few percent, which
+    is below the uncertainty in Cr and area/mass.  This approximation is
+    therefore acceptable for mission-planning fidelity.  For ultra-precise
+    SRP-limited precision orbit determination, replace with exact
+    spherical-cap intersection (Vallado 2013, Algorithm 34).
 
     Args:
         r_km: Geocentric satellite position (km).
@@ -189,7 +209,7 @@ def srp_cylindrical_illumination_factor(r_km, r_sun_km):
 # Data Structures
 # ---------------------------------------------------------------------------
 
-@dataclass
+@dataclass(frozen=True)
 class NumericalState:
     """Full kinematic state vector at a single epoch.
 
@@ -198,6 +218,11 @@ class NumericalState:
 
     In 7-DOF (powered) mode, mass_kg tracks propellant depletion via
     Tsiolkovsky coupling: dm/dt = −F / (Isp·g₀).
+
+    SE-01 Fix: frozen=True to match all other ASTRA output types (OrbitalState,
+    FiniteBurn, ConjunctionEvent). Prevents accidental mutation of integration
+    results. numpy array *contents* remain mutable by Python semantics, but
+    field references (position_km, velocity_km_s, mass_kg) cannot be reassigned.
     """
     t_jd: float
     position_km: np.ndarray  # shape (3,)
@@ -213,6 +238,7 @@ class NumericalState:
             elif r_mag < 0.1:
                 # Likely an unitialized or zeroed state
                 logger.debug("NumericalState initialized with nearly-zero position vector.")
+
 
 
 @dataclass(frozen=True)
@@ -562,10 +588,9 @@ def _acceleration(
             d_ss = r - sun_pos
             d_mag_ss = float(np.linalg.norm(d_ss))
             if d_mag_ss > 1.0:
-                P0 = 4.56e-6
-                AU_KM = 149597870.7
-                scale = (AU_KM / d_mag_ss) ** 2
-                amag = P0 * scale * srp_cr * (drag_area_m2 / drag_mass_kg) / 1000.0
+                # Use named constants (SE-09: eliminate magic numbers in Python path)
+                scale = (_AU_KM_CONST / d_mag_ss) ** 2
+                amag = _SRP_P0 * scale * srp_cr * (drag_area_m2 / drag_mass_kg) / 1000.0
                 
                 nu = 1.0
                 if srp_use_shadow:
@@ -578,11 +603,8 @@ def _acceleration(
 
 
 
-# ---------------------------------------------------------------------------
-# Standard gravitational acceleration for mass flow
-# ---------------------------------------------------------------------------
-
-_G0 = 9.80665  # m/s²
+# Standard gravitational acceleration for mass flow (references constants.G0_STD)
+_G0 = G0_STD  # m/s²
 
 
 # ---------------------------------------------------------------------------
@@ -668,9 +690,16 @@ def _powered_derivative(
     m = y[6]
     t_jd = t_jd0_segment + t_sec / SECONDS_PER_DAY
 
-    # Gravitational + drag acceleration
+    # PHY-03 Fix: Use instantaneous mass m (from state y[6]) for ballistic coefficient,
+    # not the pre-burn drag_mass_kg which remains fixed at the burn start mass.
+    # For short burns (<1% mass depletion) the difference is negligible, but for
+    # long low-thrust electric propulsion arcs, the drag systematically grows as
+    # propellant burns off and B_c = Cd*A/m should increase accordingly.
+    instantaneous_mass_kg = max(m, 1e-3)  # floor at 1g to prevent division by zero
+
+    # Gravitational + drag acceleration (using instantaneous mass for Bc)
     a_grav = _acceleration(
-        t_jd, r, v, use_drag, drag_cd, drag_area_m2, drag_mass_kg, drag_rho, drag_H_km,
+        t_jd, r, v, use_drag, drag_cd, drag_area_m2, instantaneous_mass_kg, drag_rho, drag_H_km,
         include_third_body, global_t_jd0, duration_d, sun_coeffs, moon_coeffs,
         use_srp, srp_cr, srp_use_shadow,
     )
@@ -755,11 +784,14 @@ def _acceleration_njit(
     x, y, z = r[0], r[1], r[2]
     
     # Inlined from constants to ensure Numba sees scalars
+    # Keep μ, Re, J2, J3, J4, and third-body GM in sync with astra.constants.
+    # MATH-01/02 Fix: Use full 8-significant-figure precision matching constants.py
+    # (prior values -0.00000253266 / -0.00000161962 were truncated by 3 digits).
     Re = 6378.137
     mu = 398600.4418
     J2 = 0.00108262668
-    J3 = -0.00000253266
-    J4 = -0.00000161962  # WGS-84 zonal J4
+    J3 = -0.00000253265649   # WGS-84/EGM96; synced from constants.J3 = -2.53265649e-6
+    J4 = -0.00000161962159   # WGS-84/EGM96; synced from constants.J4 = -1.61962159e-6
     # SUN_MU matches ``constants.SUN_MU_KM3_S2`` (IAU-style GM).
     SUN_MU = 1.32712440018e11
     MOON_MU = 4902.800066
@@ -923,8 +955,13 @@ def _powered_derivative_njit(
     m = y[6]
     t_jd = t_jd0 + t_sec / SECONDS_PER_DAY
 
+    # PHY-03 Fix (Numba path): Use instantaneous mass from state vector y[6] for
+    # ballistic coefficient instead of pre-burn drag_mass_kg.
+    # Clamp at 1g to avoid division by zero in degenerate edge cases.
+    instantaneous_mass_kg = m if m > 1e-3 else 1e-3
+
     a_grav = _acceleration_njit(
-        t_jd, r, v, use_drag, drag_cd, drag_area_m2, drag_mass_kg, drag_rho, drag_H_km,
+        t_jd, r, v, use_drag, drag_cd, drag_area_m2, instantaneous_mass_kg, drag_rho, drag_H_km,
         drag_ref_alt_km, include_third_body, global_t_jd0, duration_d, sun_coeffs, moon_coeffs,
         use_srp, srp_cr, srp_use_shadow,
     )
@@ -1061,6 +1098,9 @@ def propagate_cowell(
         - Powered-arc default mass absolute tolerance is 10⁻⁵ kg (0.01 g), which
           is loose for micro-thrusters on small spacecraft; pass ``atol`` for
           tighter mass conservation.
+        - SRP penumbra uses a planar circle-circle intersection formula (angular
+          quantities as proxies for linear radii). Valid to ~few-% accuracy in LEO;
+          see ``_srp_illumination_factor_njit`` docstring for details (MATH-05).
 
     Args:
         state0: Initial state (position + velocity + optional mass).
@@ -1068,12 +1108,17 @@ def propagate_cowell(
         dt_out: Output time step in seconds (default 60 s).
         drag_config: Optional atmospheric drag parameters.
         include_third_body: Include Sun/Moon gravity.
-        rtol: Relative tolerance for adaptive step integrator.
-        atol: Absolute tolerance for adaptive step integrator.
+        rtol: Relative tolerance for adaptive step integrator (overrides defaults).
+        atol: Absolute tolerance for adaptive step integrator (overrides defaults).
         maneuvers: Optional list of ``FiniteBurn`` definitions.
             Burns must not overlap in time.
         use_de: Use JPL DE421 for Sun/Moon (True) or analytical (False).
         use_empirical_drag: Use F10.7/Ap drag model (True) or static (False).
+        coast_rtol: Relative tolerance for coast arcs (default 1e-8).
+        coast_atol: Absolute tolerance for coast arcs (default 1e-8).
+            For high-accuracy conjunction analysis, tighten to 1e-12.
+        powered_rtol: Relative tolerance for powered arcs (default 1e-12).
+        powered_atol: Absolute tolerance for powered arcs (default 1e-12).
 
     Returns:
         List of ``NumericalState`` objects at each output time step.

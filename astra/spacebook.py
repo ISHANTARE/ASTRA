@@ -125,6 +125,13 @@ _sw_cache: dict[str, tuple[float, float, float]] = {}
 _sw_loaded: bool = False
 _sw_last_success: Optional[datetime] = None
 _SW_LOCK = threading.RLock()
+# CONC-01 Fix: Track the background SW refresh thread so rapid calls to
+# get_space_weather_sb() when cache is stale don't spawn unbounded threads.
+# Pattern mirrors data_pipeline._sw_fetch_thread.
+_sw_refresh_thread: Optional[threading.Thread] = None
+# CONC-02 Fix: Separate non-reentrant lock serialises the initial download so
+# two threads reading _sw_loaded=False concurrently don't both call _load_sw().
+_SW_DOWNLOAD_LOCK = threading.Lock()
 
 # EOP cache: MJD (int) → (xp_arcsec, yp_arcsec, dut1_s)
 _eop_cache: dict[int, tuple[float, float, float]] = {}
@@ -239,11 +246,18 @@ def _parse_sw_text(text: str) -> dict[str, tuple[float, float, float]]:
     The format is the standard CelesTrak CSSISpaceWeather fixed-width text
     (FORMAT: I4,I3,I3,I5,I3,...).
 
-    Columns (space-delimited, space-separated fixed-width):
-      [0]  year   [1] month  [2] day
-      [20] Avg_Ap (daily Ap)
-      [23] Adj_F10.7
-      [28] Obs_F10.7
+    DATA-02 Fix: Field positions are now named constants rather than bare
+    integer literals.  The CSSI fixed-width format is defined by specification
+    (not by a CSV header), so positional parsing is correct; named constants
+    make future format changes easy to locate and update in one place.
+
+    CSSI field positions (0-indexed, space-split tokens):
+      _SW_FW_YEAR    = 0   year
+      _SW_FW_MONTH   = 1   month
+      _SW_FW_DAY     = 2   day
+      _SW_FW_AP_AVG  = 20  daily-average Ap index
+      _SW_FW_F107ADJ = 23  81-day centred F10.7 (adjusted)
+      _SW_FW_F107OBS = 28  observed F10.7
 
     Observed, Daily-Predicted, and Monthly-Predicted blocks are all parsed
     and merged into one dict keyed by "YYYY-MM-DD".  Predicted values
@@ -253,6 +267,15 @@ def _parse_sw_text(text: str) -> dict[str, tuple[float, float, float]]:
     Returns:
         Dict mapping ``"YYYY-MM-DD"`` → ``(f107_obs, f107_adj, ap_daily)``.
     """
+    # DATA-02: Named field positions per CSSI CSSISpaceWeather fixed-width spec.
+    _SW_FW_YEAR    = 0
+    _SW_FW_MONTH   = 1
+    _SW_FW_DAY     = 2
+    _SW_FW_AP_AVG  = 20   # Daily-average (Avg) Ap geomagnetic index
+    _SW_FW_F107ADJ = 23   # 81-day centred F10.7 flux (adjusted to 1 AU)
+    _SW_FW_F107OBS = 28   # Observed (daily) F10.7 flux
+    _SW_FW_MIN_FIELDS = _SW_FW_F107OBS + 1  # 29 — minimum tokens required
+
     result: dict[str, tuple[float, float, float]] = {}
 
     inside_block = False
@@ -272,15 +295,15 @@ def _parse_sw_text(text: str) -> dict[str, tuple[float, float, float]]:
             continue
 
         fields = line.split()
-        if len(fields) < 29:
+        if len(fields) < _SW_FW_MIN_FIELDS:
             continue
         try:
-            year  = int(fields[0])
-            month = int(fields[1])
-            day   = int(fields[2])
-            ap    = float(fields[20])
-            f107_adj = float(fields[23])
-            f107_obs = float(fields[28])
+            year  = int(fields[_SW_FW_YEAR])
+            month = int(fields[_SW_FW_MONTH])
+            day   = int(fields[_SW_FW_DAY])
+            ap    = float(fields[_SW_FW_AP_AVG])
+            f107_adj = float(fields[_SW_FW_F107ADJ])
+            f107_obs = float(fields[_SW_FW_F107OBS])
             date_str = f"{year:04d}-{month:02d}-{day:02d}"
 
             # Don't overwrite an already-stored observed value with a
@@ -294,6 +317,7 @@ def _parse_sw_text(text: str) -> dict[str, tuple[float, float, float]]:
             continue
 
     return result
+
 
 
 def _load_sw(force_full: bool = False) -> None:
@@ -376,7 +400,14 @@ def get_space_weather_sb(t_jd: float) -> tuple[float, float, float]:
         loaded = _sw_loaded
 
     if not loaded:
-        _load_sw()
+        # CONC-02 Fix: Double-checked locking — acquire download lock, then
+        # re-read _sw_loaded under _SW_LOCK to prevent duplicate downloads
+        # when multiple threads both see _sw_loaded=False concurrently.
+        with _SW_DOWNLOAD_LOCK:
+            with _SW_LOCK:
+                loaded = _sw_loaded
+            if not loaded:
+                _load_sw()
 
     # Background refresh if cache is getting stale (but don't block)
     with _SW_LOCK:
@@ -384,13 +415,21 @@ def get_space_weather_sb(t_jd: float) -> tuple[float, float, float]:
             age_h = (
                 datetime.now(timezone.utc) - _sw_last_success
             ).total_seconds() / 3600.0
-            if age_h > 6:
+            # CONC-01 Fix: Only spawn a new refresh thread if one isn't already running.
+            # Without this guard, millions of rapid calls while cache is stale
+            # (age_h > 6) could each spawn a new daemon thread, exhausting memory.
+            if age_h > 6 and _sw_refresh_thread is None:
                 def _refresh():
+                    global _sw_refresh_thread
                     try:
                         _load_sw()
                     except SpacebookError as exc:
                         logger.warning("Background SW refresh failed: %s", exc)
+                    finally:
+                        with _SW_LOCK:
+                            _sw_refresh_thread = None
                 t = threading.Thread(target=_refresh, daemon=True)
+                _sw_refresh_thread = t
                 t.start()
 
     # JD → calendar date (stable at midnight boundaries)

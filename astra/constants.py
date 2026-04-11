@@ -89,3 +89,9 @@ GRID_ANGLE_CELL_DEG: float = 10.0
 SECONDS_PER_DAY: float = 86400.0
 MINUTES_PER_DAY: float = 1440.0
 G0_STD: float = 9.80665  # Standard gravitational acceleration at sea level (m/s²) — IAU
+
+# ---------------------------------------------------------------------------
+# Solar and Astronomical constants
+# ---------------------------------------------------------------------------
+AU_KM: float = 149597870.7           # Astronomical Unit (km) — IAU 2012
+SRP_P0_N_M2: float = 4.56e-6         # Solar radiation pressure at 1 AU (N/m²)
