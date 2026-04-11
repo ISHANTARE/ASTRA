@@ -22,6 +22,7 @@ Two Propagation Tiers
    - **Atmospheric Drag**: Jacchia-class empirical atmospheric density models driven by live Space Weather indicators (F10.7, Ap).
    - **Third-Body Dynamics**: Lunar & Solar gravitational perturbations computed directly from JPL DE421 planetary ephemeris.
    - **SRP**: Optional cannonball solar radiation pressure with high-fidelity **conical Earth umbra** and continuous penumbra modeling.
+   - **Mass Depletion**: Built-in instantaneous mass tracking ensuring precise drag coefficients dynamically.
 
 Numba JIT Acceleration
 ----------------------

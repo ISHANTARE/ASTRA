@@ -18,7 +18,7 @@ author = 'Ishan Tare'
 try:
     from astra.version import __version__ as _pkg_version
 except ImportError:
-    _pkg_version = '3.3.0'
+    _pkg_version = '3.4.0'
 
 version = release = _pkg_version
 

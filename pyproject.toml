@@ -4,9 +4,9 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "astra-core-engine"
-version = "3.3.0"
+version = "3.4.0"
 authors = [
-  { name="ASTRA Team - Ishan Tare" },
+  { name="Ishan Tare" },
 ]
 description = "Autonomous Space Traffic Risk Analyzer - Computation Engine with native TLE, OMM, and Space-Track support"
 readme = "README.md"

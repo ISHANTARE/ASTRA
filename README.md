@@ -1,4 +1,4 @@
-# ASTRA-Core v3.3.0 (Autonomous Space Traffic Risk Analyzer) 🛰️
+# ASTRA-Core v3.4.0 (Autonomous Space Traffic Risk Analyzer) 🛰️
 
 ![PyPI - Version](https://img.shields.io/pypi/v/astra-core-engine?color=blue&label=astra-core-engine)
 [![Documentation Status](https://readthedocs.org/projects/astra-core/badge/?version=latest)](https://astra-core.readthedocs.io/en/latest/?badge=latest)
@@ -328,7 +328,7 @@ Release notes: [CHANGELOG.md](./CHANGELOG.md).
   publisher = {GitHub},
   journal = {GitHub repository},
   howpublished = {\url{https://github.com/ISHANTARE/ASTRA}},
-  version = {3.3.0}
+  version = {3.4.0}
 }
 ```
 
@@ -336,6 +336,6 @@ Release notes: [CHANGELOG.md](./CHANGELOG.md).
 
 ## Author
 
-**ASTRA Team — Ishan Tare**
+**Ishan Tare**
 
 © 2026 ASTRA Project · MIT License

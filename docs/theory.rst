@@ -36,7 +36,7 @@ When you have 30,000 active objects in space, checking every pair for a collisio
 
 How ASTRA-Core solves this efficiently:
 
-1. **cKDTree Spatial Partitioning**: We map satellite trajectories into a highly-optimized C++ ``scipy.spatial.cKDTree`` structure. By querying spatial overlap across discrete integration intervals natively in C, we instantly discard 99.9% of safely passing configurations in $O(N \log N)$ time natively bypassing the Python Global Interpreter Lock (GIL), resulting in ~14.8x operational speedups.
+1. **cKDTree Spatial Partitioning**: We map satellite trajectories into a highly-optimized C++ ``scipy.spatial.cKDTree`` structure. By querying spatial overlap across discrete integration intervals natively in C, we instantly discard 99.9% of safely passing configurations in $O(N \log N)$ time securely using ThreadPoolExecutor context managers to bypass the Python Global Interpreter Lock (GIL), resulting in ~14.8x operational speedups.
 2. **Dynamic Attitude Cross-Sections**: For surviving "close calls", we compute the exact TCA (Time of Closest Approach) via sub-second cubic splines. Based on the satellite's specific hardware pointing mode (e.g. Nadir Earth-pointing), we dynamically rotate its geometric faces to calculate the exact projected surface area slicing through the probability field.
 3. **High-Precision Ephemeris Integration**: Leverages Spacebook EOP definitions to transform states rigorously, ensuring coordinates align seamlessly.
 
