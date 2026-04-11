@@ -396,6 +396,8 @@ def get_space_weather_sb(t_jd: float) -> tuple[float, float, float]:
     if not SPACEBOOK_ENABLED:
         raise SpacebookError("Spacebook is disabled (ASTRA_SPACEBOOK_ENABLED=false).")
 
+    global _sw_refresh_thread
+
     with _SW_LOCK:
         loaded = _sw_loaded
 
