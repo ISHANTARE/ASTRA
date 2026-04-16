@@ -15,7 +15,9 @@ Example::
     # Modern OMM with full physical metadata
     omms = astra.fetch_celestrak_group("starlink", format="json")
 """
+
 from __future__ import annotations
+from typing import Any
 
 from typing import Literal, Union, cast
 
@@ -45,12 +47,13 @@ FormatLiteral = Literal["tle", "json"]
 # Internal Helpers
 # ---------------------------------------------------------------------------
 
+
 def _format_celestrak_supgp(fmt: FormatLiteral) -> str:
     """FORMAT value for sup-gp.php (CelesTrak expects uppercase TLE / JSON)."""
     return "TLE" if fmt == "tle" else "JSON"
 
 
-def _supplemental_params(group: str, fmt: FormatLiteral) -> dict[str, str] | None:
+def _supplemental_params(group: str, fmt: FormatLiteral) -> dict[str, Any] | None:
     """Build query params for sup-gp.php, or None if no supplemental route exists.
 
     ``GROUP=active`` has no ``FILE=active`` equivalent on the supplemental API;
@@ -84,7 +87,9 @@ def _legacy_response_triggers_supplemental(response: requests.Response) -> bool:
     return False
 
 
-def _fetch_supplemental_raw(group: str, fmt: FormatLiteral, params: dict[str, str]) -> str:
+def _fetch_supplemental_raw(
+    group: str, fmt: FormatLiteral, params: dict[str, str]
+) -> str:
     """Download raw text/JSON from CelesTrak supplemental sup-gp.php."""
     try:
         response = requests.get(
@@ -164,6 +169,7 @@ def _parse_response(
         return load_tle_catalog(text.splitlines())
     elif fmt == "json":
         from astra.omm import parse_omm_json
+
         return parse_omm_json(text)
     else:
         raise AstraError(f"Unsupported format '{fmt}'. Use 'tle' or 'json'.")
@@ -172,6 +178,7 @@ def _parse_response(
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def fetch_celestrak_active(
     format: FormatLiteral = "tle",
@@ -233,13 +240,13 @@ def fetch_celestrak_comprehensive(
         Deduplicated list of ``SatelliteTLE`` or ``SatelliteOMM`` objects.
     """
     groups = [
-        "active",             # All active payloads (~15k)
-        "1999-025",           # Fengyun-1C debris (~3k)
+        "active",  # All active payloads (~15k)
+        "1999-025",  # Fengyun-1C debris (~3k)
         "iridium-33-debris",  # Iridium 33 debris (~300)
-        "cosmos-2251-debris", # Cosmos 2251 debris (~1k)
-        "1982-092",           # Cosmos 1408 debris (~500)
-        "2019-006",           # MICROSAT-R debris (~100)
-        "analyst",            # Analyst objects
+        "cosmos-2251-debris",  # Cosmos 2251 debris (~1k)
+        "1982-092",  # Cosmos 1408 debris (~500)
+        "2019-006",  # MICROSAT-R debris (~100)
+        "analyst",  # Analyst objects
     ]
 
     logger.info(
@@ -247,7 +254,7 @@ def fetch_celestrak_comprehensive(
     )
 
     seen_ids: set[str] = set()
-    unified_catalog: list = []
+    unified_catalog: list[Any] = []
 
     for g in groups:
         try:
@@ -269,6 +276,7 @@ def fetch_celestrak_comprehensive(
 # These thin wrappers exist purely for discoverability.
 # When a user types `astra.fetch_celestrak_` in their IDE, they immediately
 # see both the TLE and OMM variants without needing to know about format=.
+
 
 def fetch_celestrak_active_omm() -> list[SatelliteOMM]:
     """Fetch the active satellite catalog from CelesTrak in OMM JSON format.

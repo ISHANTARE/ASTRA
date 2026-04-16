@@ -1,4 +1,5 @@
 """Tests for astra/data.py — CelesTrak TLE and OMM ingestion."""
+
 import json
 import pytest
 from unittest.mock import patch, Mock
@@ -25,40 +26,43 @@ STARLINK-1
 1 44235U 19029A   21001.00000000  .00001480  00000-0  34282-4 0  9999
 2 44235  53.0500 284.1199 0001364 338.5498  21.5664 15.48922536 12340"""
 
-OMM_MOCK_DATA = json.dumps([
-    {
-        "OBJECT_NAME": "ISS (ZARYA)",
-        "NORAD_CAT_ID": "25544",
-        "OBJECT_TYPE": "PAYLOAD",
-        "EPOCH": "2021-01-01T00:00:00.000000",
-        "MEAN_MOTION": "15.48922536",
-        "ECCENTRICITY": "0.0001364",
-        "INCLINATION": "51.6442",
-        "RA_OF_ASC_NODE": "284.1199",
-        "ARG_OF_PERICENTER": "338.5498",
-        "MEAN_ANOMALY": "21.5664",
-        "BSTAR": "0.000034282",
-        "RCS_SIZE": "LARGE",
-    },
-    {
-        "OBJECT_NAME": "STARLINK-1",
-        "NORAD_CAT_ID": "44235",
-        "OBJECT_TYPE": "PAYLOAD",
-        "EPOCH": "2021-01-01T00:00:00.000000",
-        "MEAN_MOTION": "15.48922537",
-        "ECCENTRICITY": "0.0001364",
-        "INCLINATION": "53.0500",
-        "RA_OF_ASC_NODE": "284.1199",
-        "ARG_OF_PERICENTER": "338.5498",
-        "MEAN_ANOMALY": "21.5664",
-        "BSTAR": "0.000034282",
-        "RCS_SIZE": "SMALL",
-    },
-])
+OMM_MOCK_DATA = json.dumps(
+    [
+        {
+            "OBJECT_NAME": "ISS (ZARYA)",
+            "NORAD_CAT_ID": "25544",
+            "OBJECT_TYPE": "PAYLOAD",
+            "EPOCH": "2021-01-01T00:00:00.000000",
+            "MEAN_MOTION": "15.48922536",
+            "ECCENTRICITY": "0.0001364",
+            "INCLINATION": "51.6442",
+            "RA_OF_ASC_NODE": "284.1199",
+            "ARG_OF_PERICENTER": "338.5498",
+            "MEAN_ANOMALY": "21.5664",
+            "BSTAR": "0.000034282",
+            "RCS_SIZE": "LARGE",
+        },
+        {
+            "OBJECT_NAME": "STARLINK-1",
+            "NORAD_CAT_ID": "44235",
+            "OBJECT_TYPE": "PAYLOAD",
+            "EPOCH": "2021-01-01T00:00:00.000000",
+            "MEAN_MOTION": "15.48922537",
+            "ECCENTRICITY": "0.0001364",
+            "INCLINATION": "53.0500",
+            "RA_OF_ASC_NODE": "284.1199",
+            "ARG_OF_PERICENTER": "338.5498",
+            "MEAN_ANOMALY": "21.5664",
+            "BSTAR": "0.000034282",
+            "RCS_SIZE": "SMALL",
+        },
+    ]
+)
 
 # ---------------------------------------------------------------------------
 # TLE Tests
 # ---------------------------------------------------------------------------
+
 
 @patch("astra.data.requests.get")
 def test_fetch_celestrak_active_tle(mock_get):
@@ -101,6 +105,7 @@ def test_fetch_celestrak_group_tle(mock_get):
 # OMM Tests
 # ---------------------------------------------------------------------------
 
+
 @patch("astra.data.requests.get")
 def test_fetch_celestrak_active_omm(mock_get):
     """Active catalog in OMM JSON format returns SatelliteOMM list."""
@@ -116,7 +121,7 @@ def test_fetch_celestrak_active_omm(mock_get):
     assert isinstance(catalog[0], SatelliteOMM)
     assert catalog[0].name == "ISS (ZARYA)"
     assert catalog[0].norad_id == "25544"
-    assert catalog[0].rcs_m2 == 10.0     # LARGE → 10.0 m²
+    assert catalog[0].rcs_m2 == 10.0  # LARGE → 10.0 m²
 
 
 @patch("astra.data.requests.get")
@@ -143,6 +148,7 @@ def test_fetch_celestrak_group_omm(mock_get):
 def test_omm_fields_populated(mock_get):
     """OMM objects carry correct orbital element conversions from JSON values."""
     import math
+
     mock_resp = Mock()
     mock_resp.text = OMM_MOCK_DATA
     mock_resp.status_code = 200
@@ -166,10 +172,12 @@ def test_omm_fields_populated(mock_get):
 # Error Handling Tests
 # ---------------------------------------------------------------------------
 
+
 @patch("astra.data.requests.get")
 def test_fetch_celestrak_network_error(mock_get):
     """Network failure raises AstraError with a helpful message."""
     import requests
+
     mock_get.side_effect = requests.RequestException("API down")
 
     with pytest.raises(AstraError, match="Failed to fetch CelesTrak"):

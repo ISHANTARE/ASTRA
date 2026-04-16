@@ -7,6 +7,7 @@ Provides a unified interface between Python ``datetime``, Julian Dates,
 The Skyfield ``Timescale`` is the **managed** IERS-backed instance from
 ``data_pipeline.get_skyfield_timescale()``, not ``builtin=True``.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -14,7 +15,6 @@ import threading
 from typing import Any, Optional, Union, cast
 
 from skyfield import timelib
-from skyfield.timelib import Time as SkyfieldTime
 
 from astra.jdutil import datetime_utc_to_jd, jd_utc_to_datetime
 
@@ -106,8 +106,7 @@ def convert_time(
     valid_formats = ("jd", "datetime", "skyfield", "iso")
     if to_format not in valid_formats:
         raise ValueError(
-            f"Unsupported to_format={to_format!r}. "
-            f"Must be one of {valid_formats}."
+            f"Unsupported to_format={to_format!r}. " f"Must be one of {valid_formats}."
         )
 
     if isinstance(value, str):
@@ -141,4 +140,4 @@ def convert_time(
         dt.hour,
         dt.minute,
         dt.second + dt.microsecond * 1e-6,
-    )  # type: ignore[no-any-return]
+    )

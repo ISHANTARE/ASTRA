@@ -4,12 +4,13 @@ Implements structural parsing for standard CCSDS CDMs provided by Space-Track
 and the US Space Force. XML is parsed with ``defusedxml`` to mitigate XXE and
 billion-laughs risks on untrusted input.
 """
+
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import datetime
+from typing import Optional, Any
 
 import defusedxml.ElementTree as ET
 
@@ -66,13 +67,13 @@ class ConjunctionDataMessage:
 def _parse_time(time_str: str) -> datetime:
     """Parse standard ISO 8601 formatting from CCSDS XML."""
     clean_str = time_str.replace("Z", "+00:00")
-    return datetime.fromisoformat(clean_str)
+    return datetime.fromisoformat(clean_str)  # type: ignore[no-any-return]
 
 
-def _findtext(element: ET.Element, tag: str, default: str = "") -> str:
+def _findtext(element: Any, tag: str, default: str = "") -> str:
     """Search for a tag at any depth within the XML tree."""
     result = element.findtext(f".//{tag}", default=default)
-    return result
+    return str(result)
 
 
 def _sanitize_cdm_xml(xml_string: str) -> str:
@@ -81,10 +82,10 @@ def _sanitize_cdm_xml(xml_string: str) -> str:
     s = re.sub(r'\sxmlns(?::[a-zA-Z0-9_-]+)?="[^"]*"', "", s)
     s = re.sub(r"<([a-zA-Z0-9]+):([a-zA-Z0-9_]+)", r"<\2", s)
     s = re.sub(r"</([a-zA-Z0-9]+):([a-zA-Z0-9_]+)", r"</\2", s)
-    return s
+    return s  # type: ignore[no-any-return]
 
 
-def _parse_cdm_object(root: ET.Element, prefix: str) -> CDMObject:
+def _parse_cdm_object(root: Any, prefix: str) -> CDMObject:
     """Parse a single CDM object (OBJECT1 or OBJECT2) from the XML tree."""
     designator = _findtext(root, f"{prefix}_OBJECT_DESIGNATOR", "UNKNOWN")
     if not designator or designator == "UNKNOWN":
@@ -102,17 +103,34 @@ def _parse_cdm_object(root: ET.Element, prefix: str) -> CDMObject:
     vz = float(_findtext(root, f"{prefix}_Z_DOT", "0.0"))
 
     cov_tags = [
-        "CR_R", "CT_R", "CT_T", "CN_R", "CN_T", "CN_N",
-        "CRDOT_R", "CRDOT_T", "CRDOT_N", "CRDOT_RDOT",
-        "CTDOT_R", "CTDOT_T", "CTDOT_N", "CTDOT_RDOT", "CTDOT_TDOT",
-        "CNDOT_R", "CNDOT_T", "CNDOT_N", "CNDOT_RDOT", "CNDOT_TDOT", "CNDOT_NDOT",
+        "CR_R",
+        "CT_R",
+        "CT_T",
+        "CN_R",
+        "CN_T",
+        "CN_N",
+        "CRDOT_R",
+        "CRDOT_T",
+        "CRDOT_N",
+        "CRDOT_RDOT",
+        "CTDOT_R",
+        "CTDOT_T",
+        "CTDOT_N",
+        "CTDOT_RDOT",
+        "CTDOT_TDOT",
+        "CNDOT_R",
+        "CNDOT_T",
+        "CNDOT_N",
+        "CNDOT_RDOT",
+        "CNDOT_TDOT",
+        "CNDOT_NDOT",
     ]
     cov = []
     for tag in cov_tags:
         val_str = _findtext(root, tag, "0.0")
         cov.append(float(val_str))
 
-    return CDMObject(
+    return CDMObject(  # type: ignore[no-any-return]
         object_designator=designator,
         object_name=name,
         position_xyz=(x, y, z),
@@ -159,10 +177,14 @@ def parse_cdm_xml(xml_string: str) -> ConjunctionDataMessage:
         if rel_vel < 0.0:
             validation_errors.append(f"Negative relative velocity: {rel_vel} m/s")
         if pc_val is not None and not (0.0 <= pc_val <= 1.0):
-            validation_errors.append(f"Probability of collision {pc_val} out of range [0, 1]")
+            validation_errors.append(
+                f"Probability of collision {pc_val} out of range [0, 1]"
+            )
 
         if validation_errors:
-            error_msg = f"CDM {msg_id} failed physical validation: " + "; ".join(validation_errors)
+            error_msg = f"CDM {msg_id} failed physical validation: " + "; ".join(
+                validation_errors
+            )
             logger.error(error_msg)
             raise AstraError(error_msg)
 
@@ -171,7 +193,7 @@ def parse_cdm_xml(xml_string: str) -> ConjunctionDataMessage:
 
         logger.debug(f"Decoded CDM {msg_id} - TCA: {tca.isoformat()} - Miss: {miss_m}m")
 
-        return ConjunctionDataMessage(
+        return ConjunctionDataMessage(  # type: ignore[no-any-return]
             message_id=msg_id,
             creation_date=creation,
             tca_time=tca,

@@ -15,6 +15,7 @@ Thread safety:
     acquires the module lock before changing the flag, preventing races
     during concurrent mode reads/writes.
 """
+
 import threading
 
 # Module-level lock for ASTRA_STRICT_MODE updates.

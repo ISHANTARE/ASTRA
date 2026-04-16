@@ -8,15 +8,16 @@ The performance claim from the LinkedIn post / README is ≥10× speedup over
 a naive distance loop for N=500 objects.  This test asserts ≥5× (conservative)
 to allow for variance across hardware.
 """
+
 from __future__ import annotations
 
 import time
 import numpy as np
-import pytest
 
 
-def _brute_force_pairs(positions: dict[str, np.ndarray],
-                        threshold_km: float) -> set[tuple[str, str]]:
+def _brute_force_pairs(
+    positions: dict[str, np.ndarray], threshold_km: float
+) -> set[tuple[str, str]]:
     """O(N²) naive all-pairs search — ground truth for correctness check."""
     ids = list(positions.keys())
     pairs: set[tuple[str, str]] = set()
@@ -37,9 +38,9 @@ def _make_leo_catalog(n: int, seed: int = 42) -> dict[str, np.ndarray]:
     r_base = 6778.0
     positions = {}
     for i in range(n):
-        theta  = rng.uniform(0, np.pi)
-        phi    = rng.uniform(0, 2 * np.pi)
-        r      = r_base + rng.uniform(-100.0, 100.0)
+        theta = rng.uniform(0, np.pi)
+        phi = rng.uniform(0, 2 * np.pi)
+        r = r_base + rng.uniform(-100.0, 100.0)
         x = r * np.sin(theta) * np.cos(phi)
         y = r * np.sin(theta) * np.sin(phi)
         z = r * np.cos(theta)
@@ -59,7 +60,7 @@ def test_kdtree_finds_all_brute_force_pairs():
     idx.rebuild(positions)
 
     kdtree_pairs = set(idx.query_pairs(threshold_km=THRESHOLD_KM))
-    brute_pairs  = _brute_force_pairs(positions, THRESHOLD_KM)
+    brute_pairs = _brute_force_pairs(positions, THRESHOLD_KM)
 
     missing = brute_pairs - kdtree_pairs
     assert not missing, (
@@ -106,6 +107,7 @@ def test_kdtree_speedup_vs_brute_force():
 
     # --- KDTree timing (includes rebuild) ---
     from astra.spatial_index import SpatialIndex
+
     idx = SpatialIndex()
 
     t0 = time.perf_counter()

@@ -136,8 +136,8 @@ from astra.models import (
     OrbitalState,
     PassEvent,
     SatelliteTLE,
-    SatelliteOMM,       # Modern OMM data model
-    SatelliteState,     # Union[SatelliteTLE, SatelliteOMM] — accepted by all physics functions
+    SatelliteOMM,  # Modern OMM data model
+    SatelliteState,  # Union[SatelliteTLE, SatelliteOMM] — accepted by all physics functions
     TrajectoryMap,
     VelocityMap,
     projected_area_m2,
@@ -147,11 +147,11 @@ from astra.models import (
 # OMM Parser (modern format — recommended for new workflows)
 # ---------------------------------------------------------------------------
 from astra.omm import (
-    load_omm_file,       # Load OMM JSON from local disk
-    parse_omm_json,      # Parse OMM JSON string → list[SatelliteOMM]
-    parse_omm_record,    # Parse single OMM dict → SatelliteOMM
-    validate_omm,        # Validate OMM dict sanity before parsing
-    xptle_to_satellite_omm, # Convert XP-TLE format into high-fidelity OMM
+    load_omm_file,  # Load OMM JSON from local disk
+    parse_omm_json,  # Parse OMM JSON string → list[SatelliteOMM]
+    parse_omm_record,  # Parse single OMM dict → SatelliteOMM
+    validate_omm,  # Validate OMM dict sanity before parsing
+    xptle_to_satellite_omm,  # Convert XP-TLE format into high-fidelity OMM
 )
 
 # ---------------------------------------------------------------------------
@@ -217,7 +217,6 @@ from astra.utils import vincenty_distance, orbit_period, orbital_elements
 from astra.visibility import passes_over_location, visible_from_location
 from astra.spatial_index import SpatialIndex
 
-
 # ---------------------------------------------------------------------------
 # Public API Surface (__all__)
 # ---------------------------------------------------------------------------
@@ -226,17 +225,14 @@ __all__ = [
     "parse_tle",
     "validate_tle",
     "load_tle_catalog",
-
     # --- OMM Parsing (modern format, recommended) ---
     "parse_omm_record",
     "parse_omm_json",
     "load_omm_file",
     "validate_omm",
     "xptle_to_satellite_omm",
-
     # --- STK Ephemeris Parser (Spacebook) ---
     "parse_stk_ephemeris",
-
     # --- Data Models ---
     "SatelliteTLE",
     "SatelliteOMM",
@@ -248,37 +244,32 @@ __all__ = [
     "PassEvent",
     "FilterConfig",
     "ConjunctionDataMessage",
-
     # --- Data Ingestion: CelesTrak (no account required) ---
-    "fetch_celestrak_active",           # → list[SatelliteTLE]
-    "fetch_celestrak_group",            # → list[SatelliteTLE]
-    "fetch_celestrak_comprehensive",    # → list[SatelliteTLE]
-    "fetch_celestrak_active_omm",       # → list[SatelliteOMM]
-    "fetch_celestrak_group_omm",        # → list[SatelliteOMM]
-    "fetch_celestrak_comprehensive_omm",# → list[SatelliteOMM]
-
+    "fetch_celestrak_active",  # → list[SatelliteTLE]
+    "fetch_celestrak_group",  # → list[SatelliteTLE]
+    "fetch_celestrak_comprehensive",  # → list[SatelliteTLE]
+    "fetch_celestrak_active_omm",  # → list[SatelliteOMM]
+    "fetch_celestrak_group_omm",  # → list[SatelliteOMM]
+    "fetch_celestrak_comprehensive_omm",  # → list[SatelliteOMM]
     # --- Data Ingestion: Space-Track.org (authenticated) ---
-    "fetch_spacetrack_group",           # → list[SatelliteOMM] or list[SatelliteTLE]
-    "fetch_spacetrack_active",          # → list[SatelliteOMM] or list[SatelliteTLE]
-    "fetch_spacetrack_satcat",          # → list[dict]
+    "fetch_spacetrack_group",  # → list[SatelliteOMM] or list[SatelliteTLE]
+    "fetch_spacetrack_active",  # → list[SatelliteOMM] or list[SatelliteTLE]
+    "fetch_spacetrack_satcat",  # → list[dict]
     "spacetrack_logout",
-
     # --- Data Ingestion: Spacebook (unauthenticated) ---
-    "fetch_xp_tle_catalog",             # → list[SatelliteTLE]
-    "fetch_historical_tle",             # → list[SatelliteTLE]
-    "fetch_tle_catalog",                # → list[SatelliteTLE]
-    "fetch_synthetic_covariance_stk",   # → str
-    "fetch_satcat_details",             # → dict
+    "fetch_xp_tle_catalog",  # → list[SatelliteTLE]
+    "fetch_historical_tle",  # → list[SatelliteTLE]
+    "fetch_tle_catalog",  # → list[SatelliteTLE]
+    "fetch_synthetic_covariance_stk",  # → str
+    "fetch_satcat_details",  # → dict
     "get_space_weather_sb",
     "get_eop_sb",
-
     # --- Orbit Propagation (✓ TLE | ✓ OMM) ---
     "propagate_orbit",
     "propagate_many",
     "propagate_many_generator",
     "propagate_trajectory",
     "ground_track",
-
     # --- Debris Catalog Filtering (✓ TLE | ✓ OMM) ---
     "filter_altitude",
     "filter_region",
@@ -286,7 +277,6 @@ __all__ = [
     "catalog_statistics",
     "make_debris_object",
     "apply_filters",
-
     # --- Conjunction Analysis (✓ TLE | ✓ OMM) ---
     "distance_3d",
     "closest_approach",
@@ -294,30 +284,24 @@ __all__ = [
     "load_spacebook_covariance",
     "compute_collision_probability",
     "estimate_covariance",
-
     # --- CDM ---
     "parse_cdm_xml",
-
     # --- Visualization ---
     "plot_trajectories",
-
     # --- Visibility ---
     "visible_from_location",
     "passes_over_location",
-
     # --- Time & Utils ---
     "convert_time",
     "vincenty_distance",
     "orbital_elements",
     "orbit_period",
-
     # --- High-Fidelity Numerical Engine ---
     "compute_collision_probability_mc",
     "propagate_covariance_stm",
     "rotate_covariance_rtn_to_eci",
     "propagate_cowell",
     "SpatialIndex",
-
     # --- Maneuver & High-Fidelity Physics ---
     "ManeuverFrame",
     "FiniteBurn",
@@ -327,14 +311,12 @@ __all__ = [
     "frame_to_inertial",
     "thrust_acceleration_inertial",
     "validate_burn",
-
     # --- Space Weather ---
     "sun_position_de",
     "moon_position_de",
     "get_space_weather",
     "load_space_weather",
     "atmospheric_density_empirical",
-
     # --- Errors ---
     "AstraError",
     "InvalidTLEError",
@@ -346,21 +328,25 @@ __all__ = [
     "EphemerisError",
     "SpacebookError",
     "SpacebookLookupError",
-
     # --- Config & Mode Control ---
     "set_strict_mode",
     "validate_burn_sequence",
     "NumericalState",
     "DragConfig",
     "projected_area_m2",
+    "TrajectoryMap",
+    "VelocityMap",
+    "sun_position_teme",
+    "moon_position_teme",
 ]
 
 import sys
 from . import config
 from astra.config import set_strict_mode
+from typing import Any
 
 
-def __getattr__(name: str):
+def __getattr__(name: str) -> Any:
     """Lazy-load optional dependencies (e.g. Plotly for ``plot_trajectories``)."""
     if name == "plot_trajectories":
         try:
@@ -375,9 +361,10 @@ def __getattr__(name: str):
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-import os
+import os  # noqa: E402
 
 _BANNER_SHOWN = False
+
 
 def _show_banner() -> None:
     """Print ASTRA startup banner to stderr. Fires once per process.
@@ -392,12 +379,26 @@ def _show_banner() -> None:
     if os.environ.get("ASTRA_NO_BANNER", "0").strip() == "1":
         _BANNER_SHOWN = True
         return
-    mode = "STRICT (Flight-Grade)" if config.ASTRA_STRICT_MODE else "Relaxed (Beginner-Friendly)"
+    mode = (
+        "STRICT (Flight-Grade)"
+        if config.ASTRA_STRICT_MODE
+        else "Relaxed (Beginner-Friendly)"
+    )
     print(f"[ASTRA-Core v{__version__}] Mode: {mode}", file=sys.stderr)
     if not config.ASTRA_STRICT_MODE:
-        print("[ASTRA-Core] -> Missing data will be estimated with warnings.", file=sys.stderr)
-        print("[ASTRA-Core] -> Flight-grade: astra.config.ASTRA_STRICT_MODE = True", file=sys.stderr)
-    print("[ASTRA-Core] -> Cache: ~/.astra/data | Creds: SPACETRACK_USER / SPACETRACK_PASS", file=sys.stderr)
+        print(
+            "[ASTRA-Core] -> Missing data will be estimated with warnings.",
+            file=sys.stderr,
+        )
+        print(
+            "[ASTRA-Core] -> Flight-grade: astra.config.ASTRA_STRICT_MODE = True",
+            file=sys.stderr,
+        )
+    print(
+        "[ASTRA-Core] -> Cache: ~/.astra/data | Creds: SPACETRACK_USER / SPACETRACK_PASS",
+        file=sys.stderr,
+    )
     _BANNER_SHOWN = True
+
 
 _show_banner()

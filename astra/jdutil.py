@@ -16,10 +16,11 @@ This is silenced by anchoring the J2000 reference on an **ISO string** (timezone
 naive, implicitly UTC) so numpy never needs to round-trip through a tzinfo object.
 Timezone-awareness is re-attached explicitly on the Python side before returning.
 """
+
 from __future__ import annotations
 
 import numpy as np
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 # J2000 reference epoch: 2000-01-01T12:00:00 UTC.
 _J2000_JD: float = 2451545.0
@@ -53,14 +54,16 @@ def jd_utc_to_datetime(jd: float | np.ndarray) -> datetime | np.ndarray:
     offsets_td64 = us_offsets.astype("timedelta64[us]")
     dt64 = _J2000_NP + offsets_td64
 
+    from typing import cast
+
     if jd_arr.ndim == 0:
         # Scalar: extract Python datetime and attach UTC
         raw = dt64.item()  # returns datetime without tzinfo (numpy UTC epoch)
-        return raw.replace(tzinfo=timezone.utc)
+        return cast(datetime, raw).replace(tzinfo=timezone.utc)
 
     # Vectorised array case
     out = np.array(
-        [d.replace(tzinfo=timezone.utc) for d in dt64.astype(object)],
+        [cast(datetime, d).replace(tzinfo=timezone.utc) for d in dt64.astype(object)],
         dtype=object,
     )
     return out.reshape(jd_arr.shape)
@@ -102,6 +105,7 @@ def datetime_utc_to_jd(dt: datetime | np.ndarray) -> float | np.ndarray:
 # ``jd_to_datetime`` and ``datetime_to_jd`` are the names that ocm.py and other
 # callers import.  They delegate to the canonical implementations above so
 # there is exactly one code path.
+
 
 def jd_to_datetime(jd: float | np.ndarray) -> datetime | np.ndarray:
     """Alias for ``jd_utc_to_datetime`` — convert UTC Julian Date(s) to datetime(s).

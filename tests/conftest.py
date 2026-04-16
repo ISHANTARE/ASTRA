@@ -1,6 +1,5 @@
 import pytest
 import numpy as np
-from datetime import datetime, timezone
 
 import astra
 
@@ -10,7 +9,8 @@ ISS_LINE2 = "2 25544  51.6442 284.1199 0001364 338.5498  21.5664 15.48922536 123
 ISS_NORAD = "25544"
 
 TEST_JD_START = 2460676.5  # 2025-01-01T00:00:00 UTC
-TEST_JD_END   = 2460677.5  # 2025-01-02T00:00:00 UTC
+TEST_JD_END = 2460677.5  # 2025-01-02T00:00:00 UTC
+
 
 @pytest.fixture
 def iss_tle():
@@ -40,32 +40,38 @@ def iss_omm():
     }
     return parse_omm_record(rec)
 
+
 @pytest.fixture
 def sample_observer():
     from astra.models import Observer
+
     return Observer(
         name="Bangalore",
         latitude_deg=12.97,
         longitude_deg=77.59,
         elevation_m=920.0,
-        min_elevation_deg=10.0
+        min_elevation_deg=10.0,
     )
+
 
 @pytest.fixture
 def observer():
     """Alias for sample_observer used by visibility tests."""
     from astra.models import Observer
+
     return Observer(
         name="Bangalore",
         latitude_deg=12.97,
         longitude_deg=77.59,
         elevation_m=920.0,
-        min_elevation_deg=10.0
+        min_elevation_deg=10.0,
     )
+
 
 @pytest.fixture
 def time_steps():
     return np.arange(0.0, 24 * 60, 5.0)  # 288 steps
+
 
 @pytest.fixture
 def small_catalog():

@@ -22,6 +22,7 @@ References
 - Vallado, D. A. (2013). *Fundamentals of Astrodynamics and Applications*, §4.7.
 - Schaub & Junkins (2018). *Analytical Mechanics of Space Systems*, §14.2.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -36,6 +37,7 @@ logger = get_logger(__name__)
 # ---------------------------------------------------------------------------
 # Frame Transformation Matrices
 # ---------------------------------------------------------------------------
+
 
 def rotation_vnb_to_inertial(
     r_eci: np.ndarray,
@@ -65,7 +67,8 @@ def rotation_vnb_to_inertial(
     if v_mag < 1e-12:
         raise ManeuverError(
             "Cannot construct VNB frame: velocity magnitude is near-zero.",
-            parameter="v_eci", value=float(v_mag),
+            parameter="v_eci",
+            value=float(v_mag),
         )
 
     h = np.cross(r_eci, v_eci)  # angular momentum vector
@@ -75,11 +78,13 @@ def rotation_vnb_to_inertial(
             "Cannot construct VNB frame: position and velocity are nearly parallel "
             "(r ∥ v), so the orbital plane — and VNB normal — is undefined. "
             "Use a state with finite transverse velocity or a different frame.",
-            parameter="h_mag", value=float(h_mag),
+            parameter="h_mag",
+            value=float(h_mag),
         )
 
     from astra.frames import _build_vnb_matrix_njit
-    return _build_vnb_matrix_njit(r_eci, v_eci)
+
+    return _build_vnb_matrix_njit(r_eci, v_eci)  # type: ignore[no-any-return]
 
 
 def rotation_rtn_to_inertial(
@@ -110,7 +115,8 @@ def rotation_rtn_to_inertial(
     if r_mag < 1e-12:
         raise ManeuverError(
             "Cannot construct RTN frame: position magnitude is near-zero.",
-            parameter="r_eci", value=float(r_mag),
+            parameter="r_eci",
+            value=float(r_mag),
         )
 
     h = np.cross(r_eci, v_eci)
@@ -120,11 +126,13 @@ def rotation_rtn_to_inertial(
             "Cannot construct RTN frame: position and velocity are nearly parallel "
             "(r ∥ v), so the orbital plane — and RTN normal — is undefined. "
             "Use a state with finite transverse velocity or a different frame.",
-            parameter="h_mag", value=float(h_mag),
+            parameter="h_mag",
+            value=float(h_mag),
         )
 
     from astra.frames import _build_rtn_matrix_njit
-    return _build_rtn_matrix_njit(r_eci, v_eci)
+
+    return _build_rtn_matrix_njit(r_eci, v_eci)  # type: ignore[no-any-return]
 
 
 def frame_to_inertial(
@@ -147,19 +155,21 @@ def frame_to_inertial(
         ``a_inertial = T @ a_frame``.
     """
     if frame is ManeuverFrame.VNB:
-        return rotation_vnb_to_inertial(r_eci, v_eci)
+        return rotation_vnb_to_inertial(r_eci, v_eci)  # type: ignore[no-any-return]
     elif frame is ManeuverFrame.RTN:
-        return rotation_rtn_to_inertial(r_eci, v_eci)
+        return rotation_rtn_to_inertial(r_eci, v_eci)  # type: ignore[no-any-return]
     else:
         raise ManeuverError(
             f"Unknown ManeuverFrame: {frame!r}",
-            parameter="frame", value=str(frame),
+            parameter="frame",
+            value=str(frame),
         )
 
 
 # ---------------------------------------------------------------------------
 # Thrust Vector Computation (used inside ODE derivative)
 # ---------------------------------------------------------------------------
+
 
 def thrust_acceleration_inertial(
     r_eci: np.ndarray,
@@ -191,7 +201,8 @@ def thrust_acceleration_inertial(
         raise ManeuverError(
             "Spacecraft mass has reached zero — propellant exhausted "
             "before engine cutoff.",
-            parameter="mass_kg", value=mass_kg,
+            parameter="mass_kg",
+            value=mass_kg,
         )
 
     # Build dynamic rotation matrix from instantaneous state
@@ -207,12 +218,13 @@ def thrust_acceleration_inertial(
     # Convert to km/s²:  1 m/s² = 1e-3 km/s²
     a_thrust_km_s2 = (burn.thrust_N / mass_kg) * 1e-3 * d_inertial
 
-    return a_thrust_km_s2
+    return a_thrust_km_s2  # type: ignore[no-any-return]
 
 
 # ---------------------------------------------------------------------------
 # Maneuver Validation
 # ---------------------------------------------------------------------------
+
 
 def validate_burn(burn: FiniteBurn, initial_mass_kg: float) -> None:
     """Pre-flight validation of a FiniteBurn definition.
@@ -237,19 +249,22 @@ def validate_burn(burn: FiniteBurn, initial_mass_kg: float) -> None:
     if burn.duration_s <= 0.0:
         raise ManeuverError(
             "Burn duration must be positive.",
-            parameter="duration_s", value=burn.duration_s,
+            parameter="duration_s",
+            value=burn.duration_s,
         )
 
     if burn.thrust_N <= 0.0:
         raise ManeuverError(
             "Thrust magnitude must be positive.",
-            parameter="thrust_N", value=burn.thrust_N,
+            parameter="thrust_N",
+            value=burn.thrust_N,
         )
 
     if burn.isp_s <= 0.0:
         raise ManeuverError(
             "Specific impulse must be positive.",
-            parameter="isp_s", value=burn.isp_s,
+            parameter="isp_s",
+            value=burn.isp_s,
         )
 
     d = np.asarray(burn.direction, dtype=np.float64)
@@ -257,7 +272,8 @@ def validate_burn(burn: FiniteBurn, initial_mass_kg: float) -> None:
     if abs(d_mag - 1.0) > 1e-6:
         raise ManeuverError(
             f"Thrust direction must be a unit vector (|d| = {d_mag:.8f}).",
-            parameter="direction", value=tuple(burn.direction),
+            parameter="direction",
+            value=tuple(burn.direction),
         )
 
     # Tsiolkovsky mass check
@@ -292,7 +308,7 @@ def validate_burn_sequence(burns: list[FiniteBurn]) -> None:
     """
     for i in range(len(burns) - 1):
         b1 = burns[i]
-        b2 = burns[i+1]
+        b2 = burns[i + 1]
         if b1.epoch_cutoff_jd > b2.epoch_ignition_jd + 1e-12:
             raise ManeuverError(
                 f"Temporal overlap detected between maneuver {i} and {i+1}. "

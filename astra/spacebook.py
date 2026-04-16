@@ -49,11 +49,12 @@ References
 - COMSPOC API Section 4B: https://spacebook.com/userguide#section4B
 - Schema notes: docs/spacebook_schema_notes.md (verified 2026-04-09)
 """
+
 from __future__ import annotations
+from typing import Any
 
 import os
 import pathlib
-import re
 import threading
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -89,22 +90,22 @@ _DEFAULT_DATA_DIR = os.environ.get(
 _SB_BASE = "https://spacebook.com/api"
 
 # ── Catalog ───────────────────────────────────────────────────────────────
-_SB_TLE_URL          = f"{_SB_BASE}/entity/tle"
-_SB_HISTORICAL_TLE   = f"{_SB_BASE}/entity/tle/{{date}}"   # {date} = YYYY-MM-DD
-_SB_XPTLE_URL        = f"{_SB_BASE}/entity/xp-tle"
-_SB_SATCAT_JSON_URL  = f"{_SB_BASE}/entity/satcat"
-_SB_SATCAT_DET_URL   = f"{_SB_BASE}/entity/satcat/details"
-_SB_SATCAT_CSV_URL   = f"{_SB_BASE}/entity/satcat/csv"
+_SB_TLE_URL = f"{_SB_BASE}/entity/tle"
+_SB_HISTORICAL_TLE = f"{_SB_BASE}/entity/tle/{{date}}"  # {date} = YYYY-MM-DD
+_SB_XPTLE_URL = f"{_SB_BASE}/entity/xp-tle"
+_SB_SATCAT_JSON_URL = f"{_SB_BASE}/entity/satcat"
+_SB_SATCAT_DET_URL = f"{_SB_BASE}/entity/satcat/details"
+_SB_SATCAT_CSV_URL = f"{_SB_BASE}/entity/satcat/csv"
 
 # ── Environmental ─────────────────────────────────────────────────────────
-_SB_SW_RECENT_URL    = f"{_SB_BASE}/spaceweather/recent"
-_SB_SW_FULL_URL      = f"{_SB_BASE}/spaceweather/full"
-_SB_EOP_RECENT_URL   = f"{_SB_BASE}/eop/recent"
-_SB_EOP_FULL_URL     = f"{_SB_BASE}/eop/full"
+_SB_SW_RECENT_URL = f"{_SB_BASE}/spaceweather/recent"
+_SB_SW_FULL_URL = f"{_SB_BASE}/spaceweather/full"
+_SB_EOP_RECENT_URL = f"{_SB_BASE}/eop/recent"
+_SB_EOP_FULL_URL = f"{_SB_BASE}/eop/full"
 
 # ── Per-Object (GUID-based) ───────────────────────────────────────────────
 # Resolved GUID required. Use get_norad_guid() to obtain.
-_SB_SYNTH_COV_URL    = f"{_SB_BASE}/entity/synthetic-covariance/{{guid}}"
+_SB_SYNTH_COV_URL = f"{_SB_BASE}/entity/synthetic-covariance/{{guid}}"
 
 _HEADERS = {
     "User-Agent": (
@@ -154,6 +155,7 @@ _guid_refresh_thread: Optional[threading.Thread] = None
 # ---------------------------------------------------------------------------
 # Core HTTP Helper
 # ---------------------------------------------------------------------------
+
 
 def _sb_get(url: str, timeout: int = _REQUEST_TIMEOUT) -> requests.Response:
     """Perform an authenticated-free HTTP GET against a Spacebook endpoint.
@@ -212,6 +214,7 @@ def _cache_age_hours(path: pathlib.Path) -> float:
 # Availability Probe
 # ---------------------------------------------------------------------------
 
+
 def is_available(timeout: int = 4) -> bool:
     """Return True if the Spacebook API is reachable.
 
@@ -232,7 +235,7 @@ def is_available(timeout: int = 4) -> bool:
             _SB_SW_RECENT_URL,
             headers=_HEADERS,
             timeout=timeout,
-            stream=True,   # avoid downloading the full body just for a probe
+            stream=True,  # avoid downloading the full body just for a probe
         )
         resp.close()
         return resp.status_code == 200
@@ -243,6 +246,7 @@ def is_available(timeout: int = 4) -> bool:
 # ═══════════════════════════════════════════════════════════════════════════
 # SPACE WEATHER
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 def _parse_sw_text(text: str) -> dict[str, tuple[float, float, float]]:
     """Parse Spacebook / CSSI fixed-width space-weather text.
@@ -272,12 +276,12 @@ def _parse_sw_text(text: str) -> dict[str, tuple[float, float, float]]:
         Dict mapping ``"YYYY-MM-DD"`` → ``(f107_obs, f107_adj, ap_daily)``.
     """
     # DATA-02: Named field positions per CSSI CSSISpaceWeather fixed-width spec.
-    _SW_FW_YEAR    = 0
-    _SW_FW_MONTH   = 1
-    _SW_FW_DAY     = 2
-    _SW_FW_AP_AVG  = 20   # Daily-average (Avg) Ap geomagnetic index
-    _SW_FW_F107ADJ = 23   # 81-day centred F10.7 flux (adjusted to 1 AU)
-    _SW_FW_F107OBS = 28   # Observed (daily) F10.7 flux
+    _SW_FW_YEAR = 0
+    _SW_FW_MONTH = 1
+    _SW_FW_DAY = 2
+    _SW_FW_AP_AVG = 20  # Daily-average (Avg) Ap geomagnetic index
+    _SW_FW_F107ADJ = 23  # 81-day centred F10.7 flux (adjusted to 1 AU)
+    _SW_FW_F107OBS = 28  # Observed (daily) F10.7 flux
     _SW_FW_MIN_FIELDS = _SW_FW_F107OBS + 1  # 29 — minimum tokens required
 
     result: dict[str, tuple[float, float, float]] = {}
@@ -302,10 +306,10 @@ def _parse_sw_text(text: str) -> dict[str, tuple[float, float, float]]:
         if len(fields) < _SW_FW_MIN_FIELDS:
             continue
         try:
-            year  = int(fields[_SW_FW_YEAR])
+            year = int(fields[_SW_FW_YEAR])
             month = int(fields[_SW_FW_MONTH])
-            day   = int(fields[_SW_FW_DAY])
-            ap    = float(fields[_SW_FW_AP_AVG])
+            day = int(fields[_SW_FW_DAY])
+            ap = float(fields[_SW_FW_AP_AVG])
             f107_adj = float(fields[_SW_FW_F107ADJ])
             f107_obs = float(fields[_SW_FW_F107OBS])
             date_str = f"{year:04d}-{month:02d}-{day:02d}"
@@ -323,7 +327,6 @@ def _parse_sw_text(text: str) -> dict[str, tuple[float, float, float]]:
     return result
 
 
-
 def _load_sw(force_full: bool = False) -> None:
     """Download and parse Spacebook Space Weather into the in-memory cache.
 
@@ -334,10 +337,10 @@ def _load_sw(force_full: bool = False) -> None:
 
     # Decide which file to use
     recent_path = _sb_cache_path("sw_recent.txt")
-    full_path   = _sb_cache_path("sw_full.txt")
+    full_path = _sb_cache_path("sw_full.txt")
 
     age_recent = _cache_age_hours(recent_path)
-    age_full   = _cache_age_hours(full_path)
+    age_full = _cache_age_hours(full_path)
 
     use_full = force_full or (age_recent > 24 * 30)  # recent is >30 days old
 
@@ -346,16 +349,22 @@ def _load_sw(force_full: bool = False) -> None:
             text = full_path.read_text(encoding="utf-8", errors="replace")
             logger.debug("Spacebook SW: using cached full file.")
         else:
-            logger.info("Spacebook SW: downloading full history from %s", _SB_SW_FULL_URL)
+            logger.info(
+                "Spacebook SW: downloading full history from %s", _SB_SW_FULL_URL
+            )
             resp = _sb_get(_SB_SW_FULL_URL)
             text = resp.text
             full_path.write_text(text, encoding="utf-8")
     else:
         if age_recent <= 6 and recent_path.exists():
             text = recent_path.read_text(encoding="utf-8", errors="replace")
-            logger.debug("Spacebook SW: using cached recent file (%.1f h old).", age_recent)
+            logger.debug(
+                "Spacebook SW: using cached recent file (%.1f h old).", age_recent
+            )
         else:
-            logger.info("Spacebook SW: downloading recent data from %s", _SB_SW_RECENT_URL)
+            logger.info(
+                "Spacebook SW: downloading recent data from %s", _SB_SW_RECENT_URL
+            )
             resp = _sb_get(_SB_SW_RECENT_URL)
             text = resp.text
             recent_path.write_text(text, encoding="utf-8")
@@ -365,7 +374,7 @@ def _load_sw(force_full: bool = False) -> None:
                     logger.info("Spacebook SW: also refreshing full history.")
                     resp_full = _sb_get(_SB_SW_FULL_URL)
                     full_path.write_text(resp_full.text, encoding="utf-8")
-                    text = resp_full.text   # prefer full for in-memory
+                    text = resp_full.text  # prefer full for in-memory
                 except SpacebookError as exc:
                     logger.warning("Could not download SW full: %s", exc)
 
@@ -425,7 +434,8 @@ def get_space_weather_sb(t_jd: float) -> tuple[float, float, float]:
             # Without this guard, millions of rapid calls while cache is stale
             # (age_h > 6) could each spawn a new daemon thread, exhausting memory.
             if age_h > 6 and _sw_refresh_thread is None:
-                def _refresh():
+
+                def _refresh() -> None:
                     global _sw_refresh_thread
                     try:
                         _load_sw()
@@ -434,6 +444,7 @@ def get_space_weather_sb(t_jd: float) -> tuple[float, float, float]:
                     finally:
                         with _SW_LOCK:
                             _sw_refresh_thread = None
+
                 t = threading.Thread(target=_refresh, daemon=True)
                 _sw_refresh_thread = t
                 t.start()
@@ -454,6 +465,7 @@ def get_space_weather_sb(t_jd: float) -> tuple[float, float, float]:
 # ═══════════════════════════════════════════════════════════════════════════
 # EARTH ORIENTATION PARAMETERS (EOP)
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 def _parse_eop_text(text: str) -> dict[int, tuple[float, float, float]]:
     """Parse Spacebook IERS-format EOP file.
@@ -485,10 +497,10 @@ def _parse_eop_text(text: str) -> dict[int, tuple[float, float, float]]:
         if len(fields) < 7:
             continue
         try:
-            mjd   = int(fields[3])
-            xp    = float(fields[4])   # arcseconds
-            yp    = float(fields[5])   # arcseconds
-            dut1  = float(fields[6])   # seconds (UT1-UTC)
+            mjd = int(fields[3])
+            xp = float(fields[4])  # arcseconds
+            yp = float(fields[5])  # arcseconds
+            dut1 = float(fields[6])  # seconds (UT1-UTC)
             result[mjd] = (xp, yp, dut1)
         except (ValueError, IndexError):
             continue
@@ -501,17 +513,19 @@ def _load_eop() -> None:
     global _eop_loaded
 
     recent_path = _sb_cache_path("eop_recent.txt")
-    full_path   = _sb_cache_path("eop_full.txt")
+    full_path = _sb_cache_path("eop_full.txt")
 
     age_recent = _cache_age_hours(recent_path)
-    age_full   = _cache_age_hours(full_path)
+    age_full = _cache_age_hours(full_path)
 
     # Use recent file (24h TTL) if fresh, otherwise refresh it
     if age_recent <= 24 and recent_path.exists():
         text = recent_path.read_text(encoding="utf-8", errors="replace")
         logger.debug("Spacebook EOP: using cached recent file.")
     else:
-        logger.info("Spacebook EOP: downloading recent data from %s", _SB_EOP_RECENT_URL)
+        logger.info(
+            "Spacebook EOP: downloading recent data from %s", _SB_EOP_RECENT_URL
+        )
         resp = _sb_get(_SB_EOP_RECENT_URL)
         text = resp.text
         recent_path.write_text(text, encoding="utf-8")
@@ -527,7 +541,9 @@ def _load_eop() -> None:
         new_cache = merged
     elif age_full > 24 * 7:
         try:
-            logger.info("Spacebook EOP: downloading full history from %s", _SB_EOP_FULL_URL)
+            logger.info(
+                "Spacebook EOP: downloading full history from %s", _SB_EOP_FULL_URL
+            )
             resp_full = _sb_get(_SB_EOP_FULL_URL)
             full_path.write_text(resp_full.text, encoding="utf-8")
             full_cache = _parse_eop_text(resp_full.text)
@@ -584,7 +600,9 @@ def get_eop_sb(t_jd: float) -> tuple[float, float, float]:
         # Linear interpolation between two nearest neighbours
         keys = sorted(_eop_cache.keys())
         if not keys:
-            logger.warning("Spacebook EOP: cache empty — returning zero EOP correction.")
+            logger.warning(
+                "Spacebook EOP: cache empty — returning zero EOP correction."
+            )
             return (0.0, 0.0, 0.0)
 
         # Binary-search for bracketing indices
@@ -606,13 +624,14 @@ def get_eop_sb(t_jd: float) -> tuple[float, float, float]:
         return (
             xp0 + frac * (xp1 - xp0),
             yp0 + frac * (yp1 - yp0),
-            d0  + frac * (d1  - d0),
+            d0 + frac * (d1 - d0),
         )
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 # SATELLITE CATALOG & GUID RESOLUTION
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 def _load_satcat_guid_map() -> None:
     """Download the Spacebook satellite catalog and build the NORAD→GUID map.
@@ -634,11 +653,14 @@ def _load_satcat_guid_map() -> None:
     if not need_download and cache_path.exists():
         # Load from local cache
         import json
+
         try:
             raw = cache_path.read_text(encoding="utf-8", errors="replace")
             data = json.loads(raw)
         except Exception as exc:
-            logger.warning("Spacebook satcat: cache corrupted (%s); re-downloading.", exc)
+            logger.warning(
+                "Spacebook satcat: cache corrupted (%s); re-downloading.", exc
+            )
             need_download = True
 
     if need_download:
@@ -652,12 +674,14 @@ def _load_satcat_guid_map() -> None:
                     "Spacebook satcat: download failed (%s); using stale cache.", exc
                 )
                 import json
+
                 raw = cache_path.read_text(encoding="utf-8", errors="replace")
                 data = json.loads(raw)
             else:
                 raise
         else:
             import json
+
             cache_path.write_text(resp.text, encoding="utf-8")
             data = json.loads(resp.text)
 
@@ -681,9 +705,7 @@ def _load_satcat_guid_map() -> None:
         _guid_loaded = True
         _guid_last_success = datetime.now(timezone.utc)
 
-    logger.info(
-        "Spacebook satcat: GUID map loaded — %d objects.", len(_guid_map)
-    )
+    logger.info("Spacebook satcat: GUID map loaded — %d objects.", len(_guid_map))
 
     # AUDIT-C-05 Fix: The old code recursively called _load_satcat_guid_map()
     # from the background thread, but because the parent call already wrote the
@@ -694,12 +716,14 @@ def _load_satcat_guid_map() -> None:
     # network download and merges the result into the existing in-memory map,
     # then clear the sentinel in a guaranteed finally block.
     if stale:
-        def _bg_satcat_refresh():
+
+        def _bg_satcat_refresh() -> None:
             global _guid_refresh_thread
             try:
                 logger.info("Spacebook satcat: background refresh starting download.")
                 resp = _sb_get(_SB_SATCAT_JSON_URL, timeout=60)
                 import json as _json
+
                 cache_path.write_text(resp.text, encoding="utf-8")
                 data_fresh = _json.loads(resp.text)
                 new_map: dict[int, str] = {}
@@ -806,6 +830,7 @@ def refresh_satcat_cache() -> int:
 # TLE / XP-TLE CATALOG FETCHES
 # ═══════════════════════════════════════════════════════════════════════════
 
+
 def fetch_tle_catalog() -> list[SatelliteTLE]:
     """Fetch the current standard TLE catalog from Spacebook.
 
@@ -875,7 +900,7 @@ def fetch_historical_tle(date: datetime) -> list[SatelliteTLE]:
     return _fetch_tle_endpoint(
         url=url,
         cache_filename=cache_filename,
-        ttl_hours=float("inf"),   # never expire
+        ttl_hours=float("inf"),  # never expire
         source_tag=f"spacebook_hist_{date_str}",
     )
 
@@ -895,7 +920,9 @@ def _fetch_tle_endpoint(
 
     if age_h <= ttl_hours and cache_path.exists():
         text = cache_path.read_text(encoding="utf-8", errors="replace")
-        logger.debug("Spacebook TLE: using cache '%s' (%.1f h old).", cache_filename, age_h)
+        logger.debug(
+            "Spacebook TLE: using cache '%s' (%.1f h old).", cache_filename, age_h
+        )
     else:
         logger.info("Spacebook TLE: downloading from %s", url)
         try:
@@ -905,7 +932,8 @@ def _fetch_tle_endpoint(
         except SpacebookError:
             if cache_path.exists():
                 logger.warning(
-                    "Spacebook TLE: download failed; using stale cache '%s'.", cache_filename
+                    "Spacebook TLE: download failed; using stale cache '%s'.",
+                    cache_filename,
                 )
                 text = cache_path.read_text(encoding="utf-8", errors="replace")
             else:
@@ -919,7 +947,7 @@ def _fetch_tle_endpoint(
         try:
             object.__setattr__(tle, "_spacebook_source", source_tag)
         except (AttributeError, TypeError):
-            pass   # frozen dataclasses: skip gracefully
+            pass  # frozen dataclasses: skip gracefully
 
     logger.debug(
         "Spacebook TLE: parsed %d objects from '%s'.", len(tles), cache_filename
@@ -930,6 +958,7 @@ def _fetch_tle_endpoint(
 # ═══════════════════════════════════════════════════════════════════════════
 # PER-OBJECT: SYNTHETIC COVARIANCE (STK EPHEMERIS FORMAT)
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 def fetch_synthetic_covariance_stk(norad_id: int) -> str:
     """Fetch COMSPOC SynCoPate ephemeris with covariance for a satellite.
@@ -967,12 +996,16 @@ def fetch_synthetic_covariance_stk(norad_id: int) -> str:
 
     if age_h <= 1.0 and cache_path.exists():
         logger.debug(
-            "Spacebook covariance: using cache for NORAD %d (%.1f h old).", norad_id, age_h
+            "Spacebook covariance: using cache for NORAD %d (%.1f h old).",
+            norad_id,
+            age_h,
         )
         return cache_path.read_text(encoding="utf-8", errors="replace")
 
     logger.info(
-        "Spacebook covariance: downloading ephemeris for NORAD %d (GUID=%s).", norad_id, guid
+        "Spacebook covariance: downloading ephemeris for NORAD %d (GUID=%s).",
+        norad_id,
+        guid,
     )
     resp = _sb_get(url, timeout=45)
     text = resp.text
@@ -987,7 +1020,8 @@ def fetch_synthetic_covariance_stk(norad_id: int) -> str:
 # SATCAT DETAILS — Physical Parameters
 # ═══════════════════════════════════════════════════════════════════════════
 
-def fetch_satcat_details(norad_id: int) -> dict:
+
+def fetch_satcat_details(norad_id: int) -> dict[str, Any]:
     """Fetch detailed physical parameters for a satellite from Spacebook.
 
     Returns COMSPOC-derived physical metadata from the DISCOSweb and

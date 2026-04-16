@@ -5,16 +5,26 @@ Pre-propagation filtering of debris catalogs. ALL filtering in this module
 operates on DebrisObject parameters (derived TLE fields, NOT propagated
 positions). Filtering is O(N) and involves no SGP4 calls.
 """
+
 from __future__ import annotations
 
 import math
 from typing import Any, Optional
 
-from astra.models import DebrisObject, FilterConfig, SatelliteTLE, SatelliteOMM, SatelliteState
+from astra.models import (
+    DebrisObject,
+    FilterConfig,
+    SatelliteTLE,
+    SatelliteOMM,
+    SatelliteState,
+)
 from astra.utils import orbit_period, orbital_elements
-from astra.constants import EARTH_RADIUS_KM, EARTH_EQUATORIAL_RADIUS_KM, EARTH_MU_KM3_S2, TLE_AGE_LEO_MAX_DAYS, TLE_AGE_DEFAULT_MAX_DAYS
-
-
+from astra.constants import (
+    EARTH_EQUATORIAL_RADIUS_KM,
+    EARTH_MU_KM3_S2,
+    TLE_AGE_LEO_MAX_DAYS,
+    TLE_AGE_DEFAULT_MAX_DAYS,
+)
 
 
 def make_debris_object(source: SatelliteState) -> DebrisObject:
@@ -29,7 +39,7 @@ def make_debris_object(source: SatelliteState) -> DebrisObject:
         period_min = orbit_period(elements["mean_motion_rev_per_day"])
         # Mean motion in rad/s for semi-major axis
         if period_min <= 0:
-            n_rad_s = float('inf')
+            n_rad_s = float("inf")
             a = 0.0
         else:
             n_rad_s = (2.0 * math.pi) / (period_min * 60.0)
@@ -44,7 +54,7 @@ def make_debris_object(source: SatelliteState) -> DebrisObject:
         mean_motion_rev_day = source.mean_motion_rad_min * 1440.0 / (2.0 * math.pi)
         period_min = orbit_period(mean_motion_rev_day)
         if period_min <= 0:
-            n_rad_s = float('inf')
+            n_rad_s = float("inf")
             a = 0.0
         else:
             n_rad_s = (2.0 * math.pi) / (period_min * 60.0)
@@ -61,7 +71,7 @@ def make_debris_object(source: SatelliteState) -> DebrisObject:
     altitude_km = a - EARTH_EQUATORIAL_RADIUS_KM
 
     # Harvest RCS from OMM if available
-    rcs_m2 = getattr(source, 'rcs_m2', None)
+    rcs_m2 = getattr(source, "rcs_m2", None)
 
     return DebrisObject(
         source=source,
@@ -82,7 +92,7 @@ def filter_altitude(
 ) -> list[DebrisObject]:
     """Retain only objects whose mean orbital altitude is within bounds.
 
-    Also filters objects whose perigee is pathologically low 
+    Also filters objects whose perigee is pathologically low
     (perigee < min_km * 0.9) to discard quickly-decaying objects.
 
     Args:
@@ -136,7 +146,7 @@ def filter_region(
 
         # Object latitude bounds during its orbit: [-max_lat_reached, +max_lat_reached]
         # Bounding box latitude: [lat_min_deg, lat_max_deg]
-        
+
         # Check if the two intervals overlap
         if lat_min_deg <= max_lat_reached and lat_max_deg >= -max_lat_reached:
             # Overlap exists. Longitude is skipped since the Earth rotates underneath,
@@ -146,6 +156,7 @@ def filter_region(
     # Longitude filters are not implemented for this inclination-only heuristic
     if lon_min_deg is not None or lon_max_deg is not None:
         from astra import config
+
         lon_msg = (
             "filter_region() longitude bounds are set but IGNORED. "
             "This filter uses inclination-only approximation and cannot restrict longitude — "
@@ -154,11 +165,12 @@ def filter_region(
         )
         if config.ASTRA_STRICT_MODE:
             from astra.errors import FilterError
+
             raise FilterError(
-                f"[ASTRA STRICT] {lon_msg}",
-                parameter="lon_min_deg/lon_max_deg"
+                f"[ASTRA STRICT] {lon_msg}", parameter="lon_min_deg/lon_max_deg"
             )
         import logging
+
         logging.getLogger(__name__).warning(lon_msg)
 
     return results
@@ -180,7 +192,7 @@ def filter_time_window(
     results = []
     for obj in objects:
         age_days = t_start_jd - obj.source.epoch_jd
-        
+
         # Stale thresholds
         # Stricter threshold for LEO due to higher atmospheric drag
         is_stale = False
@@ -190,10 +202,10 @@ def filter_time_window(
         else:
             if age_days > TLE_AGE_DEFAULT_MAX_DAYS:
                 is_stale = True
-                
+
         if not is_stale:
             results.append(obj)
-            
+
     return results
 
 
@@ -215,10 +227,16 @@ def catalog_statistics(objects: list[DebrisObject]) -> dict[str, Any]:
             "altitude_std_km": 0.0,
             "altitude_min_km": 0.0,
             "altitude_max_km": 0.0,
-            "inclination_distribution": {"equatorial": 0, "inclined": 0, "polar": 0, "retrograde": 0},
+            "inclination_distribution": {
+                "equatorial": 0,
+                "inclined": 0,
+                "polar": 0,
+                "retrograde": 0,
+            },
         }
 
     import numpy as np
+
     altitudes = np.array([obj.altitude_km for obj in objects])
     eccentricities = np.array([obj.eccentricity for obj in objects])
     inclinations = np.array([obj.inclination_deg for obj in objects])
@@ -240,13 +258,14 @@ def catalog_statistics(objects: list[DebrisObject]) -> dict[str, Any]:
     # Inclination distribution
     inclination_dist = {
         "equatorial": int(np.sum(inclinations < 10.0)),
-        "inclined":   int(np.sum((inclinations >= 10.0) & (inclinations < 80.0))),
-        "polar":      int(np.sum((inclinations >= 80.0) & (inclinations <= 90.0))),
+        "inclined": int(np.sum((inclinations >= 10.0) & (inclinations < 80.0))),
+        "polar": int(np.sum((inclinations >= 80.0) & (inclinations <= 90.0))),
         "retrograde": int(np.sum(inclinations > 90.0)),
     }
 
     # Object type counts
     from collections import Counter
+
     type_counts = Counter(classes)
     by_type = {"PAYLOAD": 0, "ROCKET_BODY": 0, "DEBRIS": 0, "UNKNOWN": 0}
     by_type.update({k: v for k, v in type_counts.items() if k in by_type})
@@ -279,7 +298,9 @@ def apply_filters(
 
     # 1. Apply altitude filter
     if config.min_altitude_km is not None and config.max_altitude_km is not None:
-        filtered = filter_altitude(filtered, config.min_altitude_km, config.max_altitude_km)
+        filtered = filter_altitude(
+            filtered, config.min_altitude_km, config.max_altitude_km
+        )
 
     # 2. Apply region filter
     has_lat = config.lat_min_deg is not None and config.lat_max_deg is not None

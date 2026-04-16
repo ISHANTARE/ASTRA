@@ -57,9 +57,11 @@ def test_parse_cdm_xml_minimal_roundtrip():
 
 def test_parse_cdm_xml_multiscript_namespace_stripped():
     """Prefixed tags and xmlns stripping still yield parsed fields."""
-    inner = _minimal_cdm_xml().replace(
-        "<cdm>", '<a:cdm xmlns:a="urn:test">'
-    ).replace("</cdm>", "</a:cdm>")
+    inner = (
+        _minimal_cdm_xml()
+        .replace("<cdm>", '<a:cdm xmlns:a="urn:test">')
+        .replace("</cdm>", "</a:cdm>")
+    )
     cdm = parse_cdm_xml(inner)
     assert cdm.message_id == "TEST-CDM-001"
 

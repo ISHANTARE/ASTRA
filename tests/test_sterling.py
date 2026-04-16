@@ -2,15 +2,21 @@ import pytest
 import numpy as np
 import math
 
-from astra.propagator import NumericalState, DragConfig, propagate_cowell, _sun_position_approx, _moon_position_approx
-from astra.covariance import compute_collision_probability_mc, propagate_covariance_stm, estimate_covariance
+from astra.propagator import (
+    NumericalState,
+    DragConfig,
+    propagate_cowell,
+    _sun_position_approx,
+    _moon_position_approx,
+)
+from astra.covariance import compute_collision_probability_mc, propagate_covariance_stm
 from astra.models import projected_area_m2
 from astra.spatial_index import SpatialIndex
-
 
 # =========================================================================
 # Numerical Propagator Tests
 # =========================================================================
+
 
 class TestCowellPropagator:
     """Validates the Cowell numerical propagator against known orbital mechanics."""
@@ -31,12 +37,17 @@ class TestCowellPropagator:
 
     def test_cowell_conserves_energy_approx(self, iss_state):
         """Keplerian energy should be approximately conserved over 1 orbit."""
-        states = propagate_cowell(iss_state, 5400.0, dt_out=60.0,
-                                  include_third_body=False)
+        states = propagate_cowell(
+            iss_state, 5400.0, dt_out=60.0, include_third_body=False
+        )
         mu = 398600.4418
 
-        e0 = 0.5 * np.linalg.norm(iss_state.velocity_km_s)**2 - mu / np.linalg.norm(iss_state.position_km)
-        ef = 0.5 * np.linalg.norm(states[-1].velocity_km_s)**2 - mu / np.linalg.norm(states[-1].position_km)
+        e0 = 0.5 * np.linalg.norm(iss_state.velocity_km_s) ** 2 - mu / np.linalg.norm(
+            iss_state.position_km
+        )
+        ef = 0.5 * np.linalg.norm(states[-1].velocity_km_s) ** 2 - mu / np.linalg.norm(
+            states[-1].position_km
+        )
 
         # Energy should be conserved within 0.01% for J2 perturbed (near-conservation)
         assert abs(ef - e0) / abs(e0) < 0.001
@@ -51,8 +62,9 @@ class TestCowellPropagator:
     def test_cowell_with_drag(self, iss_state):
         """Drag should cause slight altitude decrease."""
         drag = DragConfig(cd=2.2, area_m2=400.0, mass_kg=420000.0)
-        states = propagate_cowell(iss_state, 5400.0, dt_out=60.0,
-                                  drag_config=drag, include_third_body=False)
+        states = propagate_cowell(
+            iss_state, 5400.0, dt_out=60.0, drag_config=drag, include_third_body=False
+        )
         assert len(states) > 0
 
     def test_sun_position_reasonable(self):
@@ -70,6 +82,7 @@ class TestCowellPropagator:
 # Monte Carlo Pc Tests
 # =========================================================================
 
+
 class TestMonteCarloPC:
     def test_mc_converges_to_analytical_for_high_speed(self):
         """MC should approximately match Chan for high-speed transverse encounters."""
@@ -79,8 +92,14 @@ class TestMonteCarloPC:
         cov_b = np.eye(6) * 0.01
 
         p_mc = compute_collision_probability_mc(
-            miss, vel, cov_a, cov_b, radius_a_km=0.005, radius_b_km=0.005,
-            n_samples=500_000, seed=42
+            miss,
+            vel,
+            cov_a,
+            cov_b,
+            radius_a_km=0.005,
+            radius_b_km=0.005,
+            n_samples=500_000,
+            seed=42,
         )
         assert 0.0 <= p_mc <= 1.0
 
@@ -122,6 +141,7 @@ class TestMonteCarloPC:
 # STM Covariance Tests
 # =========================================================================
 
+
 class TestSTMCovariance:
     def test_stm_returns_3x3(self):
         r0 = np.array([6778.137, 0.0, 0.0])
@@ -154,6 +174,7 @@ class TestSTMCovariance:
 # =========================================================================
 # Attitude-Aware Projected Area Tests
 # =========================================================================
+
 
 class TestProjectedArea:
     def test_face_on_returns_max_area(self):
@@ -188,6 +209,7 @@ class TestProjectedArea:
 # =========================================================================
 # Spatial Index Tests
 # =========================================================================
+
 
 class TestSpatialIndex:
     def test_insert_and_query(self):

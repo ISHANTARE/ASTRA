@@ -20,7 +20,9 @@ References:
     Space-Track.org API Documentation, OMM JSON format.
     Celestrak GP Data Documentation (https://celestrak.org/SOCRATES/help.php).
 """
+
 from __future__ import annotations
+from typing import Any
 
 import json
 import math
@@ -38,6 +40,7 @@ logger = get_logger(__name__)
 # ---------------------------------------------------------------------------
 # Epoch Conversion Helpers
 # ---------------------------------------------------------------------------
+
 
 def _epoch_iso_to_jd(epoch_str: str) -> float:
     """Convert an ISO-8601 timestamp string to a Julian Date float.
@@ -61,9 +64,9 @@ def _epoch_iso_to_jd(epoch_str: str) -> float:
     Raises:
         AstraError: If the epoch string cannot be parsed.
     """
-    clean = epoch_str.strip().rstrip('Z')
+    clean = epoch_str.strip().rstrip("Z")
     # Handle space-separated variant (YYYY-MM-DD HH:MM:SS)
-    clean = clean.replace(' ', 'T')
+    clean = clean.replace(" ", "T")
     try:
         dt = datetime.fromisoformat(clean).replace(tzinfo=timezone.utc)
     except ValueError as exc:
@@ -82,7 +85,8 @@ def _epoch_iso_to_jd(epoch_str: str) -> float:
 # Single OMM Record Parser
 # ---------------------------------------------------------------------------
 
-def parse_omm_record(record: dict) -> SatelliteOMM:
+
+def parse_omm_record(record: dict[str, Any]) -> SatelliteOMM:
     """Parse a single OMM JSON dictionary into a ``SatelliteOMM`` dataclass.
 
     Applies all mandatory unit conversions to guarantee the returned object
@@ -100,6 +104,7 @@ def parse_omm_record(record: dict) -> SatelliteOMM:
         InvalidTLEError: If mandatory orbital element fields are absent or
                          non-numeric.
     """
+
     def _get_float(key: str, default: Optional[float] = None) -> Optional[float]:
         val = record.get(key)
         if val is None or str(val).strip() == "":
@@ -154,11 +159,11 @@ def parse_omm_record(record: dict) -> SatelliteOMM:
     # Keplerian Elements (with mandatory unit conversions)
     # ------------------------------------------------------------------
     # OMM stores angles in DEGREES; SGP4 needs RADIANS.
-    inclination_rad  = math.radians(_req_float("INCLINATION"))
-    raan_rad         = math.radians(_req_float("RA_OF_ASC_NODE"))
-    argpo_rad        = math.radians(_req_float("ARG_OF_PERICENTER"))
-    mo_rad           = math.radians(_req_float("MEAN_ANOMALY"))
-    eccentricity     = _req_float("ECCENTRICITY")    # dimensionless [0, 1)
+    inclination_rad = math.radians(_req_float("INCLINATION"))
+    raan_rad = math.radians(_req_float("RA_OF_ASC_NODE"))
+    argpo_rad = math.radians(_req_float("ARG_OF_PERICENTER"))
+    mo_rad = math.radians(_req_float("MEAN_ANOMALY"))
+    eccentricity = _req_float("ECCENTRICITY")  # dimensionless [0, 1)
 
     # OMM stores Mean Motion in rev/day; SGP4 needs rad/min.
     mean_motion_rev_day = _req_float("MEAN_MOTION")
@@ -184,11 +189,15 @@ def parse_omm_record(record: dict) -> SatelliteOMM:
         rcs_m2 = rcs_m2_explicit
 
     if rcs_m2 is None:
-        logger.debug(f"OMM record for '{name}' missing RCS data (explicit or categorical).")
+        logger.debug(
+            f"OMM record for '{name}' missing RCS data (explicit or categorical)."
+        )
 
     mass_kg: Optional[float] = _get_float("MASS")
     if mass_kg is None:
-        logger.debug(f"OMM record for '{name}' missing MASS field. Numerical propagation will require explicit mass.")
+        logger.debug(
+            f"OMM record for '{name}' missing MASS field. Numerical propagation will require explicit mass."
+        )
 
     cd_area_over_mass: Optional[float] = _get_float("CD_AREA_OVER_MASS")
 
@@ -201,9 +210,13 @@ def parse_omm_record(record: dict) -> SatelliteOMM:
     if mean_motion_rev_day <= 0.0:
         _validation_errors.append(f"MEAN_MOTION={mean_motion_rev_day} must be positive")
     if not (0.0 <= math.degrees(inclination_rad) <= 180.0):
-        _validation_errors.append(f"INCLINATION={math.degrees(inclination_rad):.4f} out of range [0, 180]")
+        _validation_errors.append(
+            f"INCLINATION={math.degrees(inclination_rad):.4f} out of range [0, 180]"
+        )
     if abs(bstar) > 1.0:
-        _validation_errors.append(f"|BSTAR|={abs(bstar):.4e} > 1.0 (physically unrealistic for atmospheric drag coefficient)")
+        _validation_errors.append(
+            f"|BSTAR|={abs(bstar):.4e} > 1.0 (physically unrealistic for atmospheric drag coefficient)"
+        )
     if _validation_errors:
         raise InvalidTLEError(
             f"OMM record for '{name}' (NORAD {norad_id}) failed physical validation: "
@@ -234,6 +247,7 @@ def parse_omm_record(record: dict) -> SatelliteOMM:
 # Bulk JSON Catalog Parser
 # ---------------------------------------------------------------------------
 
+
 def parse_omm_json(json_text: str) -> list[SatelliteOMM]:
     """Parse a bulk CelesTrak / Space-Track OMM JSON response string.
 
@@ -257,6 +271,11 @@ def parse_omm_json(json_text: str) -> list[SatelliteOMM]:
         satellites = astra.parse_omm_json(response_text)
         print(f"Loaded {len(satellites)} OMM objects.")
     """
+    if len(json_text) > 50 * 1024 * 1024:
+        raise AstraError(
+            "OMM JSON payload exceeds maximum allowed size (50MB). Potential Denial of Service."
+        )
+
     try:
         data = json.loads(json_text)
     except json.JSONDecodeError as exc:
@@ -275,13 +294,19 @@ def parse_omm_json(json_text: str) -> list[SatelliteOMM]:
             omm = parse_omm_record(record)
             results.append(omm)
         except (AstraError, InvalidTLEError, KeyError) as exc:
-            logger.warning(f"Skipping OMM record #{i} (NORAD: {record.get('NORAD_CAT_ID', '?')}): {exc}")
+            logger.warning(
+                f"Skipping OMM record #{i} (NORAD: {record.get('NORAD_CAT_ID', '?')}): {exc}"
+            )
             errors += 1
 
     if errors:
-        logger.warning(f"OMM parsing complete: {len(results)} loaded, {errors} skipped.")
+        logger.warning(
+            f"OMM parsing complete: {len(results)} loaded, {errors} skipped."
+        )
     else:
-        logger.info(f"OMM parsing complete: {len(results)} records loaded successfully.")
+        logger.info(
+            f"OMM parsing complete: {len(results)} records loaded successfully."
+        )
 
     return results
 
@@ -289,6 +314,7 @@ def parse_omm_json(json_text: str) -> list[SatelliteOMM]:
 # ---------------------------------------------------------------------------
 # XP-TLE Translation
 # ---------------------------------------------------------------------------
+
 
 def xptle_to_satellite_omm(tle_objects: list["SatelliteTLE"]) -> list[SatelliteOMM]:
     """Convert SatelliteTLE objects (e.g. from Spacebook XP-TLE) to SatelliteOMM.
@@ -306,8 +332,9 @@ def xptle_to_satellite_omm(tle_objects: list["SatelliteTLE"]) -> list[SatelliteO
         List of ``SatelliteOMM`` instances matching the TLE element states.
     """
     from sgp4.api import Satrec
+
     results = []
-    
+
     for tle in tle_objects:
         try:
             satrec = Satrec.twoline2rv(tle.line1, tle.line2)
@@ -323,8 +350,8 @@ def xptle_to_satellite_omm(tle_objects: list["SatelliteTLE"]) -> list[SatelliteO
                 eccentricity=satrec.ecco,
                 mean_motion_rad_min=satrec.no_kozai,
                 bstar=satrec.bstar,
-                mean_motion_dot=getattr(satrec, 'ndot', 0.0),
-                mean_motion_ddot=getattr(satrec, 'nddot', 0.0),
+                mean_motion_dot=getattr(satrec, "ndot", 0.0),
+                mean_motion_ddot=getattr(satrec, "nddot", 0.0),
                 rcs_m2=None,
                 mass_kg=None,
                 cd_area_over_mass=None,
@@ -333,19 +360,20 @@ def xptle_to_satellite_omm(tle_objects: list["SatelliteTLE"]) -> list[SatelliteO
             source = getattr(tle, "_spacebook_source", None)
             if source:
                 object.__setattr__(omm, "_spacebook_source", source)
-                
+
             results.append(omm)
         except Exception as exc:
             logger.warning(
                 f"Failed to convert TLE for {tle.name} (NORAD {tle.norad_id}) to OMM: {exc}"
             )
-            
+
     return results
 
 
 # ---------------------------------------------------------------------------
 # Local File Loader
 # ---------------------------------------------------------------------------
+
 
 def load_omm_file(filepath: str) -> list[SatelliteOMM]:
     """Load a local OMM JSON file from disk and parse it into ``SatelliteOMM`` objects.
@@ -391,7 +419,8 @@ def load_omm_file(filepath: str) -> list[SatelliteOMM]:
 # OMM Validator
 # ---------------------------------------------------------------------------
 
-def validate_omm(record: dict) -> bool:
+
+def validate_omm(record: dict[str, Any]) -> bool:
     """Validate that an OMM JSON dictionary contains physically sensible values.
 
     Performs lightweight sanity checks on the orbital elements without
@@ -419,8 +448,14 @@ def validate_omm(record: dict) -> bool:
         print(f"{len(valid)}/{len(records)} records passed validation.")
     """
     required_keys = [
-        "INCLINATION", "RA_OF_ASC_NODE", "ARG_OF_PERICENTER",
-        "MEAN_ANOMALY", "ECCENTRICITY", "MEAN_MOTION", "BSTAR", "EPOCH",
+        "INCLINATION",
+        "RA_OF_ASC_NODE",
+        "ARG_OF_PERICENTER",
+        "MEAN_ANOMALY",
+        "ECCENTRICITY",
+        "MEAN_MOTION",
+        "BSTAR",
+        "EPOCH",
     ]
 
     for key in required_keys:

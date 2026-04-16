@@ -1,6 +1,6 @@
 """ASTRA Core Covariance and Uncertainty Modeling.
 
-Calculates Mahalanobis distance and Probability of Collision (Pc) 
+Calculates Mahalanobis distance and Probability of Collision (Pc)
 by projecting 3D positional covariances onto the 2D encounter plane.
 
 Includes:
@@ -9,6 +9,7 @@ Includes:
 - STM-based covariance propagation (linearized J2 dynamics)
 - Empirical covariance estimation (TLE degradation model)
 """
+
 from __future__ import annotations
 
 import math
@@ -45,7 +46,7 @@ def rotate_covariance_rtn_to_eci(
     t_hat /= max(float(np.linalg.norm(t_hat)), 1e-15)
     B = np.column_stack((r_hat, t_hat, n_hat))
     C = np.asarray(cov_rtn, dtype=float)
-    return B @ C @ B.T
+    return B @ C @ B.T  # type: ignore[no-any-return]
 
 
 def _exact_pc_2d_integral(
@@ -83,10 +84,10 @@ def _exact_pc_2d_integral(
     # AUDIT-D-03 Fix: Fast-path — when the miss distance is much larger than
     # the hard-body radius, Chan's approximation is indistinguishable from the
     # exact integral.  Skip the expensive dblquad and save 5-50 ms per call.
-    miss_norm = math.sqrt(mx ** 2 + my ** 2)
+    miss_norm = math.sqrt(mx**2 + my**2)
     if miss_norm > 5.0 * combined_radius_km:
         mahal = float(miss_2d @ inv_C_p @ miss_2d)
-        area = math.pi * combined_radius_km ** 2
+        area = math.pi * combined_radius_km**2
         return float(np.clip(norm * math.exp(-0.5 * mahal) * area, 0.0, 1.0))
 
     # Extract inv-covariance elements once outside the hot loop.
@@ -107,42 +108,44 @@ def _exact_pc_2d_integral(
         return math.sqrt(max(rc * rc - x * x, 0.0))
 
     try:
-        result, _err = scipy.integrate.dblquad(
+        result, _err = scipy.integrate.dblquad(  # type: ignore[call-overload]
             _integrand,
-            -rc, rc,
-            _y_lo, _y_hi,
+            -rc,
+            rc,
+            _y_lo,
+            _y_hi,
             limit=200,
             epsabs=1e-10,
             epsrel=1e-8,
         )
     except Exception:
         # Numerical failure — fall through to Chan approximation.
-        area = math.pi * rc ** 2
+        area = math.pi * rc**2
         result = math.exp(-0.5 * float(miss_2d @ inv_C_p @ miss_2d)) * area * norm
 
     return float(np.clip(result, 0.0, 1.0))
 
 
 def compute_collision_probability(
-    miss_vector_km: np.ndarray, 
-    rel_vel_km_s: np.ndarray, 
-    cov_a: np.ndarray, 
-    cov_b: np.ndarray, 
+    miss_vector_km: np.ndarray,
+    rel_vel_km_s: np.ndarray,
+    cov_a: np.ndarray,
+    cov_b: np.ndarray,
     radius_a_km: float = 0.005,
     radius_b_km: float = 0.005,
 ) -> float:
     """Computes Probability of Collision (Pc) via 2D projection on the encounter plane.
-    
+
     Uses standard Foster/Chan methodology for projecting combined 3D Cartesian
     covariance onto the B-plane (perpendicular to relative velocity vector).
-    
+
     Args:
         miss_vector_km: (3,) relative position vector at exact TCA (km).
         rel_vel_km_s: (3,) relative velocity vector at TCA (km/s).
         cov_a: (3, 3) positional covariance matrix for Object A (km^2).
         cov_b: (3, 3) positional covariance matrix for Object B (km^2).
         combined_radius_km: Hard-body collision radius sum (km).
-        
+
     Returns:
         Probability of collision (float) bounded [0.0, 1.0].
     """
@@ -155,7 +158,7 @@ def compute_collision_probability(
     v_mag = np.linalg.norm(rel_vel_km_s)
     if v_mag == 0:
         return 0.0
-        
+
     # U_y is along relative velocity direction (out of encounter plane)
     u_y = rel_vel_km_s / v_mag
 
@@ -171,16 +174,16 @@ def compute_collision_probability(
     u_z = np.cross(u_y, temp)
     u_z /= np.linalg.norm(u_z)
     u_x = np.cross(u_y, u_z)
-    
+
     # Rotation matrix to 2D encounter plane
     R = np.vstack((u_x, u_z))  # Shape (2, 3)
-    
+
     # Project 3D combined covariance to 2D
     C_p = R @ C @ R.T
-    
+
     # Project 3D miss vector into the 2D plane
     r_p = R @ miss_vector_km
-    
+
     try:
         cond = float(np.linalg.cond(C_p))
         if not np.isfinite(cond) or cond > 1e12:
@@ -191,6 +194,7 @@ def compute_collision_probability(
     except np.linalg.LinAlgError as _lae:
         import logging
         from astra import config
+
         _cov_log = logging.getLogger(__name__)
         if config.ASTRA_STRICT_MODE:
             raise ValueError(
@@ -199,22 +203,27 @@ def compute_collision_probability(
                 f"axis (singular C_p). Inspect covariance source quality. ({_lae})"
             ) from _lae
         _cov_log.warning(
-            "Singular 2D encounter covariance (det ≈ 0) — Pc returned as 0.0. "
-            "This may indicate a deterministic trajectory or zero-uncertainty axis. "
-            "Do NOT interpret 0.0 as a safe miss — verify covariance data quality."
+            "Singular 2D encounter covariance (det ≈ 0) — Pc forced to 1.0 as a "
+            "fail-closed safeguard. This is a data-quality failure, not a safe miss."
         )
-        return 0.0
+        return 1.0  # type: ignore[no-any-return, no-untyped-call]
 
     if det_C_p <= 0:
         import logging
         from astra import config
+
         _cov_log = logging.getLogger(__name__)
+        if config.ASTRA_STRICT_MODE:
+            raise ValueError(
+                "[ASTRA STRICT] Non-positive encounter-plane covariance determinant "
+                f"det(C_p)={det_C_p:.3e}. Pc computation aborted; covariance is invalid."
+            )
         _cov_log.warning(
-            f"Non-positive det(C_p)={det_C_p:.3e} in encounter plane — Pc returned as 0.0. "
-            "Verify that the combined covariance matrix is positive semi-definite."
+            f"Non-positive det(C_p)={det_C_p:.3e} in encounter plane — Pc forced to 1.0 "
+            "as a fail-closed safeguard. Verify covariance source quality."
         )
-        return 0.0
-        
+        return 1.0  # type: ignore[no-any-return, no-untyped-call]
+
     # Mahalanobis distance squared (u^2)
     mahalanobis_sq = float(r_p.T @ inv_C_p @ r_p)
 
@@ -225,6 +234,7 @@ def compute_collision_probability(
     if mahalanobis_sq < 4.0:
         import logging
         from astra import config
+
         _m5_logger = logging.getLogger(__name__)
         # Only escalate to MC when full 6×6 state covariances are available
         if cov_a.shape == (6, 6) and cov_b.shape == (6, 6):
@@ -232,9 +242,9 @@ def compute_collision_probability(
                 _m5_logger.info(
                     "Foster/Chan Pc: mahalanobis_sq=%.3f < 4.0 (co-orbital regime). "
                     "Escalating to Exact Monte Carlo integration for accurate Pc.",
-                    mahalanobis_sq
+                    mahalanobis_sq,
                 )
-            return compute_collision_probability_mc(
+            return compute_collision_probability_mc(  # type: ignore[no-any-return, no-untyped-call]
                 miss_vector_km=miss_vector_km,
                 rel_vel_km_s=rel_vel_km_s,
                 cov_a=cov_a,
@@ -262,26 +272,28 @@ def compute_collision_probability(
                 "co-orbital encounter (mahalanobis_sq=%.3f) detected but only 3×3 "
                 "covariances available — Foster/Chan formula applied (may under-estimate Pc). "
                 "Supply 6×6 state covariances from CDM for MC accuracy.",
-                mahalanobis_sq
+                mahalanobis_sq,
             )
 
     # Area of collision cross-section
-    area = math.pi * (combined_radius_km ** 2)
-    
+    area = math.pi * (combined_radius_km**2)
+
     # 2D Gaussian Density Integration Approximation (Chan's formulation)
     p_c = math.exp(-0.5 * mahalanobis_sq) * area / (2.0 * math.pi * math.sqrt(det_C_p))
-    
+
     return float(np.clip(p_c, 0.0, 1.0))
 
 
-def estimate_covariance(time_since_epoch_days: float, f107_flux: float = 150.0) -> np.ndarray:
+def estimate_covariance(
+    time_since_epoch_days: float, f107_flux: float = 150.0
+) -> np.ndarray:
     """Generates an estimated positional covariance matrix (3x3) in RTN frame.
-    
+
     Models realistic anisotropic TLE degradation based on Vallado & Alfano (2014):
     - Radial (R): grows quadratically with time (gravity model uncertainty)
     - In-track (T): grows cubically with time (drag uncertainty dominates)
     - Cross-track (N): grows linearly with time (inclination uncertainty)
-    
+
     The returned matrix is diagonal in RTN. For full accuracy, this should be
     rotated to the ECI/TEME frame using the satellite's orbital state, but for
     encounter-plane projection this diagonal approximation produces physically
@@ -291,11 +303,11 @@ def estimate_covariance(time_since_epoch_days: float, f107_flux: float = 150.0) 
         In ``ASTRA_STRICT_MODE=True`` this function raises ``ValueError``.
         Collision probability pipelines require real Orbit Determination
         covariances, not heuristic estimates.
-    
+
     Args:
         time_since_epoch_days: Days elapsed since TLE epoch.
         f107_flux: Solar F10.7 index for drag scaling.
-        
+
     Returns:
         np.ndarray: (3, 3) diagonal covariance matrix in km^2.
 
@@ -304,6 +316,7 @@ def estimate_covariance(time_since_epoch_days: float, f107_flux: float = 150.0) 
     """
     from astra import config
     from astra.errors import AstraError
+
     if config.ASTRA_STRICT_MODE:
         # AUDIT-F-04 Fix: Raise typed AstraError (not plain ValueError) so
         # callers using 'except AstraError' catch this correctly.
@@ -315,6 +328,7 @@ def estimate_covariance(time_since_epoch_days: float, f107_flux: float = 150.0) 
         )
 
     import logging
+
     _cov_logger = logging.getLogger(__name__)
     _cov_logger.warning(
         "estimate_covariance() is generating a SYNTHETIC covariance matrix. "
@@ -342,12 +356,12 @@ def estimate_covariance(time_since_epoch_days: float, f107_flux: float = 150.0) 
 
 
 def _hcw_min_distance(
-    r0_rtm,
-    v0_rtm,
-    n_rad_s,
-    t_window_s=3600.0,
-    n_steps=200,
-):
+    r0_rtm: Any,
+    v0_rtm: Any,
+    n_rad_s: float,
+    t_window_s: float = 3600.0,
+    n_steps: int = 200,
+) -> float:
     """Find the minimum relative distance along the HCW trajectory.
 
     Uses the Hill-Clohessy-Wiltshire (HCW) closed-form equations to propagate
@@ -372,7 +386,7 @@ def _hcw_min_distance(
         Minimum relative distance in km.
     """
     import numpy as _np
-    import math as _math
+
     times = _np.linspace(-t_window_s, t_window_s, n_steps)
     x0, y0, z0 = r0_rtm[0], r0_rtm[1], r0_rtm[2]
     dx0, dy0, dz0 = v0_rtm[0], v0_rtm[1], v0_rtm[2]
@@ -380,26 +394,33 @@ def _hcw_min_distance(
     c_arr = _np.cos(nt_arr)
     s_arr = _np.sin(nt_arr)
     inv_n = 1.0 / n_rad_s
-    x_arr = (4.0 - 3.0*c_arr)*x0 + s_arr*dx0*inv_n + 2.0*(1.0 - c_arr)*dy0*inv_n
-    y_arr = (6.0*(s_arr - nt_arr)*x0 + y0
-             - 2.0*(1.0 - c_arr)*dx0*inv_n
-             + (4.0*s_arr - 3.0*nt_arr)*dy0*inv_n)
-    z_arr = z0*c_arr + dz0*inv_n * s_arr
+    x_arr = (
+        (4.0 - 3.0 * c_arr) * x0
+        + s_arr * dx0 * inv_n
+        + 2.0 * (1.0 - c_arr) * dy0 * inv_n
+    )
+    y_arr = (
+        6.0 * (s_arr - nt_arr) * x0
+        + y0
+        - 2.0 * (1.0 - c_arr) * dx0 * inv_n
+        + (4.0 * s_arr - 3.0 * nt_arr) * dy0 * inv_n
+    )
+    z_arr = z0 * c_arr + dz0 * inv_n * s_arr
     dist = _np.sqrt(x_arr**2 + y_arr**2 + z_arr**2)
     return float(_np.min(dist))
 
 
 def compute_collision_probability_mc(
-    miss_vector_km,
-    rel_vel_km_s,
-    cov_a,
-    cov_b,
-    radius_a_km=0.005,
-    radius_b_km=0.005,
-    n_samples=100_000,
-    seed=None,
-    mean_motion_rad_s=None,
-):
+    miss_vector_km: Any,
+    rel_vel_km_s: Any,
+    cov_a: Any,
+    cov_b: Any,
+    radius_a_km: float = 0.005,
+    radius_b_km: float = 0.005,
+    n_samples: int = 100_000,
+    seed: Any = None,
+    mean_motion_rad_s: Any = None,
+) -> float:
     """Monte Carlo Collision Probability for long-duration and co-orbital encounters.
 
     Trajectory model selection (HIGH-04):
@@ -446,6 +467,19 @@ def compute_collision_probability_mc(
 
     rng = np.random.default_rng(seed)
     sym = 0.5 * (combined_cov + combined_cov.T)
+
+    # AUDIT-NUM-01 Fix: Apply Tikhonov regularization for severe ill-conditioning
+    # Prevents cholesky NaN generation or breakdown on colinear relative velocity
+    cond = float(np.linalg.cond(sym))
+    if not np.isfinite(cond) or cond > 1e12:
+        import logging as _reg_log
+
+        _reg_log.getLogger(__name__).debug(
+            "Covariance ill-conditioning detected (cond=%.2e). Applying Tikhonov regularization.",
+            cond,
+        )
+        sym += np.eye(sym.shape[0]) * 1e-12
+
     try:
         L = np.linalg.cholesky(sym)
     except np.linalg.LinAlgError:
@@ -469,23 +503,35 @@ def compute_collision_probability_mc(
 
     if rel_speed < _HCW_THRESHOLD_KM_S:
         import logging as _hcw_log
+
         _hcw_log.getLogger(__name__).info(
             "co-orbital encounter (rel_speed=%.5f km/s < %.2f km/s): "
             "switching to HCW trajectory model for MC Pc (HIGH-04).",
-            rel_speed, _HCW_THRESHOLD_KM_S,
+            rel_speed,
+            _HCW_THRESHOLD_KM_S,
         )
-        n_rad = mean_motion_rad_s if mean_motion_rad_s is not None else (2.0 * math.pi / 5400.0)
+        n_rad = (
+            mean_motion_rad_s
+            if mean_motion_rad_s is not None
+            else (2.0 * math.pi / 5400.0)
+        )
 
         # Build approximate RTN basis from miss vector and velocity directions.
         r_mag = float(np.linalg.norm(miss_vector_km))
-        v_hat = rel_vel_km_s / rel_speed if rel_speed > 1e-10 else np.array([0.0, 1.0, 0.0])
+        v_hat = (
+            rel_vel_km_s / rel_speed if rel_speed > 1e-10 else np.array([0.0, 1.0, 0.0])
+        )
         r_hat = miss_vector_km / r_mag if r_mag > 1e-10 else np.array([1.0, 0.0, 0.0])
 
         n_hat = np.cross(r_hat, v_hat)
         n_hat_mag = float(np.linalg.norm(n_hat))
         if n_hat_mag < 1e-10:
             # Degenerate (r parallel to v): pick any perpendicular axis
-            perp = np.array([0.0, 0.0, 1.0]) if abs(r_hat[2]) < 0.9 else np.array([0.0, 1.0, 0.0])
+            perp = (
+                np.array([0.0, 0.0, 1.0])
+                if abs(r_hat[2]) < 0.9
+                else np.array([0.0, 1.0, 0.0])
+            )
             n_hat = np.cross(r_hat, perp)
             n_hat /= max(float(np.linalg.norm(n_hat)), 1e-15)
         else:
@@ -509,17 +555,28 @@ def compute_collision_probability_mc(
         inv_n = 1.0 / nt
 
         # Vectorised HCW: (n_samples,1) broadcast with (400,) -> (n_samples, 400)
-        x0  = r_rtm[:, 0:1];  y0  = r_rtm[:, 1:2];  z0  = r_rtm[:, 2:3]
-        dx0 = v_rtm[:, 0:1];  dy0 = v_rtm[:, 1:2];  dz0 = v_rtm[:, 2:3]
+        x0 = r_rtm[:, 0:1]
+        y0 = r_rtm[:, 1:2]
+        z0 = r_rtm[:, 2:3]
+        dx0 = v_rtm[:, 0:1]
+        dy0 = v_rtm[:, 1:2]
+        dz0 = v_rtm[:, 2:3]
 
-        x_t = (4.0 - 3.0*c_arr)*x0 + s_arr*dx0*inv_n + 2.0*(1.0 - c_arr)*dy0*inv_n
-        y_t = (6.0*(s_arr - nt_arr)*x0 + y0
-               - 2.0*(1.0 - c_arr)*dx0*inv_n
-               + (4.0*s_arr - 3.0*nt_arr)*dy0*inv_n)
-        z_t = z0*c_arr + dz0*inv_n * s_arr
+        x_t = (
+            (4.0 - 3.0 * c_arr) * x0
+            + s_arr * dx0 * inv_n
+            + 2.0 * (1.0 - c_arr) * dy0 * inv_n
+        )
+        y_t = (
+            6.0 * (s_arr - nt_arr) * x0
+            + y0
+            - 2.0 * (1.0 - c_arr) * dx0 * inv_n
+            + (4.0 * s_arr - 3.0 * nt_arr) * dy0 * inv_n
+        )
+        z_t = z0 * c_arr + dz0 * inv_n * s_arr
 
         dist_t = np.sqrt(x_t**2 + y_t**2 + z_t**2)  # (n_samples, 400)
-        d_min  = np.min(dist_t, axis=1)              # (n_samples,)
+        d_min = np.min(dist_t, axis=1)  # (n_samples,)
 
     else:
         # Linear trajectory -- fast and correct for crossing/chase encounters.
@@ -534,19 +591,28 @@ def compute_collision_probability_mc(
     hits = np.sum(d_min <= combined_radius_km)
     return float(hits / n_samples)
 
-from astra._numba_compat import njit, NUMBA_AVAILABLE as _NUMBA_AVAILABLE
-from astra.constants import J3, J4
+
+from astra._numba_compat import njit  # noqa: E402
+from astra.constants import J3, J4  # noqa: E402
+
 
 @njit(fastmath=True, cache=True)
-def _acceleration_njit(r: np.ndarray, v: np.ndarray, Bc: float, rho_ref: float, H_km: float, rho_ref_alt_km: float) -> np.ndarray:
+def _acceleration_njit(
+    r: np.ndarray,
+    v: np.ndarray,
+    Bc: float,
+    rho_ref: float,
+    H_km: float,
+    rho_ref_alt_km: float,
+) -> np.ndarray:
     x, y, z = r[0], r[1], r[2]
     r_mag = np.linalg.norm(r)
     r2 = r_mag**2
     r3 = r2 * r_mag
-    
+
     # --- Two-body gravity ---
     a_total = -EARTH_MU_KM3_S2 * r / r3
-    
+
     # --- Earth Oblateness (J2, J3, J4) ---
     z2 = z**2
     r5 = r3 * r2
@@ -581,11 +647,11 @@ def _acceleration_njit(r: np.ndarray, v: np.ndarray, Bc: float, rho_ref: float, 
         # v_rel = v - omega_earth x r  subtracts the ~0.46 km/s equatorial rotation.
         # Using inertial velocity v directly introduced ~6% systematic error in
         # drag partial derivatives (identified defect DEF-002 in audit).
-        EARTH_OMEGA = 7.292115146706979e-5   # rad/s — IAU/IERS 2010
+        EARTH_OMEGA = 7.292115146706979e-5  # rad/s — IAU/IERS 2010
         # Manual cross product for Numba compatibility: omega x r = [0,0,w] x [x,y,z]
         # = [0*z - w*y, w*x - 0*z, 0*y - 0*x] = [-w*y, w*x, 0]
         vx_rel = v[0] - (-EARTH_OMEGA * r[1])
-        vy_rel = v[1] - ( EARTH_OMEGA * r[0])
+        vy_rel = v[1] - (EARTH_OMEGA * r[0])
         vz_rel = v[2]  # no z-component from Earth rotation
         v_rel = np.array([vx_rel, vy_rel, vz_rel])
         v_rel_mag = np.linalg.norm(v_rel)
@@ -596,18 +662,26 @@ def _acceleration_njit(r: np.ndarray, v: np.ndarray, Bc: float, rho_ref: float, 
 
     return a_total
 
+
 @njit(fastmath=True, cache=True)
-def _stm_jacobian_njit(r: np.ndarray, v: np.ndarray, Bc: float, rho_ref: float, H_km: float, rho_ref_alt_km: float) -> np.ndarray:
+def _stm_jacobian_njit(
+    r: np.ndarray,
+    v: np.ndarray,
+    Bc: float,
+    rho_ref: float,
+    H_km: float,
+    rho_ref_alt_km: float,
+) -> np.ndarray:
     # Central-difference Jacobian step (km)
     eps_r = 1e-4
     eps_v = 1e-4
     J = np.zeros((6, 6))
-    
+
     # Upper-right: dr/dt = v -> d(dr/dt)/dv = I
     J[0, 3] = 1.0
     J[1, 4] = 1.0
     J[2, 5] = 1.0
-    
+
     # Lower-left: da/dr
     for i in range(3):
         r_plus = r.copy()
@@ -617,7 +691,7 @@ def _stm_jacobian_njit(r: np.ndarray, v: np.ndarray, Bc: float, rho_ref: float, 
         a_plus = _acceleration_njit(r_plus, v, Bc, rho_ref, H_km, rho_ref_alt_km)
         a_minus = _acceleration_njit(r_minus, v, Bc, rho_ref, H_km, rho_ref_alt_km)
         J[3:, i] = (a_plus - a_minus) / (2.0 * eps_r)
-        
+
     # Lower-right: da/dv (mainly for drag; captures co-rotation effect too)
     for i in range(3):
         v_plus = v.copy()
@@ -626,29 +700,38 @@ def _stm_jacobian_njit(r: np.ndarray, v: np.ndarray, Bc: float, rho_ref: float, 
         v_minus[i] -= eps_v
         a_plus = _acceleration_njit(r, v_plus, Bc, rho_ref, H_km, rho_ref_alt_km)
         a_minus = _acceleration_njit(r, v_minus, Bc, rho_ref, H_km, rho_ref_alt_km)
-        J[3:, 3+i] = (a_plus - a_minus) / (2.0 * eps_v)
-        
+        J[3:, 3 + i] = (a_plus - a_minus) / (2.0 * eps_v)
+
     return J
 
+
 @njit(fastmath=True, cache=True)
-def _stm_derivatives_njit(t: float, y: np.ndarray, Bc: float, rho_ref: float, H_km: float, rho_ref_alt_km: float) -> np.ndarray:
+def _stm_derivatives_njit(
+    t: float,
+    y: np.ndarray,
+    Bc: float,
+    rho_ref: float,
+    H_km: float,
+    rho_ref_alt_km: float,
+) -> np.ndarray:
     r = y[:3]
     v = y[3:6]
     Phi = y[6:].reshape((6, 6))
-    
+
     a_total = _acceleration_njit(r, v, Bc, rho_ref, H_km, rho_ref_alt_km)
     A = _stm_jacobian_njit(r, v, Bc, rho_ref, H_km, rho_ref_alt_km)
-    
+
     dPhi = A @ Phi
-    
+
     dy = np.empty(42)
     dy[:3] = v
     dy[3:6] = a_total
-    
+
     # Flatten dPhi back to the state vector
     dy[6:] = dPhi.ravel()
-        
+
     return dy
+
 
 def propagate_covariance_stm(
     t_jd0: float,
@@ -665,7 +748,7 @@ def propagate_covariance_stm(
 
         C(t) = Φ(t, t₀) · C₀ · Φ(t, t₀)ᵀ
 
-    The state-transition matrix Φ is computed by integrating the variational 
+    The state-transition matrix Φ is computed by integrating the variational
     equations along the nominal trajectory. The Jacobian includes:
     - Point-mass gravity (μ/r³)
     - Zonal harmonics (J2, J3, J4)
@@ -682,18 +765,29 @@ def propagate_covariance_stm(
     H_km = 50.0  # Default scale height (km)
 
     # DEF-001 (Strategy A): compute rho_ref at actual initial orbit altitude, not 400 km
-    from astra.constants import EARTH_EQUATORIAL_RADIUS_KM as _Re, DRAG_MIN_ALTITUDE_KM as _min_alt
+    from astra.constants import (
+        EARTH_EQUATORIAL_RADIUS_KM as _Re,
+        DRAG_MIN_ALTITUDE_KM as _min_alt,
+    )
+
     r0_mag = float(np.linalg.norm(r0_km))
     rho_ref_alt_km = max(r0_mag - _Re, _min_alt)
 
     if drag_config:
         Bc = float(drag_config.cd * drag_config.area_m2 / drag_config.mass_kg)
         from astra.constants import DRAG_REF_DENSITY_KG_M3, DRAG_SCALE_HEIGHT_KM
+
         # Initialize density at actual orbit altitude for physical accuracy (DEF-001)
         try:
-            from astra.data_pipeline import atmospheric_density_empirical, get_space_weather
+            from astra.data_pipeline import (
+                atmospheric_density_empirical,
+                get_space_weather,
+            )
+
             f107_obs, f107_adj, ap = get_space_weather(t_jd0)
-            rho_ref = atmospheric_density_empirical(rho_ref_alt_km, f107_obs, f107_adj, ap)
+            rho_ref = atmospheric_density_empirical(
+                rho_ref_alt_km, f107_obs, f107_adj, ap
+            )
         except Exception:
             rho_ref = DRAG_REF_DENSITY_KG_M3  # fallback
             rho_ref_alt_km = 400.0
@@ -704,7 +798,7 @@ def propagate_covariance_stm(
         t_span=(0.0, duration_s),
         y0=y0,
         args=(Bc, rho_ref, H_km, rho_ref_alt_km),
-        method='DOP853',
+        method="DOP853",
         rtol=1e-10,
         atol=1e-12,
     )
@@ -712,19 +806,22 @@ def propagate_covariance_stm(
     if not sol.success:
         # STRICT_MODE: do not silently degrade Pc inputs
         from astra import config
+
         if config.ASTRA_STRICT_MODE:
             from astra.errors import PropagationError
+
             raise PropagationError(
                 f"[ASTRA STRICT] STM covariance propagation failed: {sol.message}. "
                 "Returning initial covariance would silently degrade accuracy. "
                 "Set ASTRA_STRICT_MODE=False to allow fallback to initial covariance.",
-                norad_id="COVARIANCE_STM"
+                norad_id="COVARIANCE_STM",
             )
         import logging
+
         logging.getLogger(__name__).warning(
             f"STM integration failed ({sol.message}) — returning initial covariance as conservative fallback."
         )
         return cov0_6x6  # Fallback to initial
 
     Phi_final = sol.y[6:, -1].reshape(6, 6)
-    return Phi_final @ cov0_6x6 @ Phi_final.T
+    return Phi_final @ cov0_6x6 @ Phi_final.T  # type: ignore[no-any-return]

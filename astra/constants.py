@@ -5,6 +5,7 @@ All simulation parameters, physical constants, orbital regime boundaries,
 and conjunction thresholds used across the library. These are module-level
 immutable values — no mutable state.
 """
+
 from __future__ import annotations
 
 # ---------------------------------------------------------------------------
@@ -22,7 +23,9 @@ SIMULATION_STEPS: int = 288  # 24 * 60 / 5
 EARTH_RADIUS_KM: float = 6371.0
 EARTH_EQUATORIAL_RADIUS_KM: float = 6378.137
 EARTH_MU_KM3_S2: float = 398600.4418  # gravitational parameter (km³/s²)
-EARTH_OMEGA_RAD_S: float = 7.292115146706979e-5  # Earth sidereal rotation rate (rad/s) — IAU/IERS 2010
+EARTH_OMEGA_RAD_S: float = (
+    7.292115146706979e-5  # Earth sidereal rotation rate (rad/s) — IAU/IERS 2010
+)
 
 # ---------------------------------------------------------------------------
 # Geopotential Zonal Harmonics (WGS84)
@@ -51,9 +54,9 @@ SUN_RADIUS_KM: float = 695700.0
 # ---------------------------------------------------------------------------
 DRAG_REF_DENSITY_KG_M3: float = 3.725e-12  # reference at 400 km
 DRAG_REF_ALTITUDE_KM: float = 400.0
-DRAG_SCALE_HEIGHT_KM: float = 58.515      # scale height for ~400 km
-DRAG_MIN_ALTITUDE_KM: float = 100.0       # below this, exponential model is undefined
-DRAG_MAX_ALTITUDE_KM: float = 1500.0      # above this, density is negligible
+DRAG_SCALE_HEIGHT_KM: float = 58.515  # scale height for ~400 km
+DRAG_MIN_ALTITUDE_KM: float = 100.0  # below this, exponential model is undefined
+DRAG_MAX_ALTITUDE_KM: float = 1500.0  # above this, density is negligible
 
 # ---------------------------------------------------------------------------
 # Orbital regime boundaries (km altitude above Earth's surface)
@@ -65,14 +68,18 @@ MEO_MAX_KM: float = 35786.0
 GEO_ALTITUDE_KM: float = 35786.0
 # HEO is defined by eccentricity, not altitude. Use HEO_ECCENTRICITY_THRESHOLD.
 # HEO_MIN_KM is retained for backward compatibility but is DEPRECATED.
-HEO_MIN_KM: float = 35786.0  # DEPRECATED — conflatess GEO altitude with HEO; use HEO_ECCENTRICITY_THRESHOLD
-HEO_ECCENTRICITY_THRESHOLD: float = 0.25  # e > 0.25 classifies an orbit as Highly Elliptical (Molniya etc.)
+HEO_MIN_KM: float = (
+    35786.0  # DEPRECATED — conflatess GEO altitude with HEO; use HEO_ECCENTRICITY_THRESHOLD
+)
+HEO_ECCENTRICITY_THRESHOLD: float = (
+    0.25  # e > 0.25 classifies an orbit as Highly Elliptical (Molniya etc.)
+)
 
 # ---------------------------------------------------------------------------
 # Conjunction thresholds
 # ---------------------------------------------------------------------------
-CONJUNCTION_THRESHOLD_KM: float = 5.0      # fine-grained detection
-COARSE_FILTER_THRESHOLD_KM: float = 50.0   # coarse pre-filter
+CONJUNCTION_THRESHOLD_KM: float = 5.0  # fine-grained detection
+COARSE_FILTER_THRESHOLD_KM: float = 50.0  # coarse pre-filter
 
 # ---------------------------------------------------------------------------
 # Collision probability reference volume (Chan formula)
@@ -101,8 +108,8 @@ G0_STD: float = 9.80665  # Standard gravitational acceleration at sea level (m/s
 # ---------------------------------------------------------------------------
 # Solar and Astronomical constants
 # ---------------------------------------------------------------------------
-AU_KM: float = 149597870.7           # Astronomical Unit (km) — IAU 2012
-SRP_P0_N_M2: float = 4.56e-6         # Solar radiation pressure at 1 AU (N/m²)
+AU_KM: float = 149597870.7  # Astronomical Unit (km) — IAU 2012
+SRP_P0_N_M2: float = 4.56e-6  # Solar radiation pressure at 1 AU (N/m²)
 
 # ---------------------------------------------------------------------------
 # Compile-time guard: ensure Numba inlined literals stay in sync [LOW-01]

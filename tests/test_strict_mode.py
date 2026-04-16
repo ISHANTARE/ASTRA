@@ -1,10 +1,9 @@
 # tests/test_strict_mode.py
 """Behavioral tests for ``ASTRA_STRICT_MODE`` (typed errors vs relaxed fallbacks)."""
+
 from __future__ import annotations
 
 import logging
-import math
-import threading
 import pytest
 import numpy as np
 
@@ -12,22 +11,21 @@ import astra
 import astra.config as config
 from astra.errors import (
     SpaceWeatherError,
-    EphemerisError,
     FilterError,
-    PropagationError,
 )
-from astra.covariance import estimate_covariance, propagate_covariance_stm
+from astra.covariance import estimate_covariance
 from astra.utils import vincenty_distance
 from astra.debris import filter_region
 from astra.models import DebrisObject, SatelliteTLE
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 class _StrictMode:
     """Context manager to temporarily assert ASTRA_STRICT_MODE = True/False."""
+
     def __init__(self, mode: bool):
         self._mode = mode
         self._original = None
@@ -48,7 +46,6 @@ def _make_debris(perigee=400, apogee=420, inclination=53, eccentricity=0.01):
     line1 = "1 99999U 24001A   24001.00000000  .00000000  00000-0  00000-0 0  0000"
     line2 = "2 99999  53.0000   0.0000 0010000   0.0000   0.0000 15.50000000 00000"
     # pad to 69 chars + fix checksum (these are placeholder, filter tests don't need real TLE)
-    import re
     source = SatelliteTLE(
         norad_id=norad_id,
         name="TEST",
@@ -74,13 +71,15 @@ def _make_debris(perigee=400, apogee=420, inclination=53, eccentricity=0.01):
 # SpaceWeatherError in strict mode
 # ---------------------------------------------------------------------------
 
+
 class TestSpaceWeatherStrict:
     def test_get_space_weather_raises_in_strict_with_no_data(self, monkeypatch):
         """get_space_weather should raise SpaceWeatherError in STRICT when cache empty."""
         # Ensure cache is empty and Spacebook is disabled
         from astra import data_pipeline, spacebook
+
         monkeypatch.setattr(data_pipeline, "_sw_loaded", True)  # prevent download
-        monkeypatch.setattr(data_pipeline, "_sw_cache", {})       # empty cache
+        monkeypatch.setattr(data_pipeline, "_sw_cache", {})  # empty cache
         monkeypatch.setattr(spacebook, "SPACEBOOK_ENABLED", False)
 
         with _StrictMode(True):
@@ -91,6 +90,7 @@ class TestSpaceWeatherStrict:
         """get_space_weather should return synthetic default with WARNING in Relaxed."""
         from astra import data_pipeline, spacebook
         import logging
+
         monkeypatch.setattr(data_pipeline, "_sw_loaded", True)
         monkeypatch.setattr(data_pipeline, "_sw_cache", {})
         monkeypatch.setattr(spacebook, "SPACEBOOK_ENABLED", False)
@@ -103,11 +103,16 @@ class TestSpaceWeatherStrict:
             with _StrictMode(False), caplog.at_level(logging.WARNING):
                 result = astra.get_space_weather(t_jd=2451545.0)
 
-            assert result == (150.0, 150.0, 15.0), f"Expected synthetic defaults, got {result}"
+            assert result == (
+                150.0,
+                150.0,
+                15.0,
+            ), f"Expected synthetic defaults, got {result}"
             # Look for the warning in any captured record
             all_messages = " ".join(r.getMessage() for r in caplog.records)
-            assert "moderate solar activity" in all_messages or "defaults" in all_messages, \
-                f"Expected WARNING about defaults in the log. All messages: {all_messages!r}"
+            assert (
+                "moderate solar activity" in all_messages or "defaults" in all_messages
+            ), f"Expected WARNING about defaults in the log. All messages: {all_messages!r}"
         finally:
             logger.propagate = orig_prop
 
@@ -116,25 +121,32 @@ class TestSpaceWeatherStrict:
 # estimate_covariance strict gate
 # ---------------------------------------------------------------------------
 
+
 class TestEstimateCovarianceStrict:
     def test_raises_in_strict_mode(self):
         with _StrictMode(True):
             from astra.errors import AstraError
+
             with pytest.raises(AstraError, match=r"STRICT"):
                 estimate_covariance(3.0)
 
     def test_returns_matrix_in_relaxed_mode(self, caplog):
-        with _StrictMode(False), caplog.at_level(logging.WARNING, logger="astra.covariance"):
+        with (
+            _StrictMode(False),
+            caplog.at_level(logging.WARNING, logger="astra.covariance"),
+        ):
             cov = estimate_covariance(3.0)
         assert cov.shape == (3, 3), "Expected 3×3 covariance matrix"
         assert np.all(np.diag(cov) > 0), "Diagonal covariance must be positive"
-        assert any("SYNTHETIC" in r.message for r in caplog.records), \
-            "Expected WARNING about synthetic covariance"
+        assert any(
+            "SYNTHETIC" in r.message for r in caplog.records
+        ), "Expected WARNING about synthetic covariance"
 
 
 # ---------------------------------------------------------------------------
 # Vincenty antipodal / strict mode
 # ---------------------------------------------------------------------------
+
 
 class TestVincentyAntipodal:
     # Bessel (1825) antipodal test case: these specific coordinates cause
@@ -148,23 +160,25 @@ class TestVincentyAntipodal:
     def test_antipodal_raises_in_strict(self):
         """Near-antipodal pair triggers ValueError in STRICT_MODE when non-convergent."""
         import astra.utils as _utils
+
         # Force non-convergence by short-circuiting the convergence check
         # The vincenty implementation converges for most pairs -- test the gate directly
         with _StrictMode(True):
             # Test the convergence failure path directly via a known bad pair.
             # We monkeypatch the loop to always fail convergence.
-            original_fn = _utils.vincenty_distance
-            import math
             # Construct a pair where lam doesn't converge in 200 iterations:
             # 0.01°N, 0.0° → 0.01°S, 179.5° is near-antipodal enough.
             try:
                 # Check if this actually fails (implementation-dependent)
-                d = _utils.vincenty_distance(
-                    self._ANTIPODAL_LAT1, self._ANTIPODAL_LON1,
-                    self._ANTIPODAL_LAT2, self._ANTIPODAL_LON2
+                _utils.vincenty_distance(
+                    self._ANTIPODAL_LAT1,
+                    self._ANTIPODAL_LON1,
+                    self._ANTIPODAL_LAT2,
+                    self._ANTIPODAL_LON2,
                 )
                 # If it didn't raise, skip — some impls still converge here
                 import pytest
+
                 pytest.skip("This pair converged; antipodal guard not triggered")
             except ValueError as e:
                 assert "[ASTRA STRICT]" in str(e)
@@ -186,6 +200,7 @@ class TestVincentyAntipodal:
 # filter_region longitude in strict mode
 # ---------------------------------------------------------------------------
 
+
 class TestFilterRegionLongitudeGate:
     def test_lon_raises_in_strict(self):
         debri = _make_debris()
@@ -203,7 +218,7 @@ class TestFilterRegionLongitudeGate:
     def test_no_lon_no_warning(self, caplog):
         debri = _make_debris()
         with _StrictMode(False), caplog.at_level(logging.WARNING):
-            result = filter_region([debri], -90, 90)
+            filter_region([debri], -90, 90)
         assert not any("IGNORED" in r.message for r in caplog.records)
 
 
@@ -211,10 +226,12 @@ class TestFilterRegionLongitudeGate:
 # propagate_trajectory validation
 # ---------------------------------------------------------------------------
 
+
 class TestPropagateTrajectoryValidation:
     def test_reversed_time_raises(self):
         from astra.orbit import propagate_trajectory
         from astra.models import SatelliteTLE
+
         # Build a minimal TLE (real checksums from ISS)
         sat = SatelliteTLE(
             norad_id="25544",
@@ -230,6 +247,7 @@ class TestPropagateTrajectoryValidation:
     def test_negative_step_raises(self):
         from astra.orbit import propagate_trajectory
         from astra.models import SatelliteTLE
+
         sat = SatelliteTLE(
             norad_id="25544",
             name="ISS",
@@ -239,18 +257,22 @@ class TestPropagateTrajectoryValidation:
             object_type="PAYLOAD",
         )
         with pytest.raises(ValueError, match="positive"):
-            propagate_trajectory(sat, t_start_jd=2454738.0, t_end_jd=2454738.1, step_minutes=-1.0)
+            propagate_trajectory(
+                sat, t_start_jd=2454738.0, t_end_jd=2454738.1, step_minutes=-1.0
+            )
 
 
 # ---------------------------------------------------------------------------
 # propagate_many returns (positions, velocities)
 # ---------------------------------------------------------------------------
 
+
 class TestPropagateManyTuple:
     def test_returns_two_maps(self):
         from astra.orbit import propagate_many
         from astra.models import SatelliteTLE
         import numpy as np
+
         sat = SatelliteTLE(
             norad_id="25544",
             name="ISS",

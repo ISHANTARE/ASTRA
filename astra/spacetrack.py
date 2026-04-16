@@ -39,11 +39,13 @@ Example::
         [astra.make_debris_object(s) for s in starlinks], 500, 600
     )
 """
+
 from __future__ import annotations
 
 import os
 import threading
 import json
+from datetime import datetime, timedelta, timezone
 from typing import Literal, Union, Optional
 
 import requests
@@ -74,9 +76,12 @@ FormatLiteral = Literal["json", "tle"]
 # ---------------------------------------------------------------------------
 # Module-level Session Cache
 # ---------------------------------------------------------------------------
-_SESSION_CACHE: dict[str, requests.Session] = {}
+from typing import Any  # noqa: E402
+
+_SESSION_CACHE: dict[str, tuple[Any, Any]] = {}
 _SESSION_LOCK = threading.Lock()
 _ST_WARNING_THRESHOLD = 50000
+_SESSION_TTL = timedelta(minutes=30)
 
 # ---------------------------------------------------------------------------
 # Credentials Helper
@@ -116,15 +121,16 @@ def _get_credentials() -> tuple[str, str]:
     if not user or not password:
         raise AstraError(_CREDENTIAL_HELP)
 
-    return user, password
+    return user, password  # type: ignore[no-any-return]
 
 
 # ---------------------------------------------------------------------------
 # Authenticated Session Factory
 # ---------------------------------------------------------------------------
 
+
 def _create_session(username: str, password: str) -> requests.Session:
-    """Authenticate with Space-Track and return a session with active cookies.
+    """Authenticate with Space-Track and return a session with active cookies.  # type: ignore[no-any-return]
 
     Args:
         username: Space-Track.org account email.
@@ -137,8 +143,15 @@ def _create_session(username: str, password: str) -> requests.Session:
         AstraError: On network failure or invalid credentials (HTTP 401).
     """
     with _SESSION_LOCK:
-        if username in _SESSION_CACHE:
-            return _SESSION_CACHE[username]
+        cached = _SESSION_CACHE.get(username)
+        if cached is not None:
+            session, created_at = cached
+            if datetime.now(timezone.utc) - created_at <= _SESSION_TTL:
+                return session  # type: ignore[no-any-return]
+            try:
+                session.close()
+            finally:
+                _SESSION_CACHE.pop(username, None)
 
         session = requests.Session()
         session.headers.update(_HEADERS)
@@ -165,15 +178,30 @@ def _create_session(username: str, password: str) -> requests.Session:
             )
 
         logger.info("Space-Track.org session authenticated successfully.")
-        _SESSION_CACHE[username] = session
-        return session
+        _SESSION_CACHE[username] = (session, datetime.now(timezone.utc))
+        return session  # type: ignore[no-any-return]
+
+
+def _invalidate_session(username: str) -> None:
+    """Drop a cached session for a user and close resources."""
+    with _SESSION_LOCK:
+        cached = _SESSION_CACHE.pop(username, None)
+    if cached is None:
+        return
+    session, _ = cached  # type: ignore[no-any-return]
+    try:
+        session.close()
+    except Exception:
+        pass
+
 
 def spacetrack_logout() -> None:
     """Clear session cache and logout of Space-Track."""
     username, _ = _get_credentials()
     with _SESSION_LOCK:
-        session = _SESSION_CACHE.pop(username, None)
-    if session:
+        cached = _SESSION_CACHE.pop(username, None)
+    if cached:
+        session, _ = cached
         try:
             session.get(_ST_LOGOUT_URL, timeout=10.0)
             logger.info("Successfully logged out of Space-Track.")
@@ -186,6 +214,7 @@ def spacetrack_logout() -> None:
 # ---------------------------------------------------------------------------
 # Internal Query Helper
 # ---------------------------------------------------------------------------
+
 
 def _query_spacetrack(
     session: requests.Session,
@@ -210,14 +239,14 @@ def _query_spacetrack(
         "iridium-33-debris": "/OBJECT_NAME/~~IRIDIUM 33 DEB",
         "cosmos-2251-debris": "/OBJECT_NAME/~~COSMOS 2251 DEB",
     }
-    
+
     query_filter = _ST_MAP.get(group.lower(), f"/OBJECT_NAME/~~{group.upper()}")
     url = f"{_ST_QUERY_URL}{query_filter}/FORMAT/{fmt}"
 
     try:
         resp = session.get(url, timeout=60.0)
         resp.raise_for_status()
-        
+
         # Check rate-limit header
         rate_limit = resp.headers.get("X-RateLimit-Remaining")
         if rate_limit is not None:
@@ -229,7 +258,11 @@ def _query_spacetrack(
                     )
             except ValueError:
                 pass
-
+    except requests.HTTPError as exc:
+        status = exc.response.status_code if exc.response is not None else "unknown"
+        raise AstraError(
+            f"Failed to fetch Space-Track group '{group}' [{fmt}]: HTTP {status}"
+        ) from exc
     except requests.RequestException as exc:
         raise AstraError(
             f"Failed to fetch Space-Track group '{group}' [{fmt}]: {exc}"
@@ -251,7 +284,7 @@ def _query_spacetrack(
             "Results > 87,000 may be truncated by Space-Track API caps."
         )
 
-    return text
+    return text  # type: ignore[no-any-return]
 
 
 def _parse_spacetrack_response(
@@ -260,15 +293,18 @@ def _parse_spacetrack_response(
     """Route a raw Space-Track response to the correct parser."""
     if fmt == "json":
         from astra.omm import parse_omm_json
-        return parse_omm_json(text)
+
+        return parse_omm_json(text)  # type: ignore[no-any-return]
     else:
         from astra.tle import load_tle_catalog
-        return load_tle_catalog(text.splitlines())
+
+        return load_tle_catalog(text.splitlines())  # type: ignore[no-any-return]
 
 
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def fetch_spacetrack_group(
     group: str,
@@ -307,12 +343,23 @@ def fetch_spacetrack_group(
         gps_tles = astra.fetch_spacetrack_group("gps-ops", format="tle")
     """
     username, password = _get_credentials()
-    logger.info(
-        f"Fetching Space-Track group '{group}' [{format}] as {username}..."
-    )
+    logger.info(f"Fetching Space-Track group '{group}' [{format}] as {username}...")
     session = _create_session(username, password)
-    text = _query_spacetrack(session, group, format)
-    return _parse_spacetrack_response(text, format)
+    try:
+        text = _query_spacetrack(session, group, format)
+    except AstraError as exc:
+        msg = str(exc)
+        if "HTTP 401" in msg or "HTTP 403" in msg:
+            logger.warning(
+                "Space-Track session may have expired (group=%s). Re-authenticating and retrying once.",
+                group,
+            )
+            _invalidate_session(username)
+            session = _create_session(username, password)
+            text = _query_spacetrack(session, group, format)
+        else:
+            raise
+    return _parse_spacetrack_response(text, format)  # type: ignore[no-any-return]
 
 
 def fetch_spacetrack_active(
@@ -342,10 +389,12 @@ def fetch_spacetrack_active(
         catalog = astra.fetch_spacetrack_active()
         print(f"Loaded {len(catalog)} active satellites from Space-Track.")
     """
-    return fetch_spacetrack_group("active", format=format)
+    return fetch_spacetrack_group("active", format=format)  # type: ignore[no-any-return]
 
 
-def fetch_spacetrack_satcat(norad_ids: Optional[list[str]] = None) -> list[dict]:
+def fetch_spacetrack_satcat(
+    norad_ids: Optional[list[str]] = None,
+) -> list[dict[str, Any]]:
     """Fetch metadata from the General Perturbations Satellite Catalog (SATCAT).
 
     The SATCAT contains object type classification, launch date, decay date,
@@ -362,41 +411,43 @@ def fetch_spacetrack_satcat(norad_ids: Optional[list[str]] = None) -> list[dict]
     logger.info("Fetching Space-Track SATCAT data...")
     session = _create_session(username, password)
 
-    def _fetch_page(url: str) -> list[dict]:
+    def _fetch_page(url: str) -> list[dict[str, Any]]:
         try:
             resp = session.get(url, timeout=60.0)
             resp.raise_for_status()
-            
+
             rate_limit = resp.headers.get("X-RateLimit-Remaining")
             if rate_limit is not None:
                 try:
                     remaining = int(rate_limit)
                     if remaining < 10:
-                        logger.warning(f"Space-Track.org rate limit low: {remaining} queries remaining.")
+                        logger.warning(
+                            f"Space-Track.org rate limit low: {remaining} queries remaining."
+                        )
                 except ValueError:
                     pass
-                    
+
         except requests.RequestException as exc:
             raise AstraError(f"Failed to fetch Space-Track SATCAT: {exc}") from exc
 
         if not resp.text.strip():
-            return []
+            return []  # type: ignore[no-any-return]
 
         try:
-            return json.loads(resp.text)
+            return json.loads(resp.text)  # type: ignore[no-any-return]
         except json.JSONDecodeError as exc:
             raise AstraError(f"Failed to parse SATCAT JSON: {exc}") from exc
 
     if not norad_ids:
-        return _fetch_page(f"{_ST_SATCAT_URL}/FORMAT/json")
+        return _fetch_page(f"{_ST_SATCAT_URL}/FORMAT/json")  # type: ignore[no-any-return]
 
     # Batch IDs into chunks to avoid HTTP 414 URI Too Long limits
     results = []
     batch_size = 100
     for i in range(0, len(norad_ids), batch_size):
-        batch = norad_ids[i:i + batch_size]
+        batch = norad_ids[i : i + batch_size]
         id_str = ",".join(str(nid) for nid in batch)
         url = f"{_ST_SATCAT_URL}/NORAD_CAT_ID/{id_str}/FORMAT/json"
         results.extend(_fetch_page(url))
-        
-    return results
+
+    return results  # type: ignore[no-any-return]

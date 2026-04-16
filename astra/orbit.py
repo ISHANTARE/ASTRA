@@ -9,18 +9,22 @@ Supports both legacy ``SatelliteTLE`` objects (via ``Satrec.twoline2rv``)
 and modern ``SatelliteOMM`` objects (via ``Satrec.sgp4init``). Use the
 ``_build_satrec()`` helper which dispatches automatically based on type.
 """
+
 from __future__ import annotations
 
-import math
 import numpy as np
 from typing import Generator
 from sgp4.api import Satrec, WGS84, SatrecArray
-from skyfield.constants import AU_KM
-from skyfield.positionlib import Geocentric
-from skyfield.sgp4lib import TEME
 
 from astra.errors import AstraError
-from astra.models import OrbitalState, SatelliteTLE, SatelliteOMM, SatelliteState, TrajectoryMap, VelocityMap
+from astra.models import (
+    OrbitalState,
+    SatelliteTLE,
+    SatelliteOMM,
+    SatelliteState,
+    TrajectoryMap,
+    VelocityMap,
+)
 from astra.log import get_logger
 
 logger = get_logger(__name__)
@@ -29,6 +33,7 @@ logger = get_logger(__name__)
 # ---------------------------------------------------------------------------
 # Internal Satrec Factory
 # ---------------------------------------------------------------------------
+
 
 def _build_satrec(satellite: SatelliteState) -> Satrec:
     """Build a ``Satrec`` SGP4 object from either a TLE or an OMM source.
@@ -58,7 +63,7 @@ def _build_satrec(satellite: SatelliteState) -> Satrec:
         epoch_days = satellite.epoch_jd - 2433281.5
         satrec.sgp4init(
             WGS84,
-            "i",                          # afspc_mode
+            "i",  # afspc_mode
             int(satellite.norad_id) if satellite.norad_id.isdigit() else 0,
             epoch_days,
             satellite.bstar,
@@ -99,28 +104,39 @@ def propagate_orbit(
         Do NOT feed directly into ECEF-expecting functions without conversion.
     """
     satrec = _build_satrec(satellite)
-    
+
     t_jd = epoch_jd + (t_since_minutes / 1440.0)
-    
+
     # Verify epoch staleness (SE-J)
     from astra.tle import check_tle_staleness
+
     check_tle_staleness(satellite, t_jd)
-    
+
     try:
         from astra.data_pipeline import get_ut1_utc_correction
+
         ut1_utc_s = get_ut1_utc_correction(t_jd)
         t_jd_ut1 = t_jd + ut1_utc_s / 86400.0
     except Exception as exc:
         from astra import config
+
         if config.ASTRA_STRICT_MODE:
             from astra.errors import EphemerisError
+
             raise EphemerisError(f"Failed to fetch UT1-UTC correction: {exc}") from exc
+        logger.warning(
+            "UT1-UTC correction unavailable for NORAD %s at JD %.8f; "
+            "falling back to UTC propagation in relaxed mode. (%r)",
+            satellite.norad_id,
+            t_jd,
+            exc,
+        )
         t_jd_ut1 = t_jd  # fallback
 
     fraction = 0.0
-    
+
     error_code, position, velocity = satrec.sgp4(t_jd_ut1, fraction)
-    
+
     return OrbitalState(
         norad_id=satellite.norad_id,
         t_jd=t_jd,
@@ -158,41 +174,57 @@ def propagate_many(
     if N == 0 or T == 0:
         return results, velocities
 
-    logger.info(f"Vector-propagating {N} orbits across {T} discrete time steps using SatrecArray...")
+    logger.info(
+        f"Vector-propagating {N} orbits across {T} discrete time steps using SatrecArray..."
+    )
 
     satrecs = [_build_satrec(sat) for sat in satellites]
     satrec_array = SatrecArray(satrecs)
-    
+
     # 0. Verify epoch staleness for all satellites in batch (SE-J)
     from astra.tle import check_tle_staleness
+
     for sat in satellites:
         check_tle_staleness(sat, times_jd)
-    
+
     # 1. Apply UT1-UTC correction (consistent with propagate_orbit)
     try:
         from astra.data_pipeline import get_ut1_utc_correction
+
         ut1_utc_s = get_ut1_utc_correction(times_jd)
         jd_array = times_jd + ut1_utc_s / 86400.0
     except Exception as exc:
         from astra import config
+
         if config.ASTRA_STRICT_MODE:
             from astra.errors import EphemerisError
-            raise EphemerisError(f"Failed to fetch UT1-UTC correction for batch: {exc}") from exc
+
+            raise EphemerisError(
+                f"Failed to fetch UT1-UTC correction for batch: {exc}"
+            ) from exc
+        logger.warning(
+            "UT1-UTC correction unavailable for batch propagation (%d objects, %d epochs); "
+            "falling back to UTC propagation in relaxed mode. (%r)",
+            N,
+            T,
+            exc,
+        )
         jd_array = times_jd
 
     jd_fraction_array = np.zeros_like(jd_array)
-    
+
     # 2. Vectorized SGP4 call
     e, r, v = satrec_array.sgp4(jd_array, jd_fraction_array)
-    
+
     r[e > 0] = np.nan
     v[e > 0] = np.nan
-    
+
     for i, sat in enumerate(satellites):
         results[sat.norad_id] = r[i]
         velocities[sat.norad_id] = v[i]
 
     return results, velocities
+
 
 def propagate_many_generator(
     satellites: list[SatelliteState], times_jd: np.ndarray, chunk_size: int = 1440
@@ -200,7 +232,7 @@ def propagate_many_generator(
     """Memory-efficient batch propagation yielding time-chunked results.
 
     Data formats: ✓ SatelliteTLE  ✓ SatelliteOMM
-    
+
     Prevents Out-Of-Memory (OOM) fatal kills during massive all-vs-all STM queries
     by yielding rolling spatial windows.
     """
@@ -211,42 +243,58 @@ def propagate_many_generator(
 
     satrecs = [_build_satrec(sat) for sat in satellites]
     satrec_array = SatrecArray(satrecs)
-    
+
     for start_idx in range(0, T, chunk_size):
         end_idx = min(start_idx + chunk_size, T)
-        
+
         jd_chunk = times_jd[start_idx:end_idx]
-        
+
         # Verify epoch staleness for each chunk (SE-J)
         from astra.tle import check_tle_staleness
+
         for sat in satellites:
             check_tle_staleness(sat, jd_chunk)
-        
+
         try:
             from astra.data_pipeline import get_ut1_utc_correction
+
             # Vectorize UT1-UTC directly across the chunk
             ut1_utc_s = get_ut1_utc_correction(jd_chunk)
             jd_chunk_ut1 = jd_chunk + ut1_utc_s / 86400.0
         except Exception as exc:
             from astra import config
+
             if config.ASTRA_STRICT_MODE:
                 from astra.errors import EphemerisError
-                raise EphemerisError(f"Failed to fetch UT1-UTC correction for chunk: {exc}") from exc
+
+                raise EphemerisError(
+                    f"Failed to fetch UT1-UTC correction for chunk: {exc}"
+                ) from exc
+            logger.warning(
+                "UT1-UTC correction unavailable for chunk propagation (%d objects, %d epochs); "
+                "falling back to UTC propagation in relaxed mode. (%r)",
+                N,
+                len(jd_chunk),
+                exc,
+            )
             jd_chunk_ut1 = jd_chunk
 
         frac_chunk = np.zeros_like(jd_chunk)
-        
+
         e, r, v = satrec_array.sgp4(jd_chunk_ut1, frac_chunk)
         r[e > 0] = np.nan
         v[e > 0] = np.nan
-        
+
         chunk_map = {sat.norad_id: r[i] for i, sat in enumerate(satellites)}
         vel_map = {sat.norad_id: v[i] for i, sat in enumerate(satellites)}
         yield jd_chunk, chunk_map, vel_map
 
 
 def propagate_trajectory(
-    satellite: SatelliteState, t_start_jd: float, t_end_jd: float, step_minutes: float = 5.0
+    satellite: SatelliteState,
+    t_start_jd: float,
+    t_end_jd: float,
+    step_minutes: float = 5.0,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Propagate a single satellite over a defined time window at a fixed step.
 
@@ -281,11 +329,11 @@ def propagate_trajectory(
 
     start_offset_mins = (t_start_jd - satellite.epoch_jd) * 1440.0
     end_offset_mins = (t_end_jd - satellite.epoch_jd) * 1440.0
-    
+
     # Adding a tiny epsilon to end_offset_mins to ensure inclusive bound if it aligns exactly
     time_steps = np.arange(start_offset_mins, end_offset_mins + 1e-9, step_minutes)
     times_jd = satellite.epoch_jd + (time_steps / 1440.0)
-    
+
     trajectory_map, vel_map = propagate_many([satellite], times_jd)
 
     positions = trajectory_map[satellite.norad_id]
@@ -314,13 +362,13 @@ def ground_track(
         return []
 
     from astra.frames import teme_to_ecef, ecef_to_geodetic_wgs84
-    
+
     r_itrs_km = teme_to_ecef(positions_teme, times_jd, use_spacebook_eop=True)
-    
+
     x, y, z = r_itrs_km.T
     lat_deg, lon_deg, alt_km = ecef_to_geodetic_wgs84(x, y, z)
-    
-    if np.isscalar(lat_deg) or getattr(lat_deg, 'ndim', 0) == 0:
+
+    if np.isscalar(lat_deg) or getattr(lat_deg, "ndim", 0) == 0:
         return [(float(lat_deg), float(lon_deg), float(alt_km))]
-    
+
     return list(zip(lat_deg.tolist(), lon_deg.tolist(), alt_km.tolist()))

@@ -11,18 +11,18 @@ Tests cover:
     7. load_omm_file() — local file ingestion
     8. validate_omm() — pre-parse sanity checking
 """
+
 import json
 import math
 import pytest
 import numpy as np
 
 import astra
-from astra.models import SatelliteTLE, SatelliteOMM, SatelliteState, DebrisObject
+from astra.models import SatelliteTLE, SatelliteOMM, DebrisObject
 from astra.omm import parse_omm_record, parse_omm_json
 from astra.orbit import propagate_trajectory, propagate_orbit
 from astra.debris import make_debris_object
 from astra.errors import AstraError, InvalidTLEError
-
 
 # ---------------------------------------------------------------------------
 # Fixtures -- realistic OMM data matching a known ISS-like LEO orbit
@@ -36,12 +36,12 @@ ISS_OMM_RECORD = {
     "NORAD_CAT_ID": "25544",
     "OBJECT_TYPE": "PAYLOAD",
     "EPOCH": "2021-01-01T00:00:00.000000",
-    "MEAN_MOTION": "15.48922536",       # rev/day — real ISS value
+    "MEAN_MOTION": "15.48922536",  # rev/day — real ISS value
     "ECCENTRICITY": ".0001364",
-    "INCLINATION": "51.6442",           # degrees
-    "RA_OF_ASC_NODE": "284.1199",       # degrees
-    "ARG_OF_PERICENTER": "338.5498",    # degrees
-    "MEAN_ANOMALY": "21.5664",          # degrees
+    "INCLINATION": "51.6442",  # degrees
+    "RA_OF_ASC_NODE": "284.1199",  # degrees
+    "ARG_OF_PERICENTER": "338.5498",  # degrees
+    "MEAN_ANOMALY": "21.5664",  # degrees
     "BSTAR": ".34282E-4",
     "RCS_SIZE": "LARGE",
     "MASS": "419725",
@@ -66,6 +66,7 @@ def iss_tle() -> SatelliteTLE:
 # ===========================================================================
 # 1. PARSING TESTS — Unit conversion correctness
 # ===========================================================================
+
 
 class TestOMMParsing:
 
@@ -122,6 +123,7 @@ class TestOMMParsing:
 # 2. JSON BULK PARSER TESTS
 # ===========================================================================
 
+
 class TestBulkOMMParser:
 
     def test_parse_list_of_one(self):
@@ -138,7 +140,10 @@ class TestBulkOMMParser:
         assert results == []
 
     def test_malformed_record_is_skipped_not_fatal(self):
-        bad_record = {"OBJECT_NAME": "BROKEN", "NORAD_CAT_ID": "99999"}  # missing all orbital elements
+        bad_record = {
+            "OBJECT_NAME": "BROKEN",
+            "NORAD_CAT_ID": "99999",
+        }  # missing all orbital elements
         payload = json.dumps([ISS_OMM_RECORD, bad_record])
         results = parse_omm_json(payload)
         # Only the valid record should survive
@@ -172,6 +177,7 @@ class TestBulkOMMParser:
 
 EARTH_RADIUS_KM = 6378.137
 
+
 class TestOMMPropagation:
 
     def test_propagate_orbit_returns_orbital_state(self, iss_omm):
@@ -183,7 +189,9 @@ class TestOMMPropagation:
         state = propagate_orbit(iss_omm, iss_omm.epoch_jd, 0.0)
         r_km = float(np.linalg.norm(state.position_km))
         altitude_km = r_km - EARTH_RADIUS_KM
-        assert 200.0 <= altitude_km <= 600.0, f"Unexpected altitude: {altitude_km:.1f} km"
+        assert (
+            200.0 <= altitude_km <= 600.0
+        ), f"Unexpected altitude: {altitude_km:.1f} km"
 
     def test_propagated_velocity_is_plausible_for_leo(self, iss_omm):
         """LEO orbital speed should be between 7 and 8 km/s."""
@@ -209,7 +217,9 @@ class TestOMMPropagation:
         r_tle = np.array(state_tle.position_km)
         delta_km = float(np.linalg.norm(r_omm - r_tle))
         # Small BSTAR string parsing differences may introduce minor deltas
-        assert delta_km < 100.0, f"TLE vs OMM position delta too large: {delta_km:.1f} km"
+        assert (
+            delta_km < 100.0
+        ), f"TLE vs OMM position delta too large: {delta_km:.1f} km"
 
     def test_no_nan_in_trajectory(self, iss_omm):
         _, positions, _vel = propagate_trajectory(
@@ -221,6 +231,7 @@ class TestOMMPropagation:
 # ===========================================================================
 # 4. DEBRIS OBJECT INTEGRATION
 # ===========================================================================
+
 
 class TestOMMDebrisObject:
 
@@ -255,6 +266,7 @@ class TestOMMDebrisObject:
 # 5. BACKWARDS COMPATIBILITY — TLE path still works
 # ===========================================================================
 
+
 class TestTLEBackwardsCompatibility:
 
     def test_tle_debris_object_still_uses_source(self, iss_tle):
@@ -277,6 +289,7 @@ class TestTLEBackwardsCompatibility:
 # 6. SATELLITE STATE UNION TYPE
 # ===========================================================================
 
+
 class TestSatelliteStateUnion:
 
     def test_omm_is_valid_satellite_state(self, iss_omm):
@@ -298,6 +311,7 @@ class TestSatelliteStateUnion:
 # ===========================================================================
 # 7. load_omm_file() — Local File Ingestion
 # ===========================================================================
+
 
 class TestLoadOMMFile:
 
@@ -348,6 +362,7 @@ class TestLoadOMMFile:
 # ===========================================================================
 # 8. validate_omm() — Pre-parse Sanity Checking
 # ===========================================================================
+
 
 class TestValidateOMM:
 
@@ -409,4 +424,3 @@ class TestValidateOMM:
         valid = [r for r in records if astra.validate_omm(r)]
         assert len(valid) == 1
         assert valid[0]["NORAD_CAT_ID"] == "25544"
-

@@ -44,7 +44,7 @@ dependencies = [
 
 [project.optional-dependencies]
 viz = ["plotly>=5.18.0"]
-test = ["pytest>=8.0.0", "plotly>=5.18.0", "scipy-stubs", "types-requests"]
+test = ["pytest>=8.0.0", "plotly>=5.18.0", "scipy-stubs", "types-requests", "types-defusedxml"]
 
 [tool.setuptools.packages.find]
 where = ["."]
@@ -52,3 +52,9 @@ exclude = ["paper*", "docs*"]
 
 [tool.setuptools.package-data]
 astra = ["py.typed"]
+
+[tool.mypy]
+strict = true
+ignore_missing_imports = true
+disallow_untyped_decorators = false
+warn_unused_ignores = false

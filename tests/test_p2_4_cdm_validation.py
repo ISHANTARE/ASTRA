@@ -2,6 +2,7 @@ import pytest
 from astra.cdm import parse_cdm_xml
 from astra.errors import AstraError
 
+
 def test_cdm_validation_miss_distance_p2_4():
     """Verify that negative miss distance triggers validation failure."""
     xml = """<?xml version="1.0" encoding="UTF-8"?>
@@ -18,6 +19,7 @@ def test_cdm_validation_miss_distance_p2_4():
         parse_cdm_xml(xml)
     assert "Negative miss distance" in str(excinfo.value)
     print("Negative miss distance test PASSED.")
+
 
 def test_cdm_validation_rel_vel_p2_4():
     """Verify that negative relative speed triggers validation failure."""
@@ -36,6 +38,7 @@ def test_cdm_validation_rel_vel_p2_4():
     assert "Negative relative velocity" in str(excinfo.value)
     print("Negative relative velocity test PASSED.")
 
+
 def test_cdm_validation_pc_range_p2_4():
     """Verify that out-of-range Pc triggers validation failure."""
     xml = """<?xml version="1.0" encoding="UTF-8"?>
@@ -53,6 +56,7 @@ def test_cdm_validation_pc_range_p2_4():
         parse_cdm_xml(xml)
     assert "out of range [0, 1]" in str(excinfo.value)
     print("Out-of-range Pc test PASSED.")
+
 
 if __name__ == "__main__":
     test_cdm_validation_miss_distance_p2_4()

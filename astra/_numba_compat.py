@@ -19,21 +19,24 @@ Usage::
     def my_kernel(x, y):
         return x + y
 """
+
 from __future__ import annotations
 
 import logging as _logging
+from typing import Any
 
 __all__ = ["njit", "NUMBA_AVAILABLE"]
 
 _logger = _logging.getLogger(__name__)
 
 try:
-    from numba import njit  # type: ignore[import-untyped]
+    from numba import njit
+
     NUMBA_AVAILABLE: bool = True
 except ImportError:
     NUMBA_AVAILABLE = False
 
-    def njit(*args, **kwargs):  # type: ignore[misc]
+    def njit(*args: Any, **kwargs: Any) -> Any:
         """No-op Numba decorator shim for environments without Numba.
 
         Handles both bare ``@njit`` and parameterised ``@njit(fastmath=True)``
@@ -41,8 +44,10 @@ except ImportError:
         Functions wrapped by this shim run as plain CPython — slower than the
         JIT-compiled path, but fully correct.
         """
-        def _decorator(fn):
+
+        def _decorator(fn: Any) -> Any:
             return fn
+
         # @njit used as a bare decorator (no parentheses): args[0] is the fn
         if args and callable(args[0]):
             return _decorator(args[0])

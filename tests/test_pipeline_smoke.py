@@ -11,7 +11,6 @@ from astra.debris import filter_altitude, make_debris_object
 from astra.omm import parse_omm_json
 from astra.orbit import propagate_orbit
 
-
 # Reuse ISS-like OMM from test_omm (physically self-consistent LEO).
 _ISS_OMM = {
     "OBJECT_NAME": "ISS (ZARYA)",

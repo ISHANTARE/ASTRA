@@ -5,6 +5,7 @@ This module is the entry point for all data entering ASTRA Core. It handles
 parsing, validation, and batch loading of Two-Line Element (TLE) sets from
 raw text.
 """
+
 from __future__ import annotations
 
 import logging
@@ -63,19 +64,20 @@ def _parse_epoch_to_jd(epoch_str: str) -> float:
     year = 2000 + y if y < 57 else 1900 + y
 
     # Integer day + fractional-day both accumulated through timedelta
-    day_whole = int(day_of_year)        # e.g. 123
+    day_whole = int(day_of_year)  # e.g. 123
     day_frac = day_of_year - day_whole  # e.g. 0.45678
     # Convert fractional day to integer microseconds for precise accumulation
     frac_us = round(day_frac * 86400 * 1_000_000)
-    dt = (
-        datetime(year, 1, 1, tzinfo=timezone.utc)
-        + timedelta(days=day_whole - 1, microseconds=frac_us)
+    dt = datetime(year, 1, 1, tzinfo=timezone.utc) + timedelta(
+        days=day_whole - 1, microseconds=frac_us
     )
     delta = dt - _J2000_EPOCH
     return _J2000_JD + delta.total_seconds() / 86400.0
 
 
-def check_tle_staleness(satellite: SatelliteState, target_jd: float | np.ndarray) -> None:
+def check_tle_staleness(
+    satellite: SatelliteState, target_jd: float | np.ndarray
+) -> None:
     """Verify that the propagation time is within 30 days of the satellite epoch.
 
     SGP4 accuracy degrades exponentially over time. For mission-critical analysis,
@@ -130,24 +132,36 @@ def parse_tle(name: str, line1: str, line2: str) -> SatelliteTLE:
     if len(line1) != 69:
         raise InvalidTLEError(
             f"Line 1 length is {len(line1)}, expected 69",
-            norad_id="UNKNOWN", object_name=name, invalid_line=line1, reason="L1_LENGTH",
+            norad_id="UNKNOWN",
+            object_name=name,
+            invalid_line=line1,
+            reason="L1_LENGTH",
         )
     if len(line2) != 69:
         raise InvalidTLEError(
             f"Line 2 length is {len(line2)}, expected 69",
-            norad_id="UNKNOWN", object_name=name, invalid_line=line2, reason="L2_LENGTH",
+            norad_id="UNKNOWN",
+            object_name=name,
+            invalid_line=line2,
+            reason="L2_LENGTH",
         )
 
     # 3. Prefix checks (line 1 must start with "1 ", line 2 with "2 ")
     if not line1.startswith("1 "):
         raise InvalidTLEError(
             "Line 1 does not start with '1 '",
-            norad_id="UNKNOWN", object_name=name, invalid_line=line1, reason="L1_PREFIX",
+            norad_id="UNKNOWN",
+            object_name=name,
+            invalid_line=line1,
+            reason="L1_PREFIX",
         )
     if not line2.startswith("2 "):
         raise InvalidTLEError(
             "Line 2 does not start with '2 '",
-            norad_id="UNKNOWN", object_name=name, invalid_line=line2, reason="L2_PREFIX",
+            norad_id="UNKNOWN",
+            object_name=name,
+            invalid_line=line2,
+            reason="L2_PREFIX",
         )
 
     # 4. Checksum validation
@@ -156,12 +170,18 @@ def parse_tle(name: str, line1: str, line2: str) -> SatelliteTLE:
         if _compute_checksum(line1) != expected_cs1:
             raise InvalidTLEError(
                 "Line 1 checksum mismatch",
-                norad_id="UNKNOWN", object_name=name, invalid_line=line1, reason="L1_CHECKSUM",
+                norad_id="UNKNOWN",
+                object_name=name,
+                invalid_line=line1,
+                reason="L1_CHECKSUM",
             )
     except ValueError:
         raise InvalidTLEError(
             "Line 1 checksum character is not a digit",
-            norad_id="UNKNOWN", object_name=name, invalid_line=line1, reason="L1_CHECKSUM",
+            norad_id="UNKNOWN",
+            object_name=name,
+            invalid_line=line1,
+            reason="L1_CHECKSUM",
         )
 
     try:
@@ -169,12 +189,18 @@ def parse_tle(name: str, line1: str, line2: str) -> SatelliteTLE:
         if _compute_checksum(line2) != expected_cs2:
             raise InvalidTLEError(
                 "Line 2 checksum mismatch",
-                norad_id="UNKNOWN", object_name=name, invalid_line=line2, reason="L2_CHECKSUM",
+                norad_id="UNKNOWN",
+                object_name=name,
+                invalid_line=line2,
+                reason="L2_CHECKSUM",
             )
     except ValueError:
         raise InvalidTLEError(
             "Line 2 checksum character is not a digit",
-            norad_id="UNKNOWN", object_name=name, invalid_line=line2, reason="L2_CHECKSUM",
+            norad_id="UNKNOWN",
+            object_name=name,
+            invalid_line=line2,
+            reason="L2_CHECKSUM",
         )
 
     # 5. NORAD ID consistency
@@ -242,18 +268,23 @@ def validate_tle(name: str, line1: str, line2: str) -> bool:
 
 def _chunk_tle_lines(tle_lines: list[str]) -> list[tuple[str, str, str]]:
     """Group a list of TLE lines into triplets (name, line1, line2).
-    
+
     Supports both 3-line format (with name) and 2-line format (auto-generates 'Unknown').
     Silently skips empty lines and invalid headers.
     """
     lines = [L.strip() for L in tle_lines if L.strip()]
-    
+
     triplets = []
     i = 0
     n = len(lines)
     while i < n:
         if not lines[i].startswith("1 "):
-            if i + 1 < n and lines[i + 1].startswith("1 ") and i + 2 < n and lines[i + 2].startswith("2 "):
+            if (
+                i + 1 < n
+                and lines[i + 1].startswith("1 ")
+                and i + 2 < n
+                and lines[i + 2].startswith("2 ")
+            ):
                 triplets.append((lines[i], lines[i + 1], lines[i + 2]))
                 i += 3
             else:
@@ -290,13 +321,14 @@ def load_tle_catalog(tle_lines: list[str]) -> list[SatelliteTLE]:
         return []
 
     triplets = _chunk_tle_lines(tle_lines)
-    
+
     if not triplets and any(L.strip() for L in tle_lines):
         raise AstraError("Failed to parse any TLE triplets from input lines.")
 
     from astra.config import ASTRA_STRICT_MODE
+
     results: list[SatelliteTLE] = []
-    
+
     for name, line1, line2 in triplets:
         try:
             sat = parse_tle(name, line1, line2)

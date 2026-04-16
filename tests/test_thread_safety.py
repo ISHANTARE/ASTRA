@@ -1,15 +1,14 @@
 # tests/test_thread_safety.py
 """Thread-safety tests for strict mode reads and Skyfield initialization."""
+
 from __future__ import annotations
 
 import threading
 import time
 from typing import List
 
-import pytest
 
 import astra.config as config
-from astra.data_pipeline import _ensure_skyfield, _SKYFIELD_INIT_LOCK
 
 
 class TestStrictModeThreadSafety:
@@ -35,8 +34,9 @@ class TestStrictModeThreadSafety:
             t.join()
 
         assert not errors, f"Thread errors: {errors}"
-        assert all(r == original for r in results), \
-            "STRICT_MODE value changed unexpectedly during concurrent reads"
+        assert all(
+            r == original for r in results
+        ), "STRICT_MODE value changed unexpectedly during concurrent reads"
 
     def test_mode_write_visible_to_all_threads(self):
         """A mode change from one thread should be visible to ALL threads."""
@@ -75,6 +75,7 @@ class TestSkyfieldInitThreadSafety:
     def test_concurrent_ensure_skyfield_no_double_init(self, monkeypatch):
         """Multiple simultaneous calls to _ensure_skyfield() must be idempotent."""
         from astra import data_pipeline
+
         init_count = [0]
 
         original_loader = data_pipeline._skyfield_loader
@@ -115,8 +116,9 @@ class TestSkyfieldInitThreadSafety:
                 t.join()
 
             assert not errors, f"Thread errors: {errors}"
-            assert init_count[0] == 1, \
-                f"Skyfield must initialize exactly once, but initialized {init_count[0]} times"
+            assert (
+                init_count[0] == 1
+            ), f"Skyfield must initialize exactly once, but initialized {init_count[0]} times"
         finally:
             # Restore original state
             data_pipeline._skyfield_loader = original_loader

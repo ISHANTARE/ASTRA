@@ -7,6 +7,7 @@ all-pairs search.
 
 Wraps the ultra-fast C++ scipy.spatial.cKDTree.
 """
+
 from __future__ import annotations
 
 import threading
@@ -16,6 +17,7 @@ if TYPE_CHECKING:
     from astra.models import TrajectoryMap
 import numpy as np
 from scipy.spatial import cKDTree
+
 
 class SpatialIndex:
     """High-level persistent spatial index for conjunction screening.
@@ -50,13 +52,15 @@ class SpatialIndex:
             self._positions[obj_id] = position.copy()
             self._tree = None
 
-    def query_radius(self, point: np.ndarray, radius_km: float) -> list[tuple[str, np.ndarray]]:
+    def query_radius(
+        self, point: np.ndarray, radius_km: float
+    ) -> list[tuple[str, np.ndarray]]:
         """Find all objects within radius of a point. Thread-safe."""
         with self._lock:
             self._ensure_tree()
             if self._tree is None:
                 return []
-            
+
             indices = self._tree.query_ball_point(point, r=radius_km)
             return [(self._ids[i], self._positions[self._ids[i]]) for i in indices]
 
@@ -85,14 +89,13 @@ class SpatialIndex:
                 # this typically < 50 km; for HEO it is large but only for
                 # that one object's own query, not globally inflating all pairs.
                 seen: set[tuple[str, str]] = set()
-                positions_arr = np.array([self._positions[nid] for nid in self._ids])
 
                 for i, nid in enumerate(self._ids):
-                    # Per-object query radius: the satellite can be at most
-                    # (exc_i + exc_j + threshold) from another object's center.
-                    # Search with a conservative upper bound exc_i + max_exc + threshold
-                    # to find all candidates, then refine.
-                    per_obj_radius = threshold_km + self._excursions[nid] + self._max_excursion
+                    # Per-object query radius for complete symmetric discovery:
+                    # Query i with threshold + 2*exc_i. If j has larger excursion,
+                    # the pair is guaranteed to be discovered when j is queried
+                    # because threshold + exc_i + exc_j <= threshold + 2*max(exc_i, exc_j).
+                    per_obj_radius = threshold_km + 2.0 * self._excursions[nid]
                     neighbours = self._tree.query_ball_point(
                         self._positions[nid], r=per_obj_radius
                     )
@@ -104,14 +107,19 @@ class SpatialIndex:
                         if key in seen:
                             continue
                         # Tight per-pair refinement: centers within exc_i + exc_j + threshold
-                        dist_centers = float(np.linalg.norm(
-                            self._positions[nid] - self._positions[id_j]
-                        ))
-                        if dist_centers <= threshold_km + self._excursions[nid] + self._excursions[id_j]:
+                        dist_centers = float(
+                            np.linalg.norm(self._positions[nid] - self._positions[id_j])
+                        )
+                        if (
+                            dist_centers
+                            <= threshold_km
+                            + self._excursions[nid]
+                            + self._excursions[id_j]
+                        ):
                             seen.add(key)
                 return list(seen)
             else:
-                index_pairs = self._tree.query_pairs(r=threshold_km, output_type='set')
+                index_pairs = self._tree.query_pairs(r=threshold_km, output_type="set")
                 results = []
                 for i, j in index_pairs:
                     id_a, id_b = self._ids[i], self._ids[j]
@@ -136,13 +144,15 @@ class SpatialIndex:
                 # Max excursion = max distance from center
                 excursions = np.linalg.norm(traj - center, axis=1)
                 max_exc = float(np.max(excursions))
-                
+
                 new_positions[nid] = center
                 new_excursions[nid] = max_exc
-            
+
             self._positions = new_positions
             self._excursions = new_excursions
-            self._max_excursion = max(new_excursions.values()) if new_excursions else 0.0
+            self._max_excursion = (
+                max(new_excursions.values()) if new_excursions else 0.0
+            )
             self._ensure_tree(force=True)
 
     @property
@@ -152,24 +162,21 @@ class SpatialIndex:
 
     def rebuild(self, positions: dict[str, np.ndarray]) -> None:
         """Rebuild the entire index from a fresh position dictionary. Thread-safe.
-        
+
         Silently drops any objects whose position contains NaN or Inf.
         """
         with self._lock:
             self._positions = {
-                k: v.copy() for k, v in positions.items() 
-                if np.all(np.isfinite(v))
+                k: v.copy() for k, v in positions.items() if np.all(np.isfinite(v))
             }
             self._ensure_tree(force=True)
-        
+
     def _ensure_tree(self, force: bool = False) -> None:
         """Internal tree reconstruction logic. MUST BE CALLED WITHIN _lock."""
         if (self._tree is None or force) and self._positions:
             self._ids = list(self._positions.keys())
             points = np.array([self._positions[nid] for nid in self._ids])
             if len(points) > 0:
-                self._tree = cKDTree(
-                    points, leafsize=max(1, self.max_objects_per_node)
-                )
+                self._tree = cKDTree(points, leafsize=max(1, self.max_objects_per_node))
             else:
                 self._tree = None

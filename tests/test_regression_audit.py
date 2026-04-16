@@ -1,11 +1,11 @@
 """Regression tests for physics, time, Pc, strict mode, and concurrency fixes."""
+
 from __future__ import annotations
 
 import math
 import threading
 import numpy as np
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Helper: ISS TLE — same lines as conftest.py (already validated 69 chars + checksum)
@@ -19,6 +19,7 @@ _ISS_L2 = "2 25544  51.6442 284.1199 0001364 338.5498  21.5664 15.48922536 12341
 def _iss_tle():
     """Return an ISS SatelliteTLE using the same TLE as conftest.py."""
     from astra.tle import parse_tle
+
     return parse_tle("ISS (ZARYA)", _ISS_L1, _ISS_L2)
 
 
@@ -26,7 +27,7 @@ def test_j4_python_and_numba_paths_agree():
     """Python ``_acceleration`` must match Numba ``_acceleration_njit`` (J4 term included)."""
     from astra.propagator import _acceleration, _acceleration_njit
 
-    r = np.array([7000.0, 0.0, 500.0])   # slight z-offset activates J3+J4 z-terms
+    r = np.array([7000.0, 0.0, 500.0])  # slight z-offset activates J3+J4 z-terms
     v = np.array([0.0, 7.5, 0.0])
     t_jd = 2451545.0
 
@@ -36,25 +37,62 @@ def test_j4_python_and_numba_paths_agree():
     # use_drag=False and hf_atmosphere=False, so MSIS is never invoked.
     empty_coeffs = np.zeros((1, 2, 3))
     a_py = _acceleration(
-        t_jd, r, v,
-        False, 2.2, 10.0, 1000.0, 0.0, 50.0, 400.0,        # use_drag=False, drag_ref_alt_km=400.0
-        150.0, 150.0, 15.0, False,                           # f107_obs, f107_adj, ap_daily, hf_atm
-        False, t_jd, 1.0, empty_coeffs, empty_coeffs,       # 3rd body off
-        False, 1.5, True,                                    # SRP off
+        t_jd,
+        r,
+        v,
+        False,
+        2.2,
+        10.0,
+        1000.0,
+        0.0,
+        50.0,
+        400.0,  # use_drag=False, drag_ref_alt_km=400.0
+        150.0,
+        150.0,
+        15.0,
+        False,  # f107_obs, f107_adj, ap_daily, hf_atm
+        False,
+        t_jd,
+        1.0,
+        empty_coeffs,
+        empty_coeffs,  # 3rd body off
+        False,
+        1.5,
+        True,  # SRP off
     )
 
     # Numba path: disable drag (rho=0), disable 3rd body, disable SRP
     a_nb = _acceleration_njit(
-        t_jd, r, v,
-        False, 2.2, 10.0, 1000.0, 0.0, 50.0, 400.0,        # use_drag=False, drag_ref_alt_km=400.0
-        150.0, 150.0, 15.0, False,                           # f107_obs, f107_adj, ap_daily, hf_atm
-        False, t_jd, 1.0, empty_coeffs, empty_coeffs,       # 3rd body off
-        False, 1.5, True,                                    # SRP off
+        t_jd,
+        r,
+        v,
+        False,
+        2.2,
+        10.0,
+        1000.0,
+        0.0,
+        50.0,
+        400.0,  # use_drag=False, drag_ref_alt_km=400.0
+        150.0,
+        150.0,
+        15.0,
+        False,  # f107_obs, f107_adj, ap_daily, hf_atm
+        False,
+        t_jd,
+        1.0,
+        empty_coeffs,
+        empty_coeffs,  # 3rd body off
+        False,
+        1.5,
+        True,  # SRP off
     )
 
     np.testing.assert_allclose(
-        a_py, a_nb, rtol=1e-6, atol=1e-12,
-        err_msg="Python and Numba J4 acceleration paths disagree — sign fix not applied consistently."
+        a_py,
+        a_nb,
+        rtol=1e-6,
+        atol=1e-12,
+        err_msg="Python and Numba J4 acceleration paths disagree — sign fix not applied consistently.",
     )
     # Both must be finite
     assert np.all(np.isfinite(a_py))
@@ -67,12 +105,17 @@ def test_srp_cylindrical_illumination_factor_phy18():
 
     Re = EARTH_EQUATORIAL_RADIUS_KM
     rsun = np.array([1.0e8, 0.0, 0.0])
-    assert srp_cylindrical_illumination_factor(np.array([-6800.0, 0.0, 0.0]), rsun) == 0.0
-    assert srp_cylindrical_illumination_factor(np.array([6800.0, 0.0, 0.0]), rsun) == 1.0
+    assert (
+        srp_cylindrical_illumination_factor(np.array([-6800.0, 0.0, 0.0]), rsun) == 0.0
+    )
+    assert (
+        srp_cylindrical_illumination_factor(np.array([6800.0, 0.0, 0.0]), rsun) == 1.0
+    )
     # Just outside the cylinder on the night side: ρ > Re → sunlit in this model
-    assert srp_cylindrical_illumination_factor(
-        np.array([-6800.0, Re + 100.0, 0.0]), rsun
-    ) == 1.0
+    assert (
+        srp_cylindrical_illumination_factor(np.array([-6800.0, Re + 100.0, 0.0]), rsun)
+        == 1.0
+    )
 
 
 def test_j4_sign_is_negative_for_equatorial_radial():
@@ -81,16 +124,18 @@ def test_j4_sign_is_negative_for_equatorial_radial():
 
     r = np.array([7000.0, 0.0, 0.0])
     r_mag = 7000.0
-    r2 = r_mag ** 2
-    r9 = r_mag ** 9
+    r2 = r_mag**2
+    r9 = r_mag**9
 
-    fJ4 = 0.625 * J4 * EARTH_MU_KM3_S2 * EARTH_EQUATORIAL_RADIUS_KM ** 4 / r9
+    fJ4 = 0.625 * J4 * EARTH_MU_KM3_S2 * EARTH_EQUATORIAL_RADIUS_KM**4 / r9
     a_j4_x = fJ4 * r[0] * (0.0 - 0.0 + 3.0 * r2)
 
     # J4 < 0 → fJ4 < 0 → a_j4_x < 0 (correct, opposing two-body outward direction)
     assert J4 < 0, "J4 constant should be negative per WGS-84"
     assert fJ4 < 0, f"fJ4 should be negative (J4<0, +0.625 multiplier). Got {fJ4}"
-    assert a_j4_x < 0, f"J4 x-accel at equatorial position should be negative. Got {a_j4_x}"
+    assert (
+        a_j4_x < 0
+    ), f"J4 x-accel at equatorial position should be negative. Got {a_j4_x}"
 
 
 def test_pc_exact_dblquad_vs_chan_near_hit():
@@ -99,35 +144,39 @@ def test_pc_exact_dblquad_vs_chan_near_hit():
     import numpy as np
 
     # Small miss vector — the satellite will almost certainly hit
-    miss_2d = np.array([0.003, 0.0])   # 3 m miss in encounter plane
-    sigma = 0.1                         # 100 m 1-sigma
+    miss_2d = np.array([0.003, 0.0])  # 3 m miss in encounter plane
+    sigma = 0.1  # 100 m 1-sigma
     C_p = np.diag([sigma**2, sigma**2])
     inv_C_p = np.linalg.inv(C_p)
     det_C_p = float(np.linalg.det(C_p))
-    combined_radius = 0.01              # 10 m
+    combined_radius = 0.01  # 10 m
 
     pc_exact = _exact_pc_2d_integral(miss_2d, inv_C_p, det_C_p, combined_radius)
     assert 0.0 < pc_exact <= 1.0, f"Exact Pc out of range: {pc_exact}"
 
     # Chan approximation for comparison
     import math
+
     mahal = float(miss_2d @ inv_C_p @ miss_2d)
     area = math.pi * combined_radius**2
     pc_chan = math.exp(-0.5 * mahal) * area / (2.0 * math.pi * math.sqrt(det_C_p))
 
     # Exact should be ≥ Chan in the near-hit regime
-    assert pc_exact >= pc_chan * 0.5, (
-        f"Exact Pc ({pc_exact:.4e}) unexpectedly much smaller than Chan ({pc_chan:.4e})"
-    )
+    assert (
+        pc_exact >= pc_chan * 0.5
+    ), f"Exact Pc ({pc_exact:.4e}) unexpectedly much smaller than Chan ({pc_chan:.4e})"
 
 
 def test_pc_exact_vs_mc_order_of_magnitude():
     """Exact 2D Pc and Monte Carlo Pc stay within an order of magnitude for a near-hit case."""
-    from astra.covariance import compute_collision_probability, compute_collision_probability_mc
+    from astra.covariance import (
+        compute_collision_probability,
+        compute_collision_probability_mc,
+    )
 
-    miss = np.array([0.05, 0.0, 0.0])    # 50 m miss
-    v_rel = np.array([0.0, 0.0, 10.0])   # 10 km/s cross-track
-    sigma = 0.1                            # 100 m 1-sigma
+    miss = np.array([0.05, 0.0, 0.0])  # 50 m miss
+    v_rel = np.array([0.0, 0.0, 10.0])  # 10 km/s cross-track
+    sigma = 0.1  # 100 m 1-sigma
     cov_3x3 = np.diag([sigma**2] * 3)
 
     pc_ana = compute_collision_probability(
@@ -135,19 +184,24 @@ def test_pc_exact_vs_mc_order_of_magnitude():
     )
     assert 0.0 <= pc_ana <= 1.0
 
-    cov_6x6 = np.diag([sigma**2]*3 + [1e-6]*3)
+    cov_6x6 = np.diag([sigma**2] * 3 + [1e-6] * 3)
     pc_mc = compute_collision_probability_mc(
-        miss, v_rel, cov_6x6, cov_6x6,
-        radius_a_km=0.005, radius_b_km=0.005,
-        n_samples=30_000, seed=42
+        miss,
+        v_rel,
+        cov_6x6,
+        cov_6x6,
+        radius_a_km=0.005,
+        radius_b_km=0.005,
+        n_samples=30_000,
+        seed=42,
     )
     assert 0.0 <= pc_mc <= 1.0
 
     if pc_mc > 1e-7 and pc_ana > 1e-7:
         ratio = max(pc_ana, pc_mc) / min(pc_ana, pc_mc)
-        assert ratio < 20.0, (
-            f"Analytical Pc={pc_ana:.3e} and MC Pc={pc_mc:.3e} differ by >{ratio:.1f}×"
-        )
+        assert (
+            ratio < 20.0
+        ), f"Analytical Pc={pc_ana:.3e} and MC Pc={pc_mc:.3e} differ by >{ratio:.1f}×"
 
 
 def test_get_ut1_utc_correction_j2000_reasonable():
@@ -165,7 +219,7 @@ def test_get_ut1_utc_correction_returns_finite():
     """UT1−UTC stays finite and in a physical band for several epoch offsets."""
     from astra.data_pipeline import get_ut1_utc_correction
 
-    jd_start = 2451545.0   # J2000
+    jd_start = 2451545.0  # J2000
     for delta in [0, 365, 730, 1826]:
         dut1 = float(get_ut1_utc_correction(jd_start + delta))
         assert math.isfinite(dut1), f"Non-finite UT1-UTC at JD+{delta}"
@@ -189,6 +243,7 @@ def test_pc_singular_covariance_returns_zero_no_crash():
 def test_set_strict_mode_is_callable():
     """``set_strict_mode`` is importable from ``astra.config``."""
     from astra.config import set_strict_mode
+
     assert callable(set_strict_mode)
 
 
@@ -238,7 +293,9 @@ def test_load_space_weather_concurrent_no_double_parse(monkeypatch):
     monkeypatch.setattr(dp, "_sw_cache", {})
 
     # Feed a minimal but valid CSV so no HTTP request is made
-    import pathlib, tempfile, os
+    import pathlib
+    import tempfile
+
     minimal_csv = (
         "TYPE,YYYY,MM,DD,BSRN,ND,Kp1,Kp2,Kp3,Kp4,Kp5,Kp6,Kp7,Kp8,Kp_sum,"
         "Ap1,Ap2,Ap3,Ap4,Ap5,Ap6,Ap7,Ap8,Ap_avg,Cp,C9,ISN,F10.7_obs,F10.7_adj,Q,F10.7_81,Ap_avg2\n"
@@ -254,7 +311,7 @@ def test_load_space_weather_concurrent_no_double_parse(monkeypatch):
         exc_list: list[Exception] = []
 
         def _call():
-            barrier.wait()   # synchronise all threads to fire at once
+            barrier.wait()  # synchronise all threads to fire at once
             try:
                 dp.load_space_weather(data_dir=tmpdir)
             except Exception as e:
@@ -267,9 +324,9 @@ def test_load_space_weather_concurrent_no_double_parse(monkeypatch):
             t.join()
 
         assert not exc_list, f"load_space_weather raised: {exc_list}"
-        assert parse_count[0] == 1, (
-            f"_parse_sw_csv called {parse_count[0]} times; expected exactly 1."
-        )
+        assert (
+            parse_count[0] == 1
+        ), f"_parse_sw_csv called {parse_count[0]} times; expected exactly 1."
 
 
 def test_collision_probability_nan_when_none():
@@ -277,8 +334,10 @@ def test_collision_probability_nan_when_none():
     from astra.models import ConjunctionEvent
 
     evt = ConjunctionEvent(
-        object_a_id="A", object_b_id="B",
-        tca_jd=2451545.0, miss_distance_km=1.0,
+        object_a_id="A",
+        object_b_id="B",
+        tca_jd=2451545.0,
+        miss_distance_km=1.0,
         relative_velocity_km_s=10.0,
         collision_probability=None,
         risk_level="UNKNOWN",
@@ -296,8 +355,10 @@ def test_collision_probability_nan_when_set():
     from astra.models import ConjunctionEvent
 
     evt = ConjunctionEvent(
-        object_a_id="A", object_b_id="B",
-        tca_jd=2451545.0, miss_distance_km=1.0,
+        object_a_id="A",
+        object_b_id="B",
+        tca_jd=2451545.0,
+        miss_distance_km=1.0,
         relative_velocity_km_s=10.0,
         collision_probability=1.5e-4,
         risk_level="CRITICAL",
@@ -314,8 +375,8 @@ def test_7dof_powered_arc_tsiolkovsky():
 
     tle = _iss_tle()
 
-    thrust_N  = 22.0   # N  (small thruster)
-    isp_s     = 220.0  # s  (cold-gas typical)
+    thrust_N = 22.0  # N  (small thruster)
+    isp_s = 220.0  # s  (cold-gas typical)
     duration_s = 30.0  # s
 
     burn = FiniteBurn(
@@ -323,7 +384,7 @@ def test_7dof_powered_arc_tsiolkovsky():
         duration_s=duration_s,
         thrust_N=thrust_N,
         isp_s=isp_s,
-        direction=(1.0, 0.0, 0.0),   # prograde (VNB V-axis)
+        direction=(1.0, 0.0, 0.0),  # prograde (VNB V-axis)
         frame=ManeuverFrame.VNB,
     )
 
@@ -353,11 +414,11 @@ def test_7dof_powered_arc_tsiolkovsky():
 
     # Tsiolkovsky mass depletion: Δm = F·t / (Isp · g0)
     g0 = 9.80665  # m/s²
-    dm_expected = thrust_N * duration_s / (isp_s * g0)   # kg
-    dm_actual   = initial_mass - mass_final
+    dm_expected = thrust_N * duration_s / (isp_s * g0)  # kg
+    dm_actual = initial_mass - mass_final
 
     assert dm_actual > 0, "Propellant must have been consumed"
-    assert abs(dm_actual - dm_expected) < 1.0, (   # 1 kg tolerance
+    assert abs(dm_actual - dm_expected) < 1.0, (  # 1 kg tolerance
         f"Mass depletion {dm_actual:.3f} kg deviates from Tsiolkovsky "
         f"{dm_expected:.3f} kg by {abs(dm_actual - dm_expected):.3f} kg"
     )
@@ -400,7 +461,9 @@ def test_7dof_powered_arc_produces_finite_states():
         assert np.all(np.isfinite(s.position_km)), f"NaN/Inf position at JD {s.t_jd}"
         assert np.all(np.isfinite(s.velocity_km_s)), f"NaN/Inf velocity at JD {s.t_jd}"
         r_mag = float(np.linalg.norm(s.position_km))
-        assert 6550.0 < r_mag < 7200.0, f"Orbit radius {r_mag:.1f} km outside ISS LEO bounds"
+        assert (
+            6550.0 < r_mag < 7200.0
+        ), f"Orbit radius {r_mag:.1f} km outside ISS LEO bounds"
 
 
 def test_propagate_cowell_strict_raises_propagation_error_on_ivp_failure(monkeypatch):
@@ -459,12 +522,14 @@ def test_pc_cara_order_of_magnitude_high_speed_encounter():
 def test_estimate_covariance_exported():
     """``estimate_covariance`` is importable from the ``astra`` package."""
     from astra import estimate_covariance
+
     assert callable(estimate_covariance)
 
 
 def test_set_strict_mode_exported():
     """``set_strict_mode`` is importable from ``astra.config``."""
     from astra.config import set_strict_mode
+
     assert callable(set_strict_mode)
 
 

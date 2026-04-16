@@ -16,6 +16,7 @@ Hierarchy:
     └── SpacebookError        — COMSPOC Spacebook API failures
         └── SpacebookLookupError  — NORAD ID cannot be resolved to a COMSPOC GUID
 """
+
 from __future__ import annotations
 
 from typing import Any, Optional

@@ -7,14 +7,15 @@ data types — no other module defines dataclasses.
 
 Every dataclass uses ``frozen=True`` to enforce immutability.
 """
+
 from __future__ import annotations
+from typing import Any
 
 from dataclasses import dataclass
 from enum import Enum
 from typing import Optional, Union
 
 import numpy as np
-
 
 # ---------------------------------------------------------------------------
 # Type Aliases
@@ -65,14 +66,14 @@ def projected_area_m2(
     Returns:
         Projected area in m².
     """
-    l, w, h = dimensions_m
+    length, w, h = dimensions_m
     q = attitude_quaternion
 
     # Body-frame face normals and their areas
     faces = [
         (np.array([1.0, 0.0, 0.0]), w * h),  # +X face
-        (np.array([0.0, 1.0, 0.0]), l * h),  # +Y face
-        (np.array([0.0, 0.0, 1.0]), l * w),  # +Z face
+        (np.array([0.0, 1.0, 0.0]), length * h),  # +Y face
+        (np.array([0.0, 0.0, 1.0]), length * w),  # +Z face
     ]
 
     total_area = 0.0
@@ -167,6 +168,7 @@ class FiniteBurn:
             ValueError: If any parameter is physically invalid.
         """
         import numpy as _np
+
         if self.duration_s <= 0.0:
             raise ValueError(
                 f"FiniteBurn.duration_s must be strictly positive, got {self.duration_s}."
@@ -191,6 +193,7 @@ class FiniteBurn:
 # SatelliteTLE
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class SatelliteTLE:
     """Parsed Two-Line Element set for a single orbital object.
@@ -206,13 +209,17 @@ class SatelliteTLE:
     line2: str
     epoch_jd: float
     object_type: str
-    classification_flag: str = "U"   # 'U'=Unclassified, 'C'=Classified, 'S'=Secret
-                                      # NOTE: This is a security classification, NOT an object type.
-                                      # object_type requires separate SATCAT enrichment.
-    rcs_m2: Optional[float] = None  # Radar Cross Section in **m²**. Required for high-fidelity SRP/drag.
+    classification_flag: str = "U"  # 'U'=Unclassified, 'C'=Classified, 'S'=Secret
+    # NOTE: This is a security classification, NOT an object type.
+    # object_type requires separate SATCAT enrichment.
+    rcs_m2: Optional[float] = (
+        None  # Radar Cross Section in **m²**. Required for high-fidelity SRP/drag.
+    )
     radius_m: Optional[float] = None
     dimensions_m: Optional[tuple[float, float, float]] = None  # (length, width, height)
-    attitude_quaternion: Optional[tuple[float, float, float, float]] = None  # (w, x, y, z)
+    attitude_quaternion: Optional[tuple[float, float, float, float]] = (
+        None  # (w, x, y, z)
+    )
     attitude_mode: str = "TUMBLING"  # Options: "NADIR", "TUMBLING", "INERTIAL"
 
     @classmethod
@@ -234,12 +241,14 @@ class SatelliteTLE:
             norad_id = line1[2:7].strip() if len(line1) >= 7 else ""
             name = f"NORAD-{norad_id}" if norad_id else "Unknown"
         from astra.tle import parse_tle
+
         return parse_tle(name, line1, line2)
 
 
 # ---------------------------------------------------------------------------
 # SatelliteOMM
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class SatelliteOMM:
@@ -269,11 +278,13 @@ class SatelliteOMM:
     mean_motion_dot: float = 0.0
     mean_motion_ddot: float = 0.0
     rcs_m2: Optional[float] = None  # Radar Cross Section in **m²**.
-    mass_kg: Optional[float] = None  # Spacecraft mass in **kg**. Mandatory for powered maneuvers.
+    mass_kg: Optional[float] = (
+        None  # Spacecraft mass in **kg**. Mandatory for powered maneuvers.
+    )
     cd_area_over_mass: Optional[float] = None
 
     @classmethod
-    def from_dict(cls, record: dict) -> "SatelliteOMM":
+    def from_dict(cls, record: dict[str, Any]) -> "SatelliteOMM":
         """Construct a ``SatelliteOMM`` from a raw OMM JSON dictionary.
 
         Convenience factory — delegates to ``astra.omm.parse_omm_record()``
@@ -292,6 +303,7 @@ class SatelliteOMM:
             sats = [astra.SatelliteOMM.from_dict(r) for r in records]
         """
         from astra.omm import parse_omm_record
+
         return parse_omm_record(record)
 
 
@@ -308,6 +320,7 @@ SatelliteState = Union[SatelliteTLE, SatelliteOMM]
 # OrbitalState
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class OrbitalState:
     """Complete kinematic state of a single object at one instant.
@@ -318,7 +331,7 @@ class OrbitalState:
 
     norad_id: str
     t_jd: float
-    position_km: np.ndarray   # shape (3,), dtype float64, TEME, km
+    position_km: np.ndarray  # shape (3,), dtype float64, TEME, km
     velocity_km_s: np.ndarray  # shape (3,), dtype float64, TEME, km/s
     error_code: int
 
@@ -326,6 +339,7 @@ class OrbitalState:
 # ---------------------------------------------------------------------------
 # DebrisObject
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class DebrisObject:
@@ -370,6 +384,7 @@ class DebrisObject:
 # ConjunctionEvent
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class ConjunctionEvent:
     """Detected close-approach event between two orbital objects.
@@ -386,8 +401,8 @@ class ConjunctionEvent:
     relative_velocity_km_s: float
     collision_probability: Optional[float]  # None when no covariance available
     risk_level: str
-    position_a_km: np.ndarray   # shape (3,), TEME, km
-    position_b_km: np.ndarray   # shape (3,), TEME, km
+    position_a_km: np.ndarray  # shape (3,), TEME, km
+    position_b_km: np.ndarray  # shape (3,), TEME, km
     covariance_source: str = "SYNTHETIC"  # "CDM", "STM", "SYNTHETIC", or "UNAVAILABLE"
 
     @property
@@ -404,13 +419,17 @@ class ConjunctionEvent:
             Pc in [0.0, 1.0] when covariance data was available, or
             ``float('nan')`` when ``collision_probability`` is ``None``.
         """
-        import math
-        return float('nan') if self.collision_probability is None else self.collision_probability
+        return (
+            float("nan")
+            if self.collision_probability is None
+            else self.collision_probability
+        )
 
 
 # ---------------------------------------------------------------------------
 # Observer
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class Observer:
@@ -429,6 +448,7 @@ class Observer:
 # ---------------------------------------------------------------------------
 # PassEvent
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class PassEvent:
@@ -453,6 +473,7 @@ class PassEvent:
 # FilterConfig
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class FilterConfig:
     """Filter parameters for the multi-stage debris filtering pipeline.
@@ -470,4 +491,6 @@ class FilterConfig:
     t_start_jd: Optional[float] = None
     t_end_jd: Optional[float] = None
     object_types: Optional[tuple[str, ...]] = None
-    max_objects: Optional[int] = None  # Applied after other filters; keep first N survivors
+    max_objects: Optional[int] = (
+        None  # Applied after other filters; keep first N survivors
+    )
