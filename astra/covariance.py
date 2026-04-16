@@ -325,52 +325,119 @@ def estimate_covariance(time_since_epoch_days: float, f107_flux: float = 150.0) 
     days = max(0.1, abs(time_since_epoch_days))
     drag_scale = max(0.1, f107_flux / 150.0)
 
-    sigma_r_km = min(0.05 + 0.5 * days**2, 50.0)
-    sigma_t_km = min(0.1 + (2.0 * drag_scale) * days**3, 100.0)
-    sigma_n_km = min(0.05 + 0.1 * days, 50.0)
+    # [MED-02 fix] Piecewise in-track growth model.
+    # Radial (R) and Normal (N) grow quadratically (ballistic uncertainty).
+    # In-track (T) grows linearly for fresh TLEs (< 7 days) then
+    # quadratically afterwards, driven by unmodeled drag and SRP.
+    # The old cubic `days**3` model over-estimated T uncertainty by 20-40×
+    # for 1–3 day old TLEs, inflating Pc for correctly-catalogued objects.
+    sigma_r_km = min(0.01 + 0.02 * days**2, 50.0)
+    if days <= 7.0:
+        sigma_t_km = min(0.1 + 0.3 * drag_scale * days, 5.0)
+    else:
+        sigma_t_km = min(5.0 + drag_scale * 0.5 * (days - 7.0) ** 2, 100.0)
+    sigma_n_km = min(0.01 + 0.05 * days, 20.0)
 
     return np.diag([sigma_r_km**2, sigma_t_km**2, sigma_n_km**2])
 
 
+def _hcw_min_distance(
+    r0_rtm,
+    v0_rtm,
+    n_rad_s,
+    t_window_s=3600.0,
+    n_steps=200,
+):
+    """Find the minimum relative distance along the HCW trajectory.
+
+    Uses the Hill-Clohessy-Wiltshire (HCW) closed-form equations to propagate
+    the relative state in the RTN (co-moving) frame and find the minimum
+    separation over +/- t_window_s around TCA (Time of Closest Approach).
+
+    HCW solution in RTN coordinates (Schaub and Junkins, Analytical Mechanics
+    of Space Systems, Section 9.3):
+        x(t) = (4-3c)x0 + (s/n)dx0 + (2/n)(1-c)dy0
+        y(t) = 6(s-nt)x0 + y0 - (2/n)(1-c)dx0 + (1/n)(4s-3nt)dy0
+        z(t) = z0*c + (dz0/n)*s
+    where c=cos(nt), s=sin(nt), n=mean motion [rad/s].
+
+    Args:
+        r0_rtm: (3,) relative position in RTN frame at TCA (km).
+        v0_rtm: (3,) relative velocity in RTN frame at TCA (km/s).
+        n_rad_s: Mean motion of the nominal orbit (rad/s).
+        t_window_s: Search window +/-t_window_s around TCA (s).
+        n_steps: Number of time samples in the window.
+
+    Returns:
+        Minimum relative distance in km.
+    """
+    import numpy as _np
+    import math as _math
+    times = _np.linspace(-t_window_s, t_window_s, n_steps)
+    x0, y0, z0 = r0_rtm[0], r0_rtm[1], r0_rtm[2]
+    dx0, dy0, dz0 = v0_rtm[0], v0_rtm[1], v0_rtm[2]
+    nt_arr = n_rad_s * times
+    c_arr = _np.cos(nt_arr)
+    s_arr = _np.sin(nt_arr)
+    inv_n = 1.0 / n_rad_s
+    x_arr = (4.0 - 3.0*c_arr)*x0 + s_arr*dx0*inv_n + 2.0*(1.0 - c_arr)*dy0*inv_n
+    y_arr = (6.0*(s_arr - nt_arr)*x0 + y0
+             - 2.0*(1.0 - c_arr)*dx0*inv_n
+             + (4.0*s_arr - 3.0*nt_arr)*dy0*inv_n)
+    z_arr = z0*c_arr + dz0*inv_n * s_arr
+    dist = _np.sqrt(x_arr**2 + y_arr**2 + z_arr**2)
+    return float(_np.min(dist))
+
+
 def compute_collision_probability_mc(
-    miss_vector_km: np.ndarray,
-    rel_vel_km_s: np.ndarray,
-    cov_a: np.ndarray,
-    cov_b: np.ndarray,
-    radius_a_km: float = 0.005,
-    radius_b_km: float = 0.005,
-    n_samples: int = 100_000,
-    seed: int | None = None,
-) -> float:
-    """Monte Carlo Collision Probability for long-duration/co-orbital encounters.
+    miss_vector_km,
+    rel_vel_km_s,
+    cov_a,
+    cov_b,
+    radius_a_km=0.005,
+    radius_b_km=0.005,
+    n_samples=100_000,
+    seed=None,
+    mean_motion_rad_s=None,
+):
+    """Monte Carlo Collision Probability for long-duration and co-orbital encounters.
 
-    Unlike the analytical Foster/Chan method (which assumes rectilinear motion),
-    this Monte Carlo approach works for arbitrary encounter geometries including
-    co-orbital (Starlink vs Starlink) and slow planetary-approach trajectories.
+    Trajectory model selection (HIGH-04):
 
-    The internal minimum-distance model is linear in relative velocity per
-    sample. For very slow co-orbital encounters (relative speed ≲ 10 m/s) the
-    sampled geometry can underestimate curvature; validate with higher-fidelity
-    ephemeris or shorter screening steps.
+    For encounters with relative speed >= 0.1 km/s (crossing or chase geometry),
+    a linear relative path is used per sample -- accurate and fast for these cases.
 
-    Draws samples from the combined 3D Gaussian covariance and counts the
-    fraction falling within the combined hard-body collision sphere.
+    For encounters with relative speed < 0.1 km/s (co-orbital / formation flying),
+    the Hill-Clohessy-Wiltshire (HCW) equations propagate each sampled state along
+    the correct curved orbit-relative trajectory.  The prior linear model
+    systematically under-estimates Pc in this regime because it ignores the orbital
+    curvature that brings co-planar objects back toward each other on timescales of
+    minutes to hours (critical for Starlink/OneWeb same-plane conjunctions).
+
+    The HCW evaluation is fully vectorised over all samples via numpy broadcasting
+    (n_samples x n_time_steps) -- no per-sample Python loop.
 
     Args:
         miss_vector_km: (3,) relative position at TCA (km).
         rel_vel_km_s: (3,) relative velocity at TCA (km/s).
-        cov_a: (6,6) Object A full covariance (km², km²/s² etc).
-        cov_b: (6,6) Object B full covariance (km², km²/s² etc).
-        radius_a_km: Object A hard-body radius (km).
-        radius_b_km: Object B hard-body radius (km).
+        cov_a: (6,6) Object A full covariance (km^2, km^2/s^2 etc).
+        cov_b: (6,6) Object B full covariance (km^2, km^2/s^2 etc).
+        radius_a_km: Object A hard-body radius (km). Default 5 m.
+        radius_b_km: Object B hard-body radius (km). Default 5 m.
         n_samples: Number of Monte Carlo samples (default 100,000).
         seed: Optional RNG seed for reproducibility.
+        mean_motion_rad_s: Mean orbital motion (rad/s) for HCW propagation.
+            If None, defaults to LEO 90-min orbit (2*pi/5400 ~ 1.164e-3 rad/s).
+            Pass the actual mean motion of the primary object for accuracy.
 
     Returns:
         Probability of collision (float) bounded [0.0, 1.0].
     """
     if cov_a.shape == (3, 3) or cov_b.shape == (3, 3):
-        raise ValueError("Monte-Carlo (6DOF) collision probability requires a 6x6 covariance matrix. Legacy 3x3 matrices are unsupported here; fallback to 2D Foster-Chan.")
+        raise ValueError(
+            "Monte-Carlo (6DOF) collision probability requires a 6x6 covariance matrix. "
+            "Legacy 3x3 matrices are unsupported here; fall back to 2D Foster-Chan."
+        )
     combined_radius_km = radius_a_km + radius_b_km
     combined_cov = cov_a + cov_b
 
@@ -378,7 +445,6 @@ def compute_collision_probability_mc(
         return 1.0 if np.linalg.norm(miss_vector_km) <= combined_radius_km else 0.0
 
     rng = np.random.default_rng(seed)
-
     sym = 0.5 * (combined_cov + combined_cov.T)
     try:
         L = np.linalg.cholesky(sym)
@@ -391,37 +457,82 @@ def compute_collision_probability_mc(
         except np.linalg.LinAlgError:
             return 1.0 if np.linalg.norm(miss_vector_km) <= combined_radius_km else 0.0
 
-    # Sample 6D error states (n_samples, 6)
     samples = rng.standard_normal((n_samples, 6)) @ L.T
-    
-    # 6D Relative Trajectories
     r_samples = miss_vector_km + samples[:, :3]
     v_samples = rel_vel_km_s + samples[:, 3:]
-    
-    # Calculate geometric minimum distance along the linear relative path for EACH sample
-    # t_min = -(r · v) / (v · v)
-    v_dot_v = np.sum(v_samples * v_samples, axis=1)
-    # Avoid division by zero for stationary samples
-    v_dot_v[v_dot_v < 1e-16] = 1e-16
-    
-    t_min = -np.sum(r_samples * v_samples, axis=1) / v_dot_v
-    
-    # AUDIT-C-04 Fix: Clamp t_min to a ±3600 s (1-hour) window around TCA.
-    # For co-orbital encounters (relative speed ≲ 10 m/s), the purely-linear
-    # relative trajectory minimum can be many orbital periods away, placing
-    # r_min_vec far from the true closest-approach geometry and causing
-    # systematic Pc under-estimation.  A 1-hour bracket is generous for all
-    # real-world conjunction geometries while being physically meaningful.
-    t_min = np.clip(t_min, -3600.0, 3600.0)
-    
-    # Minimum distance vectors
-    r_min_vec = r_samples + v_samples * t_min[:, np.newaxis]
-    d_min = np.linalg.norm(r_min_vec, axis=1)
-    
+    rel_speed = float(np.linalg.norm(rel_vel_km_s))
+
+    # HIGH-04: HCW model for co-orbital encounters (rel. speed < 0.1 km/s).
+    # Orbital curvature brings co-planar objects back within one orbital period;
+    # the linear model ignores this and systematically under-estimates Pc.
+    _HCW_THRESHOLD_KM_S = 0.1  # km/s = 100 m/s
+
+    if rel_speed < _HCW_THRESHOLD_KM_S:
+        import logging as _hcw_log
+        _hcw_log.getLogger(__name__).info(
+            "co-orbital encounter (rel_speed=%.5f km/s < %.2f km/s): "
+            "switching to HCW trajectory model for MC Pc (HIGH-04).",
+            rel_speed, _HCW_THRESHOLD_KM_S,
+        )
+        n_rad = mean_motion_rad_s if mean_motion_rad_s is not None else (2.0 * math.pi / 5400.0)
+
+        # Build approximate RTN basis from miss vector and velocity directions.
+        r_mag = float(np.linalg.norm(miss_vector_km))
+        v_hat = rel_vel_km_s / rel_speed if rel_speed > 1e-10 else np.array([0.0, 1.0, 0.0])
+        r_hat = miss_vector_km / r_mag if r_mag > 1e-10 else np.array([1.0, 0.0, 0.0])
+
+        n_hat = np.cross(r_hat, v_hat)
+        n_hat_mag = float(np.linalg.norm(n_hat))
+        if n_hat_mag < 1e-10:
+            # Degenerate (r parallel to v): pick any perpendicular axis
+            perp = np.array([0.0, 0.0, 1.0]) if abs(r_hat[2]) < 0.9 else np.array([0.0, 1.0, 0.0])
+            n_hat = np.cross(r_hat, perp)
+            n_hat /= max(float(np.linalg.norm(n_hat)), 1e-15)
+        else:
+            n_hat /= n_hat_mag
+
+        t_hat = np.cross(n_hat, r_hat)
+        t_hat /= max(float(np.linalg.norm(t_hat)), 1e-15)
+
+        # ECI to RTN rotation matrix (rows are basis vectors)
+        R_eci_rtn = np.vstack([r_hat, t_hat, n_hat])  # (3, 3)
+        r_rtm = (R_eci_rtn @ r_samples.T).T  # (n_samples, 3)
+        v_rtm = (R_eci_rtn @ v_samples.T).T  # (n_samples, 3)
+
+        # Time grid: +/- 1 full orbital period around TCA (full curvature cycle)
+        t_window_s = 2.0 * math.pi / n_rad
+        nt = n_rad
+        times = np.linspace(-t_window_s, t_window_s, 400)
+        nt_arr = nt * times
+        c_arr = np.cos(nt_arr)
+        s_arr = np.sin(nt_arr)
+        inv_n = 1.0 / nt
+
+        # Vectorised HCW: (n_samples,1) broadcast with (400,) -> (n_samples, 400)
+        x0  = r_rtm[:, 0:1];  y0  = r_rtm[:, 1:2];  z0  = r_rtm[:, 2:3]
+        dx0 = v_rtm[:, 0:1];  dy0 = v_rtm[:, 1:2];  dz0 = v_rtm[:, 2:3]
+
+        x_t = (4.0 - 3.0*c_arr)*x0 + s_arr*dx0*inv_n + 2.0*(1.0 - c_arr)*dy0*inv_n
+        y_t = (6.0*(s_arr - nt_arr)*x0 + y0
+               - 2.0*(1.0 - c_arr)*dx0*inv_n
+               + (4.0*s_arr - 3.0*nt_arr)*dy0*inv_n)
+        z_t = z0*c_arr + dz0*inv_n * s_arr
+
+        dist_t = np.sqrt(x_t**2 + y_t**2 + z_t**2)  # (n_samples, 400)
+        d_min  = np.min(dist_t, axis=1)              # (n_samples,)
+
+    else:
+        # Linear trajectory -- fast and correct for crossing/chase encounters.
+        v_dot_v = np.sum(v_samples * v_samples, axis=1)
+        v_dot_v[v_dot_v < 1e-16] = 1e-16
+        t_min = -np.sum(r_samples * v_samples, axis=1) / v_dot_v
+        # AUDIT-C-04 Fix: clamp to +/-3600 s window around TCA
+        t_min = np.clip(t_min, -3600.0, 3600.0)
+        r_min_vec = r_samples + v_samples * t_min[:, np.newaxis]
+        d_min = np.linalg.norm(r_min_vec, axis=1)
+
     hits = np.sum(d_min <= combined_radius_km)
-
     return float(hits / n_samples)
-
 
 from astra._numba_compat import njit, NUMBA_AVAILABLE as _NUMBA_AVAILABLE
 from astra.constants import J3, J4

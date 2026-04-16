@@ -49,9 +49,14 @@ from __future__ import annotations
 
 import re
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Any
 
 import numpy as np
+
+try:
+    import defusedxml.ElementTree as ET  # blocks XXE / Billion-Laughs attacks
+except ImportError:  # pragma: no cover  — defusedxml is a declared runtime dep
+    import xml.etree.ElementTree as ET  # type: ignore[no-redef]
 
 from astra.errors import AstraError
 from astra.log import get_logger
@@ -297,3 +302,192 @@ def parse_stk_ephemeris(text: str) -> list[NumericalState]:
         (states[-1].t_jd - states[0].t_jd) * 24.0 if len(states) > 1 else 0.0,
     )
     return states
+
+
+def parse_ocm(text: str) -> list[NumericalState]:
+    """Unified entry point for parsing CCSDS OCM (XML or KVN).
+    
+    Automatically detects the format based on the first non-empty line.
+    """
+    clean_text = text.lstrip()
+    if not clean_text:
+        raise AstraError("OCM text is empty.")
+    
+    if clean_text.startswith("<"):
+        return parse_ocm_xml(text)
+    return parse_ocm_kvn(text)
+
+
+def parse_ocm_xml(xml_text: str) -> list[NumericalState]:
+    """Parse a CCSDS OCM XML message into ASTRA NumericalState objects.
+    
+    Supports the OCM standard (CCSDS 502.0-B-2), including state vectors
+    and metadata for coordinate frames and units.
+
+    Args:
+        xml_text: Raw XML content of the OCM.
+
+    Returns:
+        List of NumericalState objects.
+    """
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError as exc:
+        raise AstraError(f"OCM XML Parsing failed: {exc}")
+
+    # Namespaces are common in CCSDS XML
+    ns = {"ndm": "urn:ccsds:schema:ndmxml"}
+    
+    # Locate body/segment
+    segment = root.find(".//segment", ns)
+    if segment is None:
+        # Some OCMs don't use the NDM wrapper namespace
+        segment = root.find(".//segment")
+        if segment is None:
+            raise AstraError("OCM segment not found in XML.")
+
+    metadata = segment.find("metadata")
+    data = segment.find("data")
+    
+    if metadata is None or data is None:
+        raise AstraError("OCM metadata or data block missing.")
+
+    # Time parsing (ISO 8601)
+    def _parse_iso(t_str: str) -> float:
+        # ASTRA standard Julian Date conversion
+        from astra.jdutil import datetime_utc_to_jd
+        dt = datetime.fromisoformat(t_str.replace("Z", "+00:00"))
+        return float(datetime_utc_to_jd(dt))
+
+    states: list[NumericalState] = []
+    
+    # State Vector Block
+    state_vectors = data.findall(".//stateVector")
+    for sv in state_vectors:
+        epoch_str = sv.findtext("EPOCH")
+        t_jd = _parse_iso(epoch_str)
+        
+        # Position (km)
+        x = float(sv.findtext("X"))
+        y = float(sv.findtext("Y"))
+        z = float(sv.findtext("Z"))
+        
+        # Velocity (km/s)
+        vx = float(sv.findtext("X_DOT"))
+        vy = float(sv.findtext("Y_DOT"))
+        vz = float(sv.findtext("Z_DOT"))
+        
+        states.append(
+            NumericalState(
+                t_jd=t_jd,
+                position_km=np.array([x, y, z]),
+                velocity_km_s=np.array([vx, vy, vz])
+            )
+        )
+        
+    states.sort(key=lambda s: s.t_jd)
+    logger.info("parse_ocm_xml: extracted %d states from OCM.", len(states))
+    return states
+
+
+def export_ocm_xml(states: list[NumericalState], object_name: str = "ASTRA_SAT") -> str:
+    """Export ASTRA orbit states to a CCSDS OCM XML string.
+    
+    Args:
+        states: List of state vectors to export.
+        object_name: Identifier for the satellite.
+
+    Returns:
+        XML string in CCSDS OCM format.
+    """
+    from astra.jdutil import jd_utc_to_datetime
+
+    root = ET.Element("ocm", {"id": "ASTRA_OCM_EXPORT", "version": "2.0"})
+    header = ET.SubElement(root, "header")
+    ET.SubElement(header, "CREATION_DATE").text = datetime.now(timezone.utc).isoformat()
+    ET.SubElement(header, "ORIGINATOR").text = "ASTRA_ENGINE"
+    
+    body = ET.SubElement(root, "body")
+    segment = ET.SubElement(body, "segment")
+    
+    metadata = ET.SubElement(segment, "metadata")
+    ET.SubElement(metadata, "OBJECT_NAME").text = object_name
+    ET.SubElement(metadata, "CENTER_NAME").text = "EARTH"
+    ET.SubElement(metadata, "TIME_SYSTEM").text = "UTC"
+    ET.SubElement(metadata, "REF_FRAME").text = "TEME"
+    
+    data = ET.SubElement(segment, "data")
+    save_data = ET.SubElement(data, "stateVector") # Simplified wrapper
+    
+    for s in states:
+        sv = ET.SubElement(data, "stateVector")
+        dt = jd_utc_to_datetime(s.t_jd)
+        ET.SubElement(sv, "EPOCH").text = dt.isoformat()  # type: ignore[union-attr]
+        ET.SubElement(sv, "X").text = f"{s.position_km[0]:.6f}"
+        ET.SubElement(sv, "Y").text = f"{s.position_km[1]:.6f}"
+        ET.SubElement(sv, "Z").text = f"{s.position_km[2]:.6f}"
+        ET.SubElement(sv, "X_DOT").text = f"{s.velocity_km_s[0]:.9f}"
+        ET.SubElement(sv, "Y_DOT").text = f"{s.velocity_km_s[1]:.9f}"
+        ET.SubElement(sv, "Z_DOT").text = f"{s.velocity_km_s[2]:.9f}"
+        
+    return ET.tostring(root, encoding="unicode")
+
+
+def parse_ocm_kvn(kvn_text: str) -> list[NumericalState]:
+    """Parse a CCSDS OCM KVN (Key-Value Notation) message.
+    
+    Format defined in CCSDS 502.0-B-2. Processes one or more segments
+    containing metadata and state vectors.
+    """
+    from astra.jdutil import datetime_utc_to_jd
+    
+    lines = kvn_text.splitlines()
+    states: list[NumericalState] = []
+    
+    current_state_data: dict[str, Any] = {}
+    
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("COMMENT"):
+            continue
+            
+        if "=" not in line:
+            continue
+            
+        key, val = [x.strip() for x in line.split("=", 1)]
+        key = key.upper()
+        
+        if key == "EPOCH":
+            # If we have a pending state, save it
+            if "X" in current_state_data:
+                states.append(_build_state_from_kvn(current_state_data))
+            current_state_data = {"EPOCH": val}
+        elif key in ("X", "Y", "Z", "X_DOT", "Y_DOT", "Z_DOT"):
+            current_state_data[key] = float(val)
+        elif key == "REF_FRAME":
+            current_state_data["REF_FRAME"] = val
+
+    # Final state
+    if "X" in current_state_data:
+        states.append(_build_state_from_kvn(current_state_data))
+        
+    states.sort(key=lambda s: s.t_jd)
+    return states
+
+
+def _build_state_from_kvn(data: dict[str, Any]) -> NumericalState:
+    """Helper to convert KVN dict to NumericalState."""
+    from astra.jdutil import datetime_utc_to_jd
+    
+    # Handle CCSDS day-of-year format (YYYY-DOY...) or standard ISO
+    t_str = data["EPOCH"]
+    if "-" in t_str and "T" not in t_str: # Simple hyphenated ISO
+         dt = datetime.strptime(t_str, "%Y-%m-%d %H:%M:%S.%f")
+    else:
+         dt = datetime.fromisoformat(t_str.replace("Z", "+00:00"))
+         
+    return NumericalState(
+        t_jd=float(datetime_utc_to_jd(dt)),
+        position_km=np.array([data["X"], data[ "Y"], data["Z"]]),
+        velocity_km_s=np.array([data["X_DOT"], data["Y_DOT"], data["Z_DOT"]])
+    )

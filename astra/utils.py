@@ -151,10 +151,11 @@ def orbital_elements(source: Union[str, np.ndarray, 'OrbitalState', 'NumericalSt
     # 2. Cartesian state path (High-fidelity)
     r = None
     vel = None
-    
-    if hasattr(source, 'position_km'):
-        r = np.asarray(source.position_km)
-        vel = np.asarray(source.velocity_km_s)
+
+    if hasattr(source, 'position_km') and hasattr(source, 'velocity_km_s'):
+        # OrbitalState or NumericalState — both carry position_km and velocity_km_s
+        r = np.asarray(source.position_km)     # type: ignore[union-attr]
+        vel = np.asarray(source.velocity_km_s)  # type: ignore[union-attr]
     elif isinstance(source, np.ndarray) and v is not None:
         r = source
         vel = v

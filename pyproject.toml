@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "astra-core-engine"
-version = "3.4.0"
+version = "3.5.0"
 authors = [
   { name="Ishan Tare" },
 ]
@@ -44,7 +44,7 @@ dependencies = [
 
 [project.optional-dependencies]
 viz = ["plotly>=5.18.0"]
-test = ["pytest>=8.0.0", "plotly>=5.18.0"]
+test = ["pytest>=8.0.0", "plotly>=5.18.0", "scipy-stubs", "types-requests"]
 
 [tool.setuptools.packages.find]
 where = ["."]

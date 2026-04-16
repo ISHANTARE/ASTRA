@@ -19,12 +19,16 @@ def test_drag_altitude_initialization():
     t_jd = 2451545.0
     empty_coeffs = np.zeros((1, 2, 3))
     
-    # Static density vs actual reference density check
+    # Static density vs actual reference density check.
+    # Signature now has 22 params: the 4 space-weather args (f107_obs, f107_adj,
+    # ap_daily, hf_atmosphere) were added between drag_ref_alt_km and include_third_body
+    # to sync the Python and Numba paths (MSIS Sync Fix).
     a_nb = _acceleration_njit(
         t_jd, r, v,
         True, 2.2, 10.0, 1000.0, 1e-12, 50.0, 621.0,   # drag_ref_alt_km = 621 km
-        False, t_jd, 1.0, empty_coeffs, empty_coeffs,  # 3rd body off
-        False, 1.5, True,                              # SRP off
+        150.0, 150.0, 15.0, False,                       # f107_obs, f107_adj, ap_daily, hf_atm
+        False, t_jd, 1.0, empty_coeffs, empty_coeffs,   # 3rd body off
+        False, 1.5, True,                                # SRP off
     )
     assert np.all(np.isfinite(a_nb))
 

@@ -52,7 +52,9 @@ def _build_rtn_matrix_njit(pos: np.ndarray, vel: np.ndarray) -> np.ndarray:
     mat[2, 0], mat[2, 1], mat[2, 2] = n_unit[0], n_unit[1], n_unit[2]
     return mat
 
-def get_eop_correction(times_jd: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def get_eop_correction(
+    times_jd: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray] | tuple[float, float, float]:
     """Fetch Spacebook Earth Orientation Parameters for a set of epochs.
 
     DEF-006: Batches calls by calendar day rather than per-timestep.
@@ -126,6 +128,9 @@ def teme_to_ecef(r_teme: np.ndarray, times_jd: np.ndarray, use_spacebook_eop: bo
     ts = _dp._skyfield_ts
     
     # 1. TEME -> GCRS (Precession / Nutation is native and identical to both)
+    _dp._ensure_skyfield()
+    ts = _dp._skyfield_ts
+    assert ts is not None, "_ensure_skyfield() failed to initialise Skyfield timescale"
     t = ts.tt_jd(times_jd)
     
     R_teme_gcrs = np.transpose(TEME.rotation_at(t), axes=(1, 0, 2)) if hasattr(t, 'shape') else np.transpose(TEME.rotation_at(t))
@@ -162,10 +167,43 @@ def teme_to_ecef(r_teme: np.ndarray, times_jd: np.ndarray, use_spacebook_eop: bo
     d_dut1 = dut1_sb - dut1_skyfield
     d_xp_rc = (xp_sb - xp_sky) * (np.pi / (180.0 * 3600.0))  # arcsec to rad
     d_yp_rc = (yp_sb - yp_sky) * (np.pi / (180.0 * 3600.0))
+
+    # [HIGH-06 fix] EOP sanity clamp: reject physically implausible deltas that
+    # indicate stale, corrupt, or unit-mismatched Spacebook EOP data.
+    # Limits: |ΔUT1| ≤ 1.0 s (IERS spec bound), |Δxp|/|Δyp| ≤ 0.01 rad (~2000 arcsec).
+    import logging as _frames_log
+    _flog = _frames_log.getLogger(__name__)
+    # [FIX] Define omega_earth BEFORE it is referenced in _MAX_THETA below.
+    # Previously this constant was defined at line ~199 (after the clamp section),
+    # causing an UnboundLocalError whenever the EOP correction branch executed.
+    omega_earth = 7.292115146706979e-5  # rad/s  — IAU/IERS 2010 Earth rotation rate
+    _MAX_DUT1 = 1.0       # seconds — IERS hard limit for UT1-UTC
+    _MAX_PM_RAD = 0.01    # radians ≈ 2062 arcsec — well beyond any observed value
+    _MAX_THETA = _MAX_DUT1 * omega_earth   # corresponding phase limit
+
+    if np.any(np.abs(d_dut1) > _MAX_DUT1):
+        _flog.warning(
+            "EOP anomaly: |Δ-DUT1|=%.4f s exceeds %.1f s limit — clamping. "
+            "Check Spacebook EOP data freshness.",
+            float(np.max(np.abs(d_dut1))), _MAX_DUT1,
+        )
+        d_dut1 = np.clip(d_dut1, -_MAX_DUT1, _MAX_DUT1)
+
+    if np.any(np.abs(d_xp_rc) > _MAX_PM_RAD):
+        _flog.warning(
+            "EOP anomaly: |Δxp|=%.4e rad exceeds %.4e rad limit — clamping.",
+            float(np.max(np.abs(d_xp_rc))), _MAX_PM_RAD,
+        )
+        d_xp_rc = np.clip(d_xp_rc, -_MAX_PM_RAD, _MAX_PM_RAD)
+
+    if np.any(np.abs(d_yp_rc) > _MAX_PM_RAD):
+        _flog.warning(
+            "EOP anomaly: |Δyp|=%.4e rad exceeds %.4e rad limit — clamping.",
+            float(np.max(np.abs(d_yp_rc))), _MAX_PM_RAD,
+        )
+        d_yp_rc = np.clip(d_yp_rc, -_MAX_PM_RAD, _MAX_PM_RAD)
     
-    # Earth rotation phase delta
-    # Earth angular velocity = ~ 7.292115e-5 rad/s
-    omega_earth = 7.292115146706979e-5
+    # Earth rotation phase delta — omega_earth already defined above.
     d_theta = d_dut1 * omega_earth
     
     # Apply correcting rotational approximations

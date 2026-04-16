@@ -17,6 +17,8 @@ SIMULATION_STEPS: int = 288  # 24 * 60 / 5
 # ---------------------------------------------------------------------------
 # Earth parameters
 # ---------------------------------------------------------------------------
+# Mean spherical radius — for astrodynamics use EARTH_EQUATORIAL_RADIUS_KM (WGS84).
+# Using this where Re (equatorial) is expected introduces a ~7 km altitude error.
 EARTH_RADIUS_KM: float = 6371.0
 EARTH_EQUATORIAL_RADIUS_KM: float = 6378.137
 EARTH_MU_KM3_S2: float = 398600.4418  # gravitational parameter (km³/s²)
@@ -28,6 +30,12 @@ EARTH_OMEGA_RAD_S: float = 7.292115146706979e-5  # Earth sidereal rotation rate 
 J2: float = 1.08262668e-3
 J3: float = -2.53265649e-6
 J4: float = -1.61962159e-6
+# J5 and J6 — EGM96/WGS-84 unnormalized zonal harmonics.
+# Required for high-fidelity MEO/GEO/HEO long-horizon propagations.
+# Skipping J5 introduces a quantifiable secular nodal-rate error above ~20,000 km.
+# Reference: EGM96 coefficients (Lemoine et al. 1998, NASA/TP-1998-206861).
+J5: float = -2.27626414e-7
+J6: float = 5.40681239e-7
 
 # ---------------------------------------------------------------------------
 # Third-body gravitational parameters (km³/s²)
@@ -95,3 +103,19 @@ G0_STD: float = 9.80665  # Standard gravitational acceleration at sea level (m/s
 # ---------------------------------------------------------------------------
 AU_KM: float = 149597870.7           # Astronomical Unit (km) — IAU 2012
 SRP_P0_N_M2: float = 4.56e-6         # Solar radiation pressure at 1 AU (N/m²)
+
+# ---------------------------------------------------------------------------
+# Compile-time guard: ensure Numba inlined literals stay in sync [LOW-01]
+# The Numba JIT kernels in propagator.py cannot import this module at compile
+# time, so they inline numeric literals.  If SRP_P0_N_M2 or AU_KM are ever
+# updated here, the corresponding literals MUST be updated manually.
+# This assertion will catch the drift at Python import time.
+# ---------------------------------------------------------------------------
+assert SRP_P0_N_M2 == 4.56e-6, (
+    f"SRP_P0_N_M2 ({SRP_P0_N_M2}) does not match the Numba inlined literal "
+    "4.56e-6 in propagator.py._acceleration_njit. Update both in sync."
+)
+assert AU_KM == 149597870.7, (
+    f"AU_KM ({AU_KM}) does not match the Numba inlined literal "
+    "149597870.7 in propagator.py._acceleration_njit. Update both in sync."
+)

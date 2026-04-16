@@ -33,7 +33,6 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
-astra_social_dashboard.html
 
 # VS Code
 .vscode/
@@ -47,3 +46,4 @@ astra_social_dashboard.html
 # Sphinx: API stubs from docs/generate_api.py (rebuilt on RTD / local docs build)
 docs/apidoc/
 .gitnexus
+AGENTS.md

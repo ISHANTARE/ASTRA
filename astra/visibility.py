@@ -74,6 +74,7 @@ def visible_from_location(
 
     _dp._ensure_skyfield()
     ts = _dp._skyfield_ts
+    assert ts is not None
     t = ts.tt_jd(times_jd)
 
     from astra.frames import teme_to_ecef
@@ -101,6 +102,7 @@ def get_azimuths(
     """Companion function for azimuth processing using the same fast matrix algebra."""
     _dp._ensure_skyfield()
     ts = _dp._skyfield_ts
+    assert ts is not None
     t = ts.tt_jd(times_jd)
 
     from astra.frames import teme_to_ecef
@@ -149,6 +151,7 @@ def _find_exact_crossing(
     
     _dp._ensure_skyfield()
     ts = _dp._skyfield_ts
+    assert ts is not None
     # Cache precession-nutation rotation matrix which changes <0.00001 deg over the pass
     t_mid_initial = ts.tt_jd((t_low + t_high) / 2.0)
     R_teme_to_gcrs_cached = np.transpose(TEME.rotation_at(t_mid_initial))

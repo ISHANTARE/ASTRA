@@ -17,7 +17,7 @@ Example::
 """
 from __future__ import annotations
 
-from typing import Literal, Union
+from typing import Literal, Union, cast
 
 import requests
 
@@ -291,7 +291,7 @@ def fetch_celestrak_active_omm() -> list[SatelliteOMM]:
         # TLE — legacy format (default)
         satellites = astra.fetch_celestrak_active()
     """
-    return fetch_celestrak_active(format="json")
+    return cast(list[SatelliteOMM], fetch_celestrak_active(format="json"))
 
 
 def fetch_celestrak_group_omm(group: str) -> list[SatelliteOMM]:
@@ -318,7 +318,7 @@ def fetch_celestrak_group_omm(group: str) -> list[SatelliteOMM]:
         # TLE — legacy format (default)
         starlinks = astra.fetch_celestrak_group("starlink")
     """
-    return fetch_celestrak_group(group, format="json")
+    return cast(list[SatelliteOMM], fetch_celestrak_group(group, format="json"))
 
 
 def fetch_celestrak_comprehensive_omm() -> list[SatelliteOMM]:
@@ -341,4 +341,4 @@ def fetch_celestrak_comprehensive_omm() -> list[SatelliteOMM]:
         # TLE — legacy format
         catalog = astra.fetch_celestrak_comprehensive()
     """
-    return fetch_celestrak_comprehensive(format="json")
+    return cast(list[SatelliteOMM], fetch_celestrak_comprehensive(format="json"))

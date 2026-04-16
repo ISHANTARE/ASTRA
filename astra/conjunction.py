@@ -262,6 +262,7 @@ def find_conjunctions(
     coarse_threshold_km: float = 50.0,
     cov_map: Optional[dict[str, np.ndarray]] = None,
     vel_map: Optional[dict[str, np.ndarray]] = None,
+    max_workers: Optional[int] = None,
 ) -> list[ConjunctionEvent]:
     """Find highly precise conjunction events using cubic spline interpolation.
 
@@ -286,6 +287,11 @@ def find_conjunctions(
         TCA refinement uses a fixed-density scan bracket plus cubic splines.
         A Brent-style minimization on the spline could reduce samples for
         marginal geometries; the present scheme prioritizes robustness.
+
+        ``max_workers`` caps the thread-pool size.  Defaults to
+        ``min(cpu_count, 16)`` to prevent thread storms on large catalogs
+        (>10,000 NORAD IDs generate O(N²) candidate pairs).  Set explicitly
+        when running in a containerised or resource-constrained environment.
     """
     norad_ids = list(trajectories.keys())
     if not norad_ids:
@@ -427,6 +433,7 @@ def find_conjunctions(
         days_since_epoch_B = tca_jd - obj_B.source.epoch_jd
         
         _spacebook_cov_a = False
+        cov_A: Optional[np.ndarray] = None
         if cov_map and A in cov_map:
             cov_A = cov_map[A]
         else:
@@ -444,6 +451,7 @@ def find_conjunctions(
                     cov_A = None
 
         _spacebook_cov_b = False
+        cov_B: Optional[np.ndarray] = None
         if cov_map and B in cov_map:
             cov_B = cov_map[B]
         else:
@@ -528,13 +536,35 @@ def find_conjunctions(
             covariance_source=covariance_src
         )
 
-    # AUDIT-B-07 Fix: Use ThreadPoolExecutor as a context manager so that
-    # executor.shutdown() is guaranteed on all code paths, including exceptions
-    # raised before the old try/finally block was entered (e.g. during future
-    # submission for very large catalogs).
+    # [MED-06 fix] Throttle max_workers to prevent thread storms on large catalogs.
+    # os.cpu_count() can be 96+ on HPC nodes, creating >96 threads per call which
+    # degrades performance through context-switch overhead on I/O-bound Pc work.
+    #
+    # Resolution priority (highest → lowest):
+    #   1. Explicit ``max_workers`` argument passed by the caller.
+    #   2. ``ASTRA_MAX_WORKERS`` environment variable (for HPC / container deployments
+    #      where the operator needs fleet-wide scaling control without code changes).
+    #   3. ``min(cpu_count, 16)`` — safe conservative default.
+    _default_workers = min((os.cpu_count() or 4), 16)
+    _env_workers_str = os.environ.get("ASTRA_MAX_WORKERS", "").strip()
+    if _env_workers_str:
+        try:
+            _env_workers = int(_env_workers_str)
+            if _env_workers < 1:
+                raise ValueError("ASTRA_MAX_WORKERS must be >= 1")
+            _default_workers = _env_workers
+        except ValueError as exc:
+            logger.warning(
+                "Invalid ASTRA_MAX_WORKERS=%r — using default %d. (%s)",
+                _env_workers_str, _default_workers, exc,
+            )
+    _workers = max_workers if max_workers is not None else _default_workers
+    # [FIX] Initialise counters BEFORE the thread loop so they are always bound.
+    # Previously `skipped` and `strict_error` were only set inside the except branch,
+    # causing NameError (skipped) / UnboundLocalError (strict_error) when no pairs failed.
     skipped = 0
-    strict_error = None
-    with concurrent.futures.ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
+    strict_error: AstraError | None = None
+    with concurrent.futures.ThreadPoolExecutor(max_workers=_workers) as executor:
         futures = {executor.submit(evaluate_pair, pair): pair for pair in candidate_pairs_phase2}
         for future in concurrent.futures.as_completed(futures):
             pair = futures[future]
@@ -556,7 +586,7 @@ def find_conjunctions(
                 logger.warning(f"Conjunction pair {pair} skipped: {e!r}")
     # __exit__ of the context manager calls shutdown(wait=True) automatically
 
-    if strict_error:
+    if strict_error is not None:
         raise strict_error from None
 
     if skipped > 0:

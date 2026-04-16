@@ -31,20 +31,25 @@ def test_j4_python_and_numba_paths_agree():
     t_jd = 2451545.0
 
     # Python path (high-level, no drag, no 3rd body, no SRP)
+    # [MSIS SYNC] _acceleration now requires f107_obs, f107_adj, ap_daily, hf_atmosphere
+    # between drag_ref_alt_km and include_third_body.  Values are irrelevant here because
+    # use_drag=False and hf_atmosphere=False, so MSIS is never invoked.
     empty_coeffs = np.zeros((1, 2, 3))
     a_py = _acceleration(
         t_jd, r, v,
-        False, 2.2, 10.0, 1000.0, 0.0, 50.0, 400.0,    # use_drag=False, drag_ref_alt_km=400.0
-        False, t_jd, 1.0, empty_coeffs, empty_coeffs,  # 3rd body off
-        False, 1.5, True,                              # SRP off
+        False, 2.2, 10.0, 1000.0, 0.0, 50.0, 400.0,        # use_drag=False, drag_ref_alt_km=400.0
+        150.0, 150.0, 15.0, False,                           # f107_obs, f107_adj, ap_daily, hf_atm
+        False, t_jd, 1.0, empty_coeffs, empty_coeffs,       # 3rd body off
+        False, 1.5, True,                                    # SRP off
     )
 
     # Numba path: disable drag (rho=0), disable 3rd body, disable SRP
     a_nb = _acceleration_njit(
         t_jd, r, v,
-        False, 2.2, 10.0, 1000.0, 0.0, 50.0, 400.0,    # use_drag=False, drag_ref_alt_km=400.0
-        False, t_jd, 1.0, empty_coeffs, empty_coeffs,  # 3rd body off
-        False, 1.5, True,                              # SRP off
+        False, 2.2, 10.0, 1000.0, 0.0, 50.0, 400.0,        # use_drag=False, drag_ref_alt_km=400.0
+        150.0, 150.0, 15.0, False,                           # f107_obs, f107_adj, ap_daily, hf_atm
+        False, t_jd, 1.0, empty_coeffs, empty_coeffs,       # 3rd body off
+        False, 1.5, True,                                    # SRP off
     )
 
     np.testing.assert_allclose(

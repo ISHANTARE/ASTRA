@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import threading
-from typing import Any, Optional, Union
+from typing import Any, Optional, Union, cast
 
 from skyfield import timelib
 from skyfield.timelib import Time as SkyfieldTime
@@ -61,12 +61,12 @@ def _iso_to_datetime(iso_str: str) -> datetime:
 
 def _datetime_to_jd(dt: datetime) -> float:
     """Convert a UTC datetime to Julian Date."""
-    return datetime_utc_to_jd(dt)
+    return float(datetime_utc_to_jd(dt))
 
 
 def _jd_to_datetime(jd: float) -> datetime:
     """Convert a Julian Date to a UTC-aware datetime."""
-    return jd_utc_to_datetime(jd)
+    return cast(datetime, jd_utc_to_datetime(jd))
 
 
 def _datetime_to_iso(dt: datetime) -> str:
