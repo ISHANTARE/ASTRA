@@ -333,7 +333,7 @@ def _download_space_weather(data_dir: Optional[str] = None) -> str:
                 "Payload length exceeds 2MB limit. Rejecting as malicious."
             )
 
-    except Exception as e:
+    except (requests.RequestException, ValueError) as e:
         from astra import config
 
         if getattr(config, "ASTRA_STRICT_MODE", False):
@@ -459,7 +459,7 @@ def _background_sw_fetch(data_dir: Optional[str]) -> None:
         _parse_sw_csv(text)
         with _SW_LOCK:
             _sw_last_success = datetime.now(timezone.utc)
-    except Exception as exc:
+    except (requests.RequestException, ValueError) as exc:
         logger.warning(f"Background Space-Weather fetch failed: {exc}")
     finally:
         with _SW_LOCK:
@@ -557,7 +557,7 @@ def get_space_weather(
         try:
             # Spacebook handles its own background refreshing
             return spacebook.get_space_weather_sb(t_jd)  # type: ignore[no-any-return]
-        except Exception as exc:
+        except (ValueError, TypeError, ArithmeticError) as exc:
             logger.warning(
                 "Spacebook Space Weather lookup failed: %s. Falling back to CelesTrak...",
                 exc,
@@ -566,7 +566,7 @@ def get_space_weather(
     # ── 2. CelesTrak (Fallback) ──
     try:
         load_space_weather(data_dir)
-    except Exception as exc:
+    except (ValueError, requests.RequestException) as exc:
         from astra import config
 
         if getattr(config, "ASTRA_STRICT_MODE", False):

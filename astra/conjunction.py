@@ -154,7 +154,7 @@ def load_spacebook_covariance(norad_id: int) -> np.ndarray | None:
 
     try:
         stk_text = fetch_synthetic_covariance_stk(norad_id)
-    except Exception as exc:
+    except AstraError as exc:
         logger.warning(
             f"Failed to fetch Spacebook covariance for NORAD {norad_id}: {exc}"
         )
@@ -477,13 +477,13 @@ def find_conjunctions(
                 cov_A = load_spacebook_covariance(int(A))
                 if cov_A is not None:
                     _spacebook_cov_a = True
-            except Exception:
+            except (ValueError, TypeError, AstraError):
                 cov_A = None
             if cov_A is None:
                 try:
                     cov_rtn_A = estimate_covariance(days_since_epoch_A)
                     cov_A = rotate_covariance_rtn_to_eci(cov_rtn_A, pos_A, vel_A)
-                except Exception:
+                except (ValueError, ArithmeticError, AstraError):
                     cov_A = None
 
         _spacebook_cov_b = False
@@ -495,13 +495,13 @@ def find_conjunctions(
                 cov_B = load_spacebook_covariance(int(B))
                 if cov_B is not None:
                     _spacebook_cov_b = True
-            except Exception:
+            except (ValueError, TypeError, AstraError):
                 cov_B = None
             if cov_B is None:
                 try:
                     cov_rtn_B = estimate_covariance(days_since_epoch_B)
                     cov_B = rotate_covariance_rtn_to_eci(cov_rtn_B, pos_B, vel_B)
-                except Exception:
+                except (ValueError, ArithmeticError, AstraError):
                     cov_B = None
 
         miss_vector = pos_A - pos_B
@@ -623,7 +623,7 @@ def find_conjunctions(
                     result = future.result()
                     if result is not None:
                         events.append(result)
-                except Exception as e:
+                except (ValueError, TypeError, KeyError, IndexError, RuntimeError, AstraError, ArithmeticError) as e:
                     skipped += 1
                     from astra import config
 

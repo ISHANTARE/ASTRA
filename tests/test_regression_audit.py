@@ -489,7 +489,7 @@ def test_propagate_cowell_strict_raises_propagation_error_on_ivp_failure(monkeyp
             position_km=np.array([7000.0, 0.0, 0.0]),
             velocity_km_s=np.array([0.0, 7.5, 0.0]),
         )
-        with pytest.raises(PropagationError, match="Cowell coast integration failed"):
+        with pytest.raises(PropagationError, match="Cowell integration failed"):
             propagate_cowell(
                 state0,
                 duration_s=120.0,

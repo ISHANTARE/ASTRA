@@ -21,13 +21,26 @@ from typing import Any
 
 from typing import Literal, Union, cast
 
-import requests
-
 from astra.errors import AstraError
 from astra.models import SatelliteTLE, SatelliteOMM
 from astra.tle import load_tle_catalog
 from astra.log import get_logger
 from astra.version import __version__
+
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+_session = requests.Session()
+_retry = Retry(
+    total=3,
+    backoff_factor=1.0,
+    status_forcelist=(429, 500, 502, 503, 504),
+    allowed_methods=["HEAD", "GET", "OPTIONS"]
+)
+_adapter = HTTPAdapter(max_retries=_retry)
+_session.mount("http://", _adapter)
+_session.mount("https://", _adapter)
 
 logger = get_logger(__name__)
 
@@ -92,8 +105,8 @@ def _fetch_supplemental_raw(
 ) -> str:
     """Download raw text/JSON from CelesTrak supplemental sup-gp.php."""
     try:
-        response = requests.get(
-            _SUP_GP_URL, params=params, headers=_HEADERS, timeout=20.0
+        response = _session.get(
+            _SUP_GP_URL, params=params, headers=_HEADERS, timeout=20.0, verify=True
         )
         if _rate_limited(response):
             raise AstraError(
@@ -119,7 +132,7 @@ def _fetch_group_raw(group: str, fmt: FormatLiteral) -> str:
     sup_params = _supplemental_params(group, fmt)
 
     try:
-        response = requests.get(url, headers=_HEADERS, timeout=20.0)
+        response = _session.get(url, headers=_HEADERS, timeout=20.0, verify=True)
     except requests.RequestException as e:
         if sup_params is None:
             raise AstraError(

@@ -1497,6 +1497,7 @@ def _coast_derivative_njit(
     dy = np.empty(6)
     dy[0:3] = v
     dy[3:6] = a
+
     return dy
 
 
@@ -1599,6 +1600,7 @@ def _powered_derivative_njit(
     dy[0:3] = v
     dy[3:6] = a_total
     dy[6] = dm_dt
+
     return dy
 
 
@@ -1655,6 +1657,193 @@ def _compute_planetary_splines(
 # Segmented Cowell Integrator
 # ---------------------------------------------------------------------------
 
+
+@dataclass
+class _PropagatorContext:
+    t_jd0: float
+    duration_d: float
+    dt_out: float
+    include_third_body: bool
+    use_drag: bool
+    use_empirical_drag: bool
+    hf_atmosphere: bool
+    use_srp: bool
+    srp_cr: float
+    srp_use_shadow: bool
+    include_stm: bool
+    rtol: Optional[float]
+    atol: Any
+    coast_rtol: float
+    coast_atol: float
+    powered_rtol: float
+    powered_atol: float
+    sun_coeffs: np.ndarray
+    moon_coeffs: np.ndarray
+    drag_cd: float
+    drag_area_m2: float
+    current_P0: np.ndarray
+
+def _prepare_maneuvers(maneuvers: list[FiniteBurn], mass_kg: Optional[float]) -> tuple[list[FiniteBurn], float]:
+    from astra.maneuver import validate_burn, validate_burn_sequence
+    from astra import config
+    if mass_kg is None:
+        if config.ASTRA_STRICT_MODE:
+            from astra.errors import ManeuverError
+            raise ManeuverError(
+                "[ASTRA STRICT] Spacecraft mass_kg is required for powered maneuver propagation. "
+                "Set NumericalState.mass_kg or disable strict mode via astra.config.ASTRA_STRICT_MODE=False."
+            )
+        logger.warning(
+            "Maneuvers specified but initial mass_kg is None. "
+            "Defaulting to 1000.0 kg — drag and Tsiolkovsky accuracy are compromised. "
+            "Provide mass_kg in NumericalState for physical accuracy."
+        )
+        mass_kg = 1000.0
+
+    burns = sorted(maneuvers, key=lambda b: b.epoch_ignition_jd)
+    validate_burn_sequence(burns)
+    running_mass = mass_kg
+    for burn in burns:
+        validate_burn(burn, running_mass)
+        running_mass -= burn.mass_flow_rate_kg_s * burn.duration_s
+    return burns, mass_kg
+
+def _prepare_drag_environment(t_jd: float, drag_ref_alt_km: float, use_drag: bool, use_empirical_drag: bool) -> tuple[float, float, float, float, float]:
+    f107_obs, f107_adj, ap_daily = 150.0, 150.0, 15.0
+    drag_rho = 0.0
+    drag_H_km = 58.515
+    if use_drag:
+        if use_empirical_drag:
+            try:
+                from astra.data_pipeline import get_space_weather, atmospheric_density_empirical
+                f107_obs, f107_adj, ap_daily = get_space_weather(t_jd)
+                drag_rho = atmospheric_density_empirical(drag_ref_alt_km, f107_obs, f107_adj, ap_daily)
+                drag_H_km = _compute_scale_height(f107_obs, f107_adj, ap_daily)
+            except Exception:
+                drag_rho = 0.0
+        if drag_rho == 0.0:
+            from astra.constants import DRAG_REF_DENSITY_KG_M3, DRAG_SCALE_HEIGHT_KM
+            drag_rho = DRAG_REF_DENSITY_KG_M3
+            drag_H_km = DRAG_SCALE_HEIGHT_KM
+            drag_ref_alt_km = 400.0
+    return drag_rho, drag_H_km, f107_obs, f107_adj, ap_daily
+
+def _integrate_segment(
+    seg_start_s: float, seg_end_s: float, active_burn: Optional[FiniteBurn],
+    current_r: np.ndarray, current_v: np.ndarray, current_mass: Optional[float],
+    current_phi_flat: np.ndarray, ctx: _PropagatorContext,
+    drag_mass_kg: float, drag_rho: float, drag_H_km: float, drag_ref_alt_km: float,
+    f107_obs: float, f107_adj: float, ap_daily: float
+) -> tuple[bool, str, list[NumericalState], np.ndarray, np.ndarray, float, np.ndarray, float]:
+    
+    seg_duration = seg_end_s - seg_start_s
+    global_t_start = seg_start_s
+    global_t_end = seg_end_s
+
+    t_out = []
+    first_grid = math.ceil(global_t_start / ctx.dt_out) * ctx.dt_out
+    t = first_grid
+    while t <= global_t_end + 1e-9:
+        if t >= global_t_start - 1e-9:
+            t_out.append(t - global_t_start)
+        t += ctx.dt_out
+
+    if not t_out or t_out[0] > 1e-9:
+        t_out.insert(0, 0.0)
+    if t_out[-1] < seg_duration - 1e-9:
+        t_out.append(seg_duration)
+
+    t_eval = np.array(sorted(set(t_out)))
+    t_eval = t_eval[t_eval <= seg_duration + 1e-9]
+    
+    segment_states = []
+
+    if active_burn is not None and current_mass is not None:
+        y0 = np.concatenate([current_r, current_v, [current_mass]])
+        if ctx.include_stm:
+            y0 = np.concatenate([y0, current_phi_flat])
+
+        b_thrust = active_burn.thrust_N
+        b_isp = active_burn.isp_s
+        b_dir = np.array(active_burn.direction)
+        b_idx = 0 if active_burn.frame.value == "VNB" else 1
+
+        def deriv(t_sec: float, y: np.ndarray) -> np.ndarray:
+            return _powered_derivative_njit(  # type: ignore[no-any-return]
+                t_sec, y, ctx.t_jd0 + seg_start_s / SECONDS_PER_DAY,
+                ctx.use_drag, ctx.drag_cd, ctx.drag_area_m2, drag_mass_kg,
+                drag_rho, drag_H_km, drag_ref_alt_km, f107_obs, f107_adj, ap_daily,
+                ctx.hf_atmosphere, ctx.include_third_body, ctx.t_jd0, ctx.duration_d,
+                ctx.sun_coeffs, ctx.moon_coeffs, ctx.use_srp, ctx.srp_cr, ctx.srp_use_shadow,
+                b_thrust, b_isp, b_dir, b_idx
+            )
+            
+        atol_vec = np.array([1e-11]*3 + [1e-13]*3 + [1e-5])
+        if ctx.include_stm:
+            atol_vec = np.concatenate([atol_vec, np.full(36, 1e-12)])
+            
+        sol = solve_ivp(
+            deriv, t_span=(0.0, seg_duration), y0=y0, method="DOP853", t_eval=t_eval,
+            rtol=ctx.rtol if ctx.rtol is not None else ctx.powered_rtol,
+            atol=ctx.atol if ctx.atol is not None else atol_vec,
+        )
+        is_powered = True
+    else:
+        y0 = np.concatenate([current_r, current_v])
+        if ctx.include_stm:
+            y0 = np.concatenate([y0, current_phi_flat])
+
+        def deriv(t_sec: float, y: np.ndarray) -> np.ndarray:
+            return _coast_derivative_njit(  # type: ignore[no-any-return]
+                t_sec, y, ctx.t_jd0 + seg_start_s / SECONDS_PER_DAY,
+                ctx.use_drag, ctx.drag_cd, ctx.drag_area_m2, drag_mass_kg,
+                drag_rho, drag_H_km, drag_ref_alt_km, f107_obs, f107_adj, ap_daily,
+                ctx.hf_atmosphere, ctx.include_third_body, ctx.t_jd0, ctx.duration_d,
+                ctx.sun_coeffs, ctx.moon_coeffs, ctx.use_srp, ctx.srp_cr, ctx.srp_use_shadow
+            )
+            
+        atol_vec = np.array([ctx.coast_atol] * 6)
+        if ctx.include_stm:
+            atol_vec = np.concatenate([atol_vec, np.full(36, 1e-12)])
+            
+        sol = solve_ivp(
+            deriv, t_span=(0.0, seg_duration), y0=y0, method="DOP853", t_eval=t_eval,
+            rtol=ctx.rtol if ctx.rtol is not None else ctx.coast_rtol,
+            atol=ctx.atol if ctx.atol is not None else atol_vec,
+        )
+        is_powered = False
+
+    if sol.success and hasattr(sol, "y") and not np.all(np.isfinite(sol.y)):
+        sol.success = False
+        sol.message = "Numerical instability detected (NaN/Inf in state)"
+
+    if not sol.success:
+        return False, sol.message, [], current_r, current_v, current_mass or 0.0, current_phi_flat, drag_mass_kg
+
+    for i in range(len(sol.t)):
+        _cov_out = None
+        if ctx.include_stm:
+            phi_i = sol.y[7:43, i].reshape((6, 6)) if is_powered else sol.y[6:42, i].reshape((6, 6))
+            phi_rr = phi_i[:3, :3]
+            _cov_out = phi_rr @ ctx.current_P0 @ phi_rr.T
+            
+        segment_states.append(
+            NumericalState(
+                t_jd=ctx.t_jd0 + (seg_start_s + sol.t[i]) / SECONDS_PER_DAY,
+                position_km=sol.y[:3, i].copy(),
+                velocity_km_s=sol.y[3:6, i].copy(),
+                mass_kg=float(sol.y[6, i]) if is_powered else (current_mass or 0.0),
+                covariance_km2=_cov_out,
+            )
+        )
+
+    r_out = sol.y[:3, -1].copy()
+    v_out = sol.y[3:6, -1].copy()
+    m_out = float(sol.y[6, -1]) if is_powered else (current_mass or 0.0)
+    phi_out = sol.y[7:43, -1].copy() if is_powered and ctx.include_stm else (sol.y[6:42, -1].copy() if ctx.include_stm else current_phi_flat)
+    dm_out = m_out if is_powered else drag_mass_kg
+    
+    return True, "", segment_states, r_out, v_out, m_out, phi_out, dm_out
 
 def propagate_cowell(
     state0: NumericalState,
@@ -1726,389 +1915,89 @@ def propagate_cowell(
         If maneuvers are present, each state includes the current mass.
     """
     t_jd0 = state0.t_jd
+    if duration_s > 72 * 3600:
+        logger.warning(
+            f"Long-duration propagation ({duration_s/3600:.1f}h > 72h) detected. "
+            "SGP4/TLE accuracy degrades significantly beyond 3 days; result should be "
+            "treated as coarse screening only."
+        )
 
-    # Resolve initial mass
-    mass_kg = state0.mass_kg  # None if coast-only
-
-    # Validate and sort maneuvers by ignition time
     burns: list[FiniteBurn] = []
+    mass_kg = state0.mass_kg
     if maneuvers:
-        from astra.maneuver import validate_burn, validate_burn_sequence
+        burns, mass_kg = _prepare_maneuvers(maneuvers, mass_kg)
 
-        if mass_kg is None:
-            from astra import config
-
-            if config.ASTRA_STRICT_MODE:
-                from astra.errors import ManeuverError
-
-                raise ManeuverError(
-                    "[ASTRA STRICT] Spacecraft mass_kg is required for powered maneuver propagation. "
-                    "Set NumericalState.mass_kg or disable strict mode via astra.config.ASTRA_STRICT_MODE=False."
-                )
-            logger.warning(
-                "Maneuvers specified but initial mass_kg is None. "
-                "Defaulting to 1000.0 kg — drag and Tsiolkovsky accuracy are compromised. "
-                "Provide mass_kg in NumericalState for physical accuracy."
-            )
-            mass_kg = 1000.0
-
-        burns = sorted(maneuvers, key=lambda b: b.epoch_ignition_jd)
-        validate_burn_sequence(burns)
-
-        # Validate each burn
-        running_mass = mass_kg
-        for burn in burns:
-            validate_burn(burn, running_mass)
-            running_mass -= burn.mass_flow_rate_kg_s * burn.duration_s
-
-    # Build timeline segments
-    # Each segment: (t_start_s, t_end_s, burn_or_None)
     segments = _build_segments(t_jd0, duration_s, burns)
 
-    # Pre-Compute Planetary Splines (Chebyshev Polynomials)
     if include_third_body:
-        sun_coeffs, moon_coeffs, duration_d = _compute_planetary_splines(
-            t_jd0, duration_s, use_de
-        )
+        sun_coeffs, moon_coeffs, duration_d = _compute_planetary_splines(t_jd0, duration_s, use_de)
     else:
-        # AUDIT-D-01 Fix: Even when disabled, Numba JIT needs a strictly 3D array
-        # signature to compile the _eval_cheb_3d_njit piece-wise lookup.
         sun_coeffs = np.zeros((1, 1, 3))
         moon_coeffs = np.zeros((1, 1, 3))
         duration_d = duration_s / 86400.0
 
-    # Space weather once per propagation for empirical drag (rho_ref, scale height).
     use_drag = drag_config is not None
     drag_cd = drag_config.cd if drag_config else 0.0
     drag_area_m2 = drag_config.area_m2 if drag_config else 0.0
     drag_mass_kg = drag_config.mass_kg if drag_config else 1.0
 
-    hf_atmosphere = bool(
-        drag_config is not None
-        and use_empirical_drag
-        and drag_config.model.upper() == "NRLMSISE00"
-    )
+    hf_atmosphere = bool(drag_config is not None and use_empirical_drag and drag_config.model.upper() == "NRLMSISE00")
+    use_srp = bool(drag_config is not None and getattr(drag_config, "include_srp", True) and include_third_body)
+    srp_cr = float(drag_config.cr) if drag_config is not None else 1.5
+    srp_use_shadow = bool(drag_config is not None and getattr(drag_config, "srp_conical_shadow", True))
 
-    # DEF-001: Derive the initial reference altitude from the actual state vector
-    # (not hard-coded to 400 km). This ensures the exponential drag profile
-    # is anchored at the satellite's epoch position.
     _r0_mag = float(np.linalg.norm(state0.position_km))
     drag_ref_alt_km = max(0.0, _r0_mag - EARTH_EQUATORIAL_RADIUS_KM)
 
-    # Solar/Geomagnetic indices for empirical drag models.
-    # Only fetched when use_empirical_drag=True.
-    f107_obs, f107_adj, ap_daily = 150.0, 150.0, 15.0
+    drag_rho, drag_H_km, f107_obs, f107_adj, ap_daily = _prepare_drag_environment(t_jd0, drag_ref_alt_km, use_drag, use_empirical_drag)
 
-    # Initial density and scale height for exponential fallback segments
-    drag_rho = 0.0
-    drag_H_km = 58.515
-    if use_drag:
-        if use_empirical_drag:
-            from astra.data_pipeline import (
-                get_space_weather,
-                atmospheric_density_empirical,
-            )
+    _initial_cov = getattr(state0, "covariance_km2", None)
+    current_P0 = _initial_cov.copy() if _initial_cov is not None else np.eye(3, dtype=np.float64) * 1e-6
 
-            try:
-                f107_obs, f107_adj, ap_daily = get_space_weather(t_jd0)
-                # DEF-001: density at actual initial orbit altitude (not hardcoded 400 km)
-                drag_rho = atmospheric_density_empirical(
-                    drag_ref_alt_km, f107_obs, f107_adj, ap_daily
-                )
-                drag_H_km = _compute_scale_height(f107_obs, f107_adj, ap_daily)
-            except (ImportError, ValueError, OSError):
-                drag_rho = 0.0
-        if drag_rho == 0.0:
-            from astra.constants import DRAG_REF_DENSITY_KG_M3, DRAG_SCALE_HEIGHT_KM
-
-            drag_rho = (
-                DRAG_REF_DENSITY_KG_M3  # static fallback density (400 km reference)
-            )
-            drag_H_km = DRAG_SCALE_HEIGHT_KM
-            drag_ref_alt_km = 400.0  # static profile anchored at 400 km
-
-    use_srp = bool(
-        drag_config is not None
-        and getattr(drag_config, "include_srp", True)
-        and include_third_body
-    )
-    srp_cr = float(drag_config.cr) if drag_config is not None else 1.5
-    # [LOW-02 fix] Read from canonical srp_conical_shadow; avoid triggering the
-    # DeprecationWarning emitted by the srp_cylindrical_shadow property.
-    srp_use_shadow = bool(
-        drag_config is not None and getattr(drag_config, "srp_conical_shadow", True)
+    ctx = _PropagatorContext(
+        t_jd0=t_jd0, duration_d=duration_d, dt_out=dt_out, include_third_body=include_third_body,
+        use_drag=use_drag, use_empirical_drag=use_empirical_drag, hf_atmosphere=hf_atmosphere,
+        use_srp=use_srp, srp_cr=srp_cr, srp_use_shadow=srp_use_shadow, include_stm=include_stm,
+        rtol=rtol, atol=atol, coast_rtol=coast_rtol, coast_atol=coast_atol,
+        powered_rtol=powered_rtol, powered_atol=powered_atol,
+        sun_coeffs=sun_coeffs, moon_coeffs=moon_coeffs,
+        drag_cd=drag_cd, drag_area_m2=drag_area_m2, current_P0=current_P0
     )
 
-    logger.info(
-        f"Segmented Cowell propagation: {duration_s:.0f}s, "
-        f"{len(segments)} segments ({len(burns)} burn(s)), "
-        f"drag={'ON' if drag_config else 'OFF'}, "
-        f"third_body={'ON' if include_third_body else 'OFF'}, "
-        f"ephemeris={'DE421' if use_de else 'analytical'} (Splined)"
-    )
-
-    # [MED-04 fix] Warn when the top-level rtol/atol overrides silence per-segment values.
-    if rtol is not None and (coast_rtol != 1e-8 or powered_rtol != 1e-12):
-        logger.warning(
-            "propagate_cowell: top-level rtol=%.2e overrides per-segment "
-            "coast_rtol=%.2e / powered_rtol=%.2e. All segments will use rtol=%.2e.",
-            rtol,
-            coast_rtol,
-            powered_rtol,
-            rtol,
-        )
-    if atol is not None and (coast_atol != 1e-8 or powered_atol != 1e-12):
-        logger.warning(
-            "propagate_cowell: top-level atol=%.2e overrides per-segment "
-            "coast_atol=%.2e / powered_atol=%.2e. All segments will use atol=%.2e.",
-            atol,
-            coast_atol,
-            powered_atol,
-            atol,
-        )
-
-    # Run each segment sequentially
     all_states: list[NumericalState] = []
     current_r = state0.position_km.copy()
     current_v = state0.velocity_km_s.copy()
     current_mass = mass_kg
-    # Initialize STM as 6x6 Identity
     current_phi_flat = np.eye(6, dtype=np.float64).flatten()
-    # [CRIT-04 fix] Track the initial covariance P0 for Phi propagation.
-    # Uses state0.covariance_km2 when available; falls back to identity so
-    # relative STM evolution is still meaningful for conjunction analysis.
-    _initial_cov = getattr(state0, "covariance_km2", None)
-    current_P0: np.ndarray = (
-        _initial_cov.copy()
-        if _initial_cov is not None
-        else np.eye(3, dtype=np.float64) * 1e-6  # 1 m position uncertainty
-    )
 
     for seg_start_s, seg_end_s, active_burn in segments:
         seg_duration = seg_end_s - seg_start_s
         if seg_duration < 1e-9:
             continue
 
-        # Build output times for this segment (relative to segment start)
-        # Align to the global dt_output grid
-        global_t_start = seg_start_s
-        global_t_end = seg_end_s
-
-        # Output times within this segment
-        t_out = []
-        # First output at the global grid time >= segment start
-        first_grid = math.ceil(global_t_start / dt_out) * dt_out
-        t = first_grid
-        while t <= global_t_end + 1e-9:
-            if t >= global_t_start - 1e-9:
-                t_out.append(t - global_t_start)
-            t += dt_out
-
-        # Always include segment endpoints
-        if not t_out or t_out[0] > 1e-9:
-            t_out.insert(0, 0.0)
-        if t_out[-1] < seg_duration - 1e-9:
-            t_out.append(seg_duration)
-
-        t_eval = np.array(sorted(set(t_out)))
-        t_eval = t_eval[t_eval <= seg_duration + 1e-9]
-
-        if active_burn is not None and current_mass is not None:
-            # ---- POWERED SEGMENT (7-DOF) ----
-            y0 = np.concatenate([current_r, current_v, [current_mass]])
-            if include_stm:
-                y0 = np.concatenate([y0, current_phi_flat])
-
-            b_thrust = active_burn.thrust_N
-            b_isp = active_burn.isp_s
-            b_dir = np.array(active_burn.direction)
-            b_idx = 0 if active_burn.frame.value == "VNB" else 1
-
-            def powered_deriv(t_sec: Any, y: Any) -> Any:
-                return _powered_derivative_njit(
-                    t_sec,
-                    y,
-                    t_jd0 + seg_start_s / SECONDS_PER_DAY,
-                    use_drag,
-                    drag_cd,
-                    drag_area_m2,
-                    drag_mass_kg,
-                    drag_rho,
-                    drag_H_km,
-                    drag_ref_alt_km,
-                    f107_obs,
-                    f107_adj,
-                    ap_daily,
-                    hf_atmosphere,
-                    include_third_body,
-                    t_jd0,
-                    duration_d,
-                    sun_coeffs,
-                    moon_coeffs,
-                    use_srp,
-                    srp_cr,
-                    srp_use_shadow,
-                    b_thrust,
-                    b_isp,
-                    b_dir,
-                    b_idx,
-                )
-
-            # Per-dimension absolute tolerances for 7-DOF powered arc
-            # Position (km), velocity (km/s), mass (kg) — different physical scales
-            powered_atol_vec = np.array(
-                [
-                    1e-11,
-                    1e-11,
-                    1e-11,  # position x, y, z (km) — sub-cm accuracy
-                    1e-13,
-                    1e-13,
-                    1e-13,  # velocity vx, vy, vz (km/s) — sub-μm/s accuracy
-                    # 1e-5 kg suits ton-class vehicles; pass rtol/atol for micro-thrust vehicles.
-                    1e-5,
-                ]
+        if use_drag and use_empirical_drag:
+            drag_rho, drag_H_km, f107_obs, f107_adj, ap_daily = _prepare_drag_environment(
+                t_jd0 + seg_start_s / 86400.0, drag_ref_alt_km, use_drag, use_empirical_drag
             )
 
-            # Expand tolerances if STM is present
-            if include_stm:
-                stm_atol = np.full(36, 1e-12)
-                powered_atol_vec = np.concatenate([powered_atol_vec, stm_atol])
+        success, msg, seg_states, current_r, current_v, current_mass, current_phi_flat, drag_mass_kg = _integrate_segment(
+            seg_start_s, seg_end_s, active_burn,
+            current_r, current_v, current_mass,
+            current_phi_flat, ctx,
+            drag_mass_kg, drag_rho, drag_H_km, drag_ref_alt_km,
+            f107_obs, f107_adj, ap_daily
+        )
 
-            sol = solve_ivp(
-                powered_deriv,
-                t_span=(0.0, seg_duration),
-                y0=y0,
-                method="DOP853",
-                t_eval=t_eval,
-                rtol=rtol if rtol is not None else powered_rtol,
-                atol=atol if atol is not None else powered_atol_vec,
-            )
-
-            if not sol.success:
-                logger.error(f"Powered integration failed: {sol.message}")
-                from astra import config
+        if not success:
+            logger.error(f"Integration failed: {msg}")
+            from astra import config
+            if config.ASTRA_STRICT_MODE:
                 from astra.errors import PropagationError
+                raise PropagationError(f"Cowell integration failed: {msg}", t_jd=t_jd0 + seg_start_s / SECONDS_PER_DAY)
+            break
+            
+        all_states.extend(seg_states)
 
-                if config.ASTRA_STRICT_MODE:
-                    raise PropagationError(
-                        f"Cowell powered integration failed: {sol.message}",
-                        t_jd=t_jd0 + seg_start_s / SECONDS_PER_DAY,
-                    )
-                break
-
-            for i in range(len(sol.t)):
-                # [CRIT-04 fix] Propagate and store covariance for powered arcs.
-                _cov_out = None
-                if include_stm:
-                    phi_i = sol.y[7:43, i].reshape((6, 6))
-                    # Propagate position-only 3x3 covariance P = Phi_rr P0 Phi_rr^T
-                    phi_rr = phi_i[:3, :3]
-                    _cov_out = phi_rr @ current_P0 @ phi_rr.T
-                all_states.append(
-                    NumericalState(
-                        t_jd=t_jd0 + (seg_start_s + sol.t[i]) / SECONDS_PER_DAY,
-                        position_km=sol.y[:3, i].copy(),
-                        velocity_km_s=sol.y[3:6, i].copy(),
-                        mass_kg=float(sol.y[6, i]),
-                        covariance_km2=_cov_out,
-                    )
-                )
-
-            # Update handoff state
-            current_r = sol.y[:3, -1].copy()
-            current_v = sol.y[3:6, -1].copy()
-            current_mass = float(sol.y[6, -1])
-            # AUDIT-B-04 Fix: Update drag ballistic coefficient to reflect
-            # post-burn mass. Without this, subsequent coast arc drag used
-            # the pre-burn mass, systematically overestimating deceleration
-            # by the fraction of propellant consumed.
-            drag_mass_kg = current_mass
-
-        else:
-            # ---- COAST SEGMENT (6-DOF) ----
-            y0 = np.concatenate([current_r, current_v])
-            if include_stm:
-                y0 = np.concatenate([y0, current_phi_flat])
-
-            def coast_deriv(t_sec: Any, y: Any) -> Any:
-                return _coast_derivative_njit(
-                    t_sec,
-                    y,
-                    t_jd0 + seg_start_s / SECONDS_PER_DAY,
-                    use_drag,
-                    drag_cd,
-                    drag_area_m2,
-                    drag_mass_kg,
-                    drag_rho,
-                    drag_H_km,
-                    drag_ref_alt_km,
-                    f107_obs,
-                    f107_adj,
-                    ap_daily,
-                    hf_atmosphere,
-                    include_third_body,
-                    t_jd0,
-                    duration_d,
-                    sun_coeffs,
-                    moon_coeffs,
-                    use_srp,
-                    srp_cr,
-                    srp_use_shadow,
-                )
-
-            # Expand tolerances if STM is present
-            coast_atol_vec = np.array([coast_atol] * 6)
-            if include_stm:
-                stm_atol = np.full(36, 1e-12)
-                coast_atol_vec = np.concatenate([coast_atol_vec, stm_atol])
-
-            sol = solve_ivp(
-                coast_deriv,
-                t_span=(0.0, seg_duration),
-                y0=y0,
-                method="DOP853",
-                t_eval=t_eval,
-                rtol=rtol if rtol is not None else coast_rtol,
-                atol=atol if atol is not None else coast_atol_vec,
-            )
-
-            if not sol.success:
-                logger.error(f"Coast integration failed: {sol.message}")
-                from astra import config
-                from astra.errors import PropagationError
-
-                if config.ASTRA_STRICT_MODE:
-                    raise PropagationError(
-                        f"Cowell coast integration failed: {sol.message}",
-                        t_jd=t_jd0 + seg_start_s / SECONDS_PER_DAY,
-                    )
-                break
-
-            for i in range(len(sol.t)):
-                # [CRIT-04 fix] Propagate and store covariance P = Phi_rr P0 Phi_rr^T
-                _cov_out = None
-                if include_stm:
-                    phi_i = sol.y[6:42, i].reshape((6, 6))
-                    phi_rr = phi_i[:3, :3]  # position-to-position STM block
-                    _cov_out = phi_rr @ current_P0 @ phi_rr.T
-                st = NumericalState(
-                    t_jd=t_jd0 + (seg_start_s + sol.t[i]) / SECONDS_PER_DAY,
-                    position_km=sol.y[:3, i].copy(),
-                    velocity_km_s=sol.y[3:6, i].copy(),
-                    mass_kg=current_mass,
-                    covariance_km2=_cov_out,
-                )
-                all_states.append(st)
-
-            # Update handoff state
-            current_r = sol.y[:3, -1].copy()
-            current_v = sol.y[3:6, -1].copy()
-            if include_stm:
-                current_phi_flat = sol.y[6:42, -1].copy()
-
-    # Deduplicate states exactly at segment boundaries (same t_jd)
-    # The 1e-12 JD threshold (~86 microseconds) is chosen to catch repeated
-    # solve_ivp t_eval endpoints without filtering distinct adjacent steps.
     if all_states:
         deduped = [all_states[0]]
         for s in all_states[1:]:
@@ -2118,7 +2007,6 @@ def propagate_cowell(
 
     logger.info(f"Propagation complete: {len(all_states)} states generated.")
     return all_states
-
 
 # ---------------------------------------------------------------------------
 # Timeline Segmentation

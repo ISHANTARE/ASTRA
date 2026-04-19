@@ -228,7 +228,29 @@ def parse_tle(name: str, line1: str, line2: str) -> SatelliteTLE:
             reason="EPOCH_PARSE_ERROR",
         )
 
-    # 7. Extract classification character (U=Unclassified, C=Classified, S=Secret)
+    # 7. Physical Bounds Checking (Input Poisoning Defense)
+    try:
+        ecco_str = line2[26:33].strip()
+        if ecco_str:
+            ecco = float("." + ecco_str)
+            if ecco < 0.0 or ecco >= 1.0:
+                raise ValueError(f"Eccentricity {ecco} out of bounds [0, 1) for SGP4")
+        
+        incl_str = line2[8:16].strip()
+        if incl_str:
+            incl = float(incl_str)
+            if incl < 0.0 or incl > 180.0:
+                raise ValueError(f"Inclination {incl} out of bounds [0, 180]")
+    except ValueError as e:
+        raise InvalidTLEError(
+            f"Physical bounds violation in TLE: {e}",
+            norad_id=norad_id,
+            object_name=name,
+            invalid_line=line2,
+            reason="BOUNDS_VIOLATION",
+        )
+
+    # 8. Extract classification character (U=Unclassified, C=Classified, S=Secret)
     # NOTE: This is a SECURITY classification, not an object type.
     # Object type (PAYLOAD/DEBRIS/ROCKET_BODY) requires SATCAT lookup.
     classification_flag = line1[7]

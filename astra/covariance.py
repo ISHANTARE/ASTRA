@@ -185,9 +185,18 @@ def compute_collision_probability(
     r_p = R @ miss_vector_km
 
     try:
+        # AUDIT-NUM-01: Fix 4 - Apply Tikhonov regularization for severe ill-conditioning
+        # mirror the MC path logic to ensure robust inversion of 2D B-plane matrices.
         cond = float(np.linalg.cond(C_p))
         if not np.isfinite(cond) or cond > 1e12:
-            inv_C_p = np.linalg.pinv(C_p)
+            import logging as _reg_log
+            _reg_log.getLogger(__name__).debug(
+                "2D B-plane covariance ill-conditioning (cond=%.2e). Applying Tikhonov regularization.",
+                cond
+            )
+            # Add 1e-12 km^2 (1 mm positional variance) to ensure positive-definiteness
+            C_p += np.eye(2) * 1e-12
+            inv_C_p = np.linalg.inv(C_p)
         else:
             inv_C_p = np.linalg.inv(C_p)
         det_C_p = np.linalg.det(C_p)

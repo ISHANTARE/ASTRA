@@ -60,6 +60,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from astra.errors import SpacebookError, SpacebookLookupError
 from astra.log import get_logger
@@ -117,6 +119,17 @@ _HEADERS = {
 
 _REQUEST_TIMEOUT = 30  # seconds
 
+_session = requests.Session()
+_retry = Retry(
+    total=3,
+    backoff_factor=1.0,
+    status_forcelist=(429, 500, 502, 503, 504),
+    allowed_methods=["HEAD", "GET", "OPTIONS"]
+)
+_adapter = HTTPAdapter(max_retries=_retry)
+_session.mount("http://", _adapter)
+_session.mount("https://", _adapter)
+
 # ---------------------------------------------------------------------------
 # In-Memory Caches (thread-safe)
 # ---------------------------------------------------------------------------
@@ -171,7 +184,7 @@ def _sb_get(url: str, timeout: int = _REQUEST_TIMEOUT) -> requests.Response:
         SpacebookError: On network failure, timeout, or non-200 HTTP status.
     """
     try:
-        resp = requests.get(url, headers=_HEADERS, timeout=timeout)
+        resp = _session.get(url, headers=_HEADERS, timeout=timeout, verify=True)
     except requests.Timeout as exc:
         raise SpacebookError(
             f"Spacebook request timed out after {timeout}s.",
@@ -231,11 +244,12 @@ def is_available(timeout: int = 4) -> bool:
     if not SPACEBOOK_ENABLED:
         return False
     try:
-        resp = requests.get(
+        resp = _session.get(
             _SB_SW_RECENT_URL,
             headers=_HEADERS,
             timeout=timeout,
             stream=True,  # avoid downloading the full body just for a probe
+            verify=True,
         )
         resp.close()
         return resp.status_code == 200

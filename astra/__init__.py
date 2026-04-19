@@ -338,12 +338,58 @@ __all__ = [
     "VelocityMap",
     "sun_position_teme",
     "moon_position_teme",
+    "warmup",
 ]
 
 import sys
 from . import config
 from astra.config import set_strict_mode
 from typing import Any
+import numpy as np
+
+
+def warmup() -> None:
+    """Pre-compile Numba JIT kernels to eliminate first-run latency.
+
+    Performs a trivial 1-second propagation and conjunction check to
+    trigger binary code generation for the numerical integrator, drag
+    model, and spatial index. Highly recommended for production workers.
+    """
+    from astra.propagator import propagate_cowell, NumericalState
+    from astra.conjunction import find_conjunctions
+    from astra.models import DebrisObject
+
+    # 1. Warm-up Propagator (Numba Cowell kernel)
+    p0 = np.array([7000.0, 0.0, 0.0])
+    v0 = np.array([0.0, 7.5, 0.0])
+    state = NumericalState(t_jd=2460000.5, position_km=p0, velocity_km_s=v0)
+    _ = propagate_cowell(state, duration_s=1.0, dt_out=1.0)
+
+    # 2. Warm-up Conjunction Screening (Numba and SpatialIndex)
+    from astra.models import SatelliteTLE
+    tle = SatelliteTLE(
+        norad_id="WARMUP",
+        name="WARMUP",
+        line1="1 99999U 99999A   26100.00000000  .00000000  00000-0  00000-0 0  9999",
+        line2="2 99999   0.0000   0.0000 0000000   0.0000   0.0000 15.00000000    00",
+        epoch_jd=2460000.5,
+        object_type="PAYLOAD"
+    )
+    obj = DebrisObject(
+        source=tle,
+        altitude_km=622.0,
+        inclination_deg=0.0,
+        period_minutes=96.0,
+        raan_deg=0.0,
+        eccentricity=0.0,
+        apogee_km=622.0,
+        perigee_km=622.0,
+        object_class="PAYLOAD",
+        radius_m=5.0
+    )
+    traj = { "WARM1": np.array([p0, p0, p0]), "WARM2": np.array([p0, p0, p0]) }
+    times = np.array([2460000.5, 2460000.5 + 1.0/86400.0, 2460000.5 + 2.0/86400.0])
+    _ = find_conjunctions(traj, times, { "WARM1": obj, "WARM2": obj }, threshold_km=1.0)
 
 
 def __getattr__(name: str) -> Any:

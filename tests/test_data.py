@@ -64,7 +64,7 @@ OMM_MOCK_DATA = json.dumps(
 # ---------------------------------------------------------------------------
 
 
-@patch("astra.data.requests.get")
+@patch("astra.data._session.get")
 def test_fetch_celestrak_active_tle(mock_get):
     """Active catalog in TLE format returns SatelliteTLE list."""
     mock_resp = Mock()
@@ -81,7 +81,7 @@ def test_fetch_celestrak_active_tle(mock_get):
     assert catalog[0].norad_id == "25544"
 
 
-@patch("astra.data.requests.get")
+@patch("astra.data._session.get")
 def test_fetch_celestrak_group_tle(mock_get):
     """Group fetch in TLE format calls correct URL and returns SatelliteTLE list."""
     mock_resp = Mock()
@@ -98,6 +98,7 @@ def test_fetch_celestrak_group_tle(mock_get):
         "https://celestrak.org/NORAD/elements/gp.php?GROUP=starlink&FORMAT=tle",
         headers=_HEADERS,
         timeout=20.0,
+        verify=True,
     )
 
 
@@ -106,7 +107,7 @@ def test_fetch_celestrak_group_tle(mock_get):
 # ---------------------------------------------------------------------------
 
 
-@patch("astra.data.requests.get")
+@patch("astra.data._session.get")
 def test_fetch_celestrak_active_omm(mock_get):
     """Active catalog in OMM JSON format returns SatelliteOMM list."""
     mock_resp = Mock()
@@ -124,7 +125,7 @@ def test_fetch_celestrak_active_omm(mock_get):
     assert catalog[0].rcs_m2 == 10.0  # LARGE → 10.0 m²
 
 
-@patch("astra.data.requests.get")
+@patch("astra.data._session.get")
 def test_fetch_celestrak_group_omm(mock_get):
     """Group fetch in OMM JSON format calls correct URL and returns SatelliteOMM list."""
     mock_resp = Mock()
@@ -141,10 +142,11 @@ def test_fetch_celestrak_group_omm(mock_get):
         "https://celestrak.org/NORAD/elements/gp.php?GROUP=starlink&FORMAT=json",
         headers=_HEADERS,
         timeout=20.0,
+        verify=True,
     )
 
 
-@patch("astra.data.requests.get")
+@patch("astra.data._session.get")
 def test_omm_fields_populated(mock_get):
     """OMM objects carry correct orbital element conversions from JSON values."""
     import math
@@ -173,7 +175,7 @@ def test_omm_fields_populated(mock_get):
 # ---------------------------------------------------------------------------
 
 
-@patch("astra.data.requests.get")
+@patch("astra.data._session.get")
 def test_fetch_celestrak_network_error(mock_get):
     """Network failure raises AstraError with a helpful message."""
     import requests
@@ -184,7 +186,7 @@ def test_fetch_celestrak_network_error(mock_get):
         fetch_celestrak_active()
 
 
-@patch("astra.data.requests.get")
+@patch("astra.data._session.get")
 def test_fetch_celestrak_rate_limit(mock_get):
     """Celestrak 403 rate-limit message raises AstraError with actionable text."""
     mock_resp = Mock()
@@ -197,7 +199,7 @@ def test_fetch_celestrak_rate_limit(mock_get):
         fetch_celestrak_group("starlink")
 
 
-@patch("astra.data.requests.get")
+@patch("astra.data._session.get")
 def test_fetch_celestrak_fallback_to_supplemental_after_500(mock_get):
     """Legacy gp.php 503 triggers supplemental sup-gp.php with FILE=group."""
     bad = Mock()
@@ -225,7 +227,7 @@ def test_fetch_celestrak_fallback_to_supplemental_after_500(mock_get):
     assert kwargs["headers"] == _HEADERS
 
 
-@patch("astra.data.requests.get")
+@patch("astra.data._session.get")
 def test_fetch_celestrak_gps_ops_fallback_uses_gps_a_source(mock_get):
     """gps-ops supplemental mapping uses SOURCE=GPS-A (not FILE=gps-ops)."""
     bad = Mock()
@@ -246,7 +248,7 @@ def test_fetch_celestrak_gps_ops_fallback_uses_gps_a_source(mock_get):
     }
 
 
-@patch("astra.data.requests.get")
+@patch("astra.data._session.get")
 def test_fetch_celestrak_active_no_supplemental_mapping_on_legacy_failure(mock_get):
     """GROUP=active has no sup-gp mapping; legacy failure surfaces clearly."""
     bad = Mock()
