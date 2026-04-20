@@ -1,0 +1,673 @@
+<!doctype html>
+<html class="no-js" lang="en" data-content_root="../../">
+  <head><meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="color-scheme" content="light dark"><link rel="index" title="Index" href="../../genindex.html"><link rel="search" title="Search" href="../../search.html">
+
+    <!-- Generated with Sphinx 9.1.0 and Furo 2025.12.19 -->
+        <title>astra.frames - ASTRA-Core 3.5.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=acfd86a5" />
+    <link rel="stylesheet" type="text/css" href="../../_static/styles/furo.css?v=7bdb33bb" />
+    <link rel="stylesheet" type="text/css" href="../../_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="../../_static/styles/furo-extensions.css?v=8dab3a3b" />
+    
+    
+
+
+<style>
+  body {
+    --color-code-background: #f2f2f2;
+  --color-code-foreground: #1e1e1e;
+  
+  }
+  @media not print {
+    body[data-theme="dark"] {
+      --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+  
+    }
+    @media (prefers-color-scheme: dark) {
+      body:not([data-theme="light"]) {
+        --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+  
+      }
+    }
+  }
+</style></head>
+  <body>
+    
+    <script>
+      document.body.dataset.theme = localStorage.getItem("theme") || "auto";
+    </script>
+    
+
+<svg xmlns="http://www.w3.org/2000/svg" style="display: none;">
+  <symbol id="svg-toc" viewBox="0 0 24 24">
+    <title>Contents</title>
+    <svg stroke="currentColor" fill="currentColor" stroke-width="0" viewBox="0 0 1024 1024">
+      <path d="M408 442h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8zm-8 204c0 4.4 3.6 8 8 8h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56zm504-486H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zm0 632H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zM115.4 518.9L271.7 642c5.8 4.6 14.4.5 14.4-6.9V388.9c0-7.4-8.5-11.5-14.4-6.9L115.4 505.1a8.74 8.74 0 0 0 0 13.8z"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-menu" viewBox="0 0 24 24">
+    <title>Menu</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-menu">
+      <line x1="3" y1="12" x2="21" y2="12"></line>
+      <line x1="3" y1="6" x2="21" y2="6"></line>
+      <line x1="3" y1="18" x2="21" y2="18"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-arrow-right" viewBox="0 0 24 24">
+    <title>Expand</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-chevron-right">
+      <polyline points="9 18 15 12 9 6"></polyline>
+    </svg>
+  </symbol>
+  <symbol id="svg-sun" viewBox="0 0 24 24">
+    <title>Light mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="feather-sun">
+      <circle cx="12" cy="12" r="5"></circle>
+      <line x1="12" y1="1" x2="12" y2="3"></line>
+      <line x1="12" y1="21" x2="12" y2="23"></line>
+      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+      <line x1="1" y1="12" x2="3" y2="12"></line>
+      <line x1="21" y1="12" x2="23" y2="12"></line>
+      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-moon" viewBox="0 0 24 24">
+    <title>Dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-moon">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+      <path d="M12 3c.132 0 .263 0 .393 0a7.5 7.5 0 0 0 7.92 12.446a9 9 0 1 1 -8.313 -12.454z" />
+    </svg>
+  </symbol>
+  <symbol id="svg-sun-with-moon" viewBox="0 0 24 24">
+    <title>Auto light/dark, in light mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round"
+      class="icon-custom-derived-from-feather-sun-and-tabler-moon">
+      <path style="opacity: 50%" d="M 5.411 14.504 C 5.471 14.504 5.532 14.504 5.591 14.504 C 3.639 16.319 4.383 19.569 6.931 20.352 C 7.693 20.586 8.512 20.551 9.25 20.252 C 8.023 23.207 4.056 23.725 2.11 21.184 C 0.166 18.642 1.702 14.949 4.874 14.536 C 5.051 14.512 5.231 14.5 5.411 14.5 L 5.411 14.504 Z"/>
+      <line x1="14.5" y1="3.25" x2="14.5" y2="1.25"/>
+      <line x1="14.5" y1="15.85" x2="14.5" y2="17.85"/>
+      <line x1="10.044" y1="5.094" x2="8.63" y2="3.68"/>
+      <line x1="19" y1="14.05" x2="20.414" y2="15.464"/>
+      <line x1="8.2" y1="9.55" x2="6.2" y2="9.55"/>
+      <line x1="20.8" y1="9.55" x2="22.8" y2="9.55"/>
+      <line x1="10.044" y1="14.006" x2="8.63" y2="15.42"/>
+      <line x1="19" y1="5.05" x2="20.414" y2="3.636"/>
+      <circle cx="14.5" cy="9.55" r="3.6"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-moon-with-sun" viewBox="0 0 24 24">
+    <title>Auto light/dark, in dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round"
+      class="icon-custom-derived-from-feather-sun-and-tabler-moon">
+      <path d="M 8.282 7.007 C 8.385 7.007 8.494 7.007 8.595 7.007 C 5.18 10.184 6.481 15.869 10.942 17.24 C 12.275 17.648 13.706 17.589 15 17.066 C 12.851 22.236 5.91 23.143 2.505 18.696 C -0.897 14.249 1.791 7.786 7.342 7.063 C 7.652 7.021 7.965 7 8.282 7 L 8.282 7.007 Z"/>
+      <line style="opacity: 50%" x1="18" y1="3.705" x2="18" y2="2.5"/>
+      <line style="opacity: 50%" x1="18" y1="11.295" x2="18" y2="12.5"/>
+      <line style="opacity: 50%" x1="15.316" y1="4.816" x2="14.464" y2="3.964"/>
+      <line style="opacity: 50%" x1="20.711" y1="10.212" x2="21.563" y2="11.063"/>
+      <line style="opacity: 50%" x1="14.205" y1="7.5" x2="13.001" y2="7.5"/>
+      <line style="opacity: 50%" x1="21.795" y1="7.5" x2="23" y2="7.5"/>
+      <line style="opacity: 50%" x1="15.316" y1="10.184" x2="14.464" y2="11.036"/>
+      <line style="opacity: 50%" x1="20.711" y1="4.789" x2="21.563" y2="3.937"/>
+      <circle style="opacity: 50%" cx="18" cy="7.5" r="2.169"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-pencil" viewBox="0 0 24 24">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-pencil-code">
+      <path d="M4 20h4l10.5 -10.5a2.828 2.828 0 1 0 -4 -4l-10.5 10.5v4" />
+      <path d="M13.5 6.5l4 4" />
+      <path d="M20 21l2 -2l-2 -2" />
+      <path d="M17 17l-2 2l2 2" />
+    </svg>
+  </symbol>
+  <symbol id="svg-eye" viewBox="0 0 24 24">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-eye-code">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+      <path d="M10 12a2 2 0 1 0 4 0a2 2 0 0 0 -4 0" />
+      <path
+        d="M11.11 17.958c-3.209 -.307 -5.91 -2.293 -8.11 -5.958c2.4 -4 5.4 -6 9 -6c3.6 0 6.6 2 9 6c-.21 .352 -.427 .688 -.647 1.008" />
+      <path d="M20 21l2 -2l-2 -2" />
+      <path d="M17 17l-2 2l2 2" />
+    </svg>
+  </symbol>
+</svg>
+
+<input type="checkbox" class="sidebar-toggle" name="__navigation" id="__navigation" aria-label="Toggle site navigation sidebar">
+<input type="checkbox" class="sidebar-toggle" name="__toc" id="__toc" aria-label="Toggle table of contents sidebar">
+<label class="overlay sidebar-overlay" for="__navigation"></label>
+<label class="overlay toc-overlay" for="__toc"></label>
+
+<a class="skip-to-content muted-link" href="#furo-main-content">Skip to content</a>
+
+
+
+<div class="page">
+  <header class="mobile-header">
+    <div class="header-left">
+      <label class="nav-overlay-icon" for="__navigation">
+        <span class="icon"><svg><use href="#svg-menu"></use></svg></span>
+      </label>
+    </div>
+    <div class="header-center">
+      <a href="../../index.html"><div class="brand">ASTRA-Core 3.5.0 documentation</div></a>
+    </div>
+    <div class="header-right">
+      <div class="theme-toggle-container theme-toggle-header">
+        <button class="theme-toggle" aria-label="Toggle Light / Dark / Auto color theme">
+          <svg class="theme-icon-when-auto-light"><use href="#svg-sun-with-moon"></use></svg>
+          <svg class="theme-icon-when-auto-dark"><use href="#svg-moon-with-sun"></use></svg>
+          <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+          <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+        </button>
+      </div>
+      <label class="toc-overlay-icon toc-header-icon no-toc" for="__toc">
+        <span class="icon"><svg><use href="#svg-toc"></use></svg></span>
+      </label>
+    </div>
+  </header>
+  <aside class="sidebar-drawer">
+    <div class="sidebar-container">
+      
+      <div class="sidebar-sticky"><a class="sidebar-brand" href="../../index.html">
+  
+  <span class="sidebar-brand-text">ASTRA-Core 3.5.0 documentation</span>
+  
+</a><form class="sidebar-search-container" method="get" action="../../search.html" role="search">
+  <input class="sidebar-search" placeholder="Search" name="q" aria-label="Search">
+  <input type="hidden" name="check_keywords" value="yes">
+  <input type="hidden" name="area" value="default">
+</form>
+<div id="searchbox"></div><div class="sidebar-scroll"><div class="sidebar-tree">
+  <p class="caption" role="heading"><span class="caption-text">User guide</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../limitations.html">Operational limitations</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../quickstart.html">Quickstart</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../theory.html">Theoretical Framework</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../architecture.html">Architecture &amp; Physics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../maneuvers.html">Orbital Maneuvers</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../api.html">API reference</a><input aria-label="Toggle navigation of API reference" class="toctree-checkbox" id="toctree-checkbox-1" name="toctree-checkbox-1" role="switch" type="checkbox"/><label for="toctree-checkbox-1"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../apidoc/modules.html">astra</a><input aria-label="Toggle navigation of astra" class="toctree-checkbox" id="toctree-checkbox-2" name="toctree-checkbox-2" role="switch" type="checkbox"/><label for="toctree-checkbox-2"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../apidoc/astra.html">astra package</a><input aria-label="Toggle navigation of astra package" class="toctree-checkbox" id="toctree-checkbox-3" name="toctree-checkbox-3" role="switch" type="checkbox"/><label for="toctree-checkbox-3"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../apidoc/astra.cdm.html">astra.cdm module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../apidoc/astra.config.html">astra.config module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../apidoc/astra.conjunction.html">astra.conjunction module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../apidoc/astra.constants.html">astra.constants module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../apidoc/astra.covariance.html">astra.covariance module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../apidoc/astra.data.html">astra.data module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../apidoc/astra.data_pipeline.html">astra.data_pipeline module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../apidoc/astra.debris.html">astra.debris module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../apidoc/astra.errors.html">astra.errors module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../apidoc/astra.frames.html">astra.frames module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../apidoc/astra.jdutil.html">astra.jdutil module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../apidoc/astra.log.html">astra.log module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../apidoc/astra.maneuver.html">astra.maneuver module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../apidoc/astra.models.html">astra.models module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../apidoc/astra.ocm.html">astra.ocm module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../apidoc/astra.omm.html">astra.omm module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../apidoc/astra.orbit.html">astra.orbit module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../apidoc/astra.plot.html">astra.plot module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../apidoc/astra.propagator.html">astra.propagator module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../apidoc/astra.spacebook.html">astra.spacebook module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../apidoc/astra.spacetrack.html">astra.spacetrack module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../apidoc/astra.spatial_index.html">astra.spatial_index module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../apidoc/astra.time.html">astra.time module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../apidoc/astra.tle.html">astra.tle module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../apidoc/astra.utils.html">astra.utils module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../apidoc/astra.version.html">astra.version module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../apidoc/astra.visibility.html">astra.visibility module</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+</div>
+</div>
+
+      </div>
+      
+    </div>
+  </aside>
+  <div class="main">
+    <div class="content">
+      <div class="article-container">
+        <a href="#" class="back-to-top muted-link">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+            <path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8v12z"></path>
+          </svg>
+          <span>Back to top</span>
+        </a>
+        <div class="content-icon-container">
+          <div class="theme-toggle-container theme-toggle-content">
+            <button class="theme-toggle" aria-label="Toggle Light / Dark / Auto color theme">
+              <svg class="theme-icon-when-auto-light"><use href="#svg-sun-with-moon"></use></svg>
+              <svg class="theme-icon-when-auto-dark"><use href="#svg-moon-with-sun"></use></svg>
+              <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+              <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+            </button>
+          </div>
+          <label class="toc-overlay-icon toc-content-icon no-toc" for="__toc">
+            <span class="icon"><svg><use href="#svg-toc"></use></svg></span>
+          </label>
+        </div>
+        <article role="main" id="furo-main-content">
+          <h1>Source code for astra.frames</h1><div class="highlight"><pre>
+<span></span><span class="kn">from</span> <span class="nn">typing</span> <span class="kn">import</span> <span class="n">Any</span>
+
+<span class="c1"># astra/frames.py</span>
+<span class="sd">&quot;&quot;&quot;ASTRA Core Coordinate Frame Transformations.</span>
+
+<span class="sd">High-performance Numba-accelerated kernels for orbital frame rotations (VNB, RTN).</span>
+<span class="sd">This module acts as a base for both propagator and maneuver logic,</span>
+<span class="sd">resolving circular dependencies.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>  <span class="c1"># noqa: E402</span>
+
+<span class="c1"># DEF-003: Graceful Numba fallback — mirrors the pattern in propagator.py.</span>
+<span class="c1"># Without this, importing frames.py would hard-crash in environments where</span>
+<span class="c1"># Numba is not installed, breaking the propagator&#39;s own graceful fallback.</span>
+<span class="kn">from</span> <span class="nn">astra._numba_compat</span> <span class="kn">import</span> <span class="n">njit</span>  <span class="c1"># noqa: E402</span>
+
+
+<span class="nd">@njit</span><span class="p">(</span><span class="n">fastmath</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">cache</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="k">def</span> <span class="nf">_build_vnb_matrix_njit</span><span class="p">(</span><span class="n">pos</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">vel</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Build the 3x3 rotation matrix from ECI to VNB frame.</span>
+
+<span class="sd">    V (Velocity): Along the velocity vector.</span>
+<span class="sd">    N (Normal): Along the angular momentum vector (R x V).</span>
+<span class="sd">    B (Binormal): Completes the right-handed triad (V x N).</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">v_unit</span> <span class="o">=</span> <span class="n">vel</span> <span class="o">/</span> <span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">norm</span><span class="p">(</span><span class="n">vel</span><span class="p">)</span>
+    <span class="n">h</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">cross</span><span class="p">(</span><span class="n">pos</span><span class="p">,</span> <span class="n">vel</span><span class="p">)</span>
+    <span class="n">n_unit</span> <span class="o">=</span> <span class="n">h</span> <span class="o">/</span> <span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">norm</span><span class="p">(</span><span class="n">h</span><span class="p">)</span>
+    <span class="n">b_unit</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">cross</span><span class="p">(</span><span class="n">v_unit</span><span class="p">,</span> <span class="n">n_unit</span><span class="p">)</span>
+
+    <span class="c1"># Matrix for ECI -&gt; VNB: rows are basis vectors</span>
+    <span class="n">mat</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="mi">3</span><span class="p">,</span> <span class="mi">3</span><span class="p">))</span>
+    <span class="n">mat</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">],</span> <span class="n">mat</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">],</span> <span class="n">mat</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">2</span><span class="p">]</span> <span class="o">=</span> <span class="n">v_unit</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">v_unit</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="n">v_unit</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span>
+    <span class="n">mat</span><span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">],</span> <span class="n">mat</span><span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">],</span> <span class="n">mat</span><span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">]</span> <span class="o">=</span> <span class="n">n_unit</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">n_unit</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="n">n_unit</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span>
+    <span class="n">mat</span><span class="p">[</span><span class="mi">2</span><span class="p">,</span> <span class="mi">0</span><span class="p">],</span> <span class="n">mat</span><span class="p">[</span><span class="mi">2</span><span class="p">,</span> <span class="mi">1</span><span class="p">],</span> <span class="n">mat</span><span class="p">[</span><span class="mi">2</span><span class="p">,</span> <span class="mi">2</span><span class="p">]</span> <span class="o">=</span> <span class="n">b_unit</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">b_unit</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="n">b_unit</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span>
+    <span class="k">return</span> <span class="n">mat</span>  <span class="c1"># type: ignore[no-any-return]</span>
+
+
+<span class="nd">@njit</span><span class="p">(</span><span class="n">fastmath</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">cache</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="k">def</span> <span class="nf">_build_rtn_matrix_njit</span><span class="p">(</span><span class="n">pos</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">vel</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Build the 3x3 rotation matrix from ECI to RTN (RIC) frame.</span>
+
+<span class="sd">    R (Radial): Along the geocentric position vector.</span>
+<span class="sd">    T (Transverse/In-track): In the orbital plane, orthogonal to R.</span>
+<span class="sd">    N (Normal): Along the angular momentum vector (R x V).</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">r_unit</span> <span class="o">=</span> <span class="n">pos</span> <span class="o">/</span> <span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">norm</span><span class="p">(</span><span class="n">pos</span><span class="p">)</span>
+    <span class="n">h</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">cross</span><span class="p">(</span><span class="n">pos</span><span class="p">,</span> <span class="n">vel</span><span class="p">)</span>
+    <span class="n">n_unit</span> <span class="o">=</span> <span class="n">h</span> <span class="o">/</span> <span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">norm</span><span class="p">(</span><span class="n">h</span><span class="p">)</span>
+    <span class="n">t_unit</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">cross</span><span class="p">(</span><span class="n">n_unit</span><span class="p">,</span> <span class="n">r_unit</span><span class="p">)</span>
+
+    <span class="c1"># Matrix for ECI -&gt; RTN: rows are basis vectors</span>
+    <span class="n">mat</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="mi">3</span><span class="p">,</span> <span class="mi">3</span><span class="p">))</span>
+    <span class="n">mat</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">],</span> <span class="n">mat</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">],</span> <span class="n">mat</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">2</span><span class="p">]</span> <span class="o">=</span> <span class="n">r_unit</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">r_unit</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="n">r_unit</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span>
+    <span class="n">mat</span><span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">],</span> <span class="n">mat</span><span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">],</span> <span class="n">mat</span><span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">]</span> <span class="o">=</span> <span class="n">t_unit</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">t_unit</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="n">t_unit</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span>
+    <span class="n">mat</span><span class="p">[</span><span class="mi">2</span><span class="p">,</span> <span class="mi">0</span><span class="p">],</span> <span class="n">mat</span><span class="p">[</span><span class="mi">2</span><span class="p">,</span> <span class="mi">1</span><span class="p">],</span> <span class="n">mat</span><span class="p">[</span><span class="mi">2</span><span class="p">,</span> <span class="mi">2</span><span class="p">]</span> <span class="o">=</span> <span class="n">n_unit</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">n_unit</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="n">n_unit</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span>
+    <span class="k">return</span> <span class="n">mat</span>  <span class="c1"># type: ignore[no-any-return]</span>
+
+
+<div class="viewcode-block" id="get_eop_correction">
+<a class="viewcode-back" href="../../apidoc/astra.frames.html#astra.frames.get_eop_correction">[docs]</a>
+<span class="k">def</span> <span class="nf">get_eop_correction</span><span class="p">(</span>
+    <span class="n">times_jd</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]</span> <span class="o">|</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="nb">float</span><span class="p">,</span> <span class="nb">float</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Fetch Spacebook Earth Orientation Parameters for a set of epochs.</span>
+
+<span class="sd">    DEF-006: Batches calls by calendar day rather than per-timestep.</span>
+<span class="sd">    For a 24-hour propagation at 5-minute steps (288 points), this reduces</span>
+<span class="sd">    Spacebook API calls from 288 to ~1, with intra-day values taken from</span>
+<span class="sd">    the representative midday fetch (EOP variation within a day is sub-ms).</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        (xp_arcsec, yp_arcsec, dut1_s) arrays matching times_jd shape.</span>
+<span class="sd">        If Spacebook is disabled or offline, returns arrays of zeros.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">import</span> <span class="nn">os</span>
+
+    <span class="n">times_arr</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">atleast_1d</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">times_jd</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">float</span><span class="p">))</span>
+    <span class="n">zeros</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">times_arr</span><span class="p">))</span>
+
+    <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;ASTRA_SPACEBOOK_ENABLED&quot;</span><span class="p">,</span> <span class="s2">&quot;true&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span> <span class="o">==</span> <span class="s2">&quot;false&quot;</span><span class="p">:</span>
+        <span class="k">return</span> <span class="p">(</span><span class="n">zeros</span><span class="o">.</span><span class="n">copy</span><span class="p">(),</span> <span class="n">zeros</span><span class="o">.</span><span class="n">copy</span><span class="p">(),</span> <span class="n">zeros</span><span class="o">.</span><span class="n">copy</span><span class="p">())</span> <span class="k">if</span> <span class="n">times_arr</span><span class="o">.</span><span class="n">ndim</span> <span class="k">else</span> <span class="p">(</span><span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">)</span>  <span class="c1"># type: ignore[no-any-return]</span>
+
+    <span class="k">try</span><span class="p">:</span>
+        <span class="kn">from</span> <span class="nn">astra.spacebook</span> <span class="kn">import</span> <span class="n">get_eop_sb</span>
+
+        <span class="c1"># --- DEF-006: Group by calendar date, fetch once per unique day ---</span>
+        <span class="c1"># Floor each JD to midnight of that day (integer part).</span>
+        <span class="c1"># EOP values change by at most ~0.3 ms/day (dUT1), well below</span>
+        <span class="c1"># the 1-second timestep of most propagations.</span>
+        <span class="n">day_keys</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">floor</span><span class="p">(</span><span class="n">times_arr</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">int</span><span class="p">)</span>
+        <span class="n">unique_days</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">unique</span><span class="p">(</span><span class="n">day_keys</span><span class="p">)</span>
+
+        <span class="n">eop_cache</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="n">Any</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="k">for</span> <span class="n">day_jd</span> <span class="ow">in</span> <span class="n">unique_days</span><span class="p">:</span>
+            <span class="c1"># Query at midday of that calendar date (more representative than midnight)</span>
+            <span class="n">eop_cache</span><span class="p">[</span><span class="nb">int</span><span class="p">(</span><span class="n">day_jd</span><span class="p">)]</span> <span class="o">=</span> <span class="n">get_eop_sb</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">day_jd</span><span class="p">)</span> <span class="o">+</span> <span class="mf">0.5</span><span class="p">)</span>
+
+        <span class="n">xps</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="n">eop_cache</span><span class="p">[</span><span class="nb">int</span><span class="p">(</span><span class="n">dk</span><span class="p">)][</span><span class="mi">0</span><span class="p">]</span> <span class="k">for</span> <span class="n">dk</span> <span class="ow">in</span> <span class="n">day_keys</span><span class="p">])</span>
+        <span class="n">yps</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="n">eop_cache</span><span class="p">[</span><span class="nb">int</span><span class="p">(</span><span class="n">dk</span><span class="p">)][</span><span class="mi">1</span><span class="p">]</span> <span class="k">for</span> <span class="n">dk</span> <span class="ow">in</span> <span class="n">day_keys</span><span class="p">])</span>
+        <span class="n">dut1s</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="n">eop_cache</span><span class="p">[</span><span class="nb">int</span><span class="p">(</span><span class="n">dk</span><span class="p">)][</span><span class="mi">2</span><span class="p">]</span> <span class="k">for</span> <span class="n">dk</span> <span class="ow">in</span> <span class="n">day_keys</span><span class="p">])</span>
+
+        <span class="c1"># Return scalars when a scalar JD was passed in</span>
+        <span class="k">if</span> <span class="n">np</span><span class="o">.</span><span class="n">isscalar</span><span class="p">(</span><span class="n">times_jd</span><span class="p">)</span> <span class="ow">or</span> <span class="p">(</span><span class="nb">hasattr</span><span class="p">(</span><span class="n">times_jd</span><span class="p">,</span> <span class="s2">&quot;ndim&quot;</span><span class="p">)</span> <span class="ow">and</span> <span class="n">times_jd</span><span class="o">.</span><span class="n">ndim</span> <span class="o">==</span> <span class="mi">0</span><span class="p">):</span>
+            <span class="k">return</span> <span class="nb">float</span><span class="p">(</span><span class="n">xps</span><span class="p">[</span><span class="mi">0</span><span class="p">]),</span> <span class="nb">float</span><span class="p">(</span><span class="n">yps</span><span class="p">[</span><span class="mi">0</span><span class="p">]),</span> <span class="nb">float</span><span class="p">(</span><span class="n">dut1s</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>  <span class="c1"># type: ignore[no-any-return]</span>
+        <span class="k">return</span> <span class="n">xps</span><span class="p">,</span> <span class="n">yps</span><span class="p">,</span> <span class="n">dut1s</span>  <span class="c1"># type: ignore[no-any-return]</span>
+
+    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="kn">import</span> <span class="nn">logging</span>
+
+        <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="vm">__name__</span><span class="p">)</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span>
+            <span class="s2">&quot;EOP fetch failed (</span><span class="si">%s</span><span class="s2">); defaulting to zero correction.&quot;</span><span class="p">,</span> <span class="n">e</span>
+        <span class="p">)</span>
+        <span class="k">return</span> <span class="p">(</span><span class="n">zeros</span><span class="o">.</span><span class="n">copy</span><span class="p">(),</span> <span class="n">zeros</span><span class="o">.</span><span class="n">copy</span><span class="p">(),</span> <span class="n">zeros</span><span class="o">.</span><span class="n">copy</span><span class="p">())</span>  <span class="c1"># type: ignore[no-any-return]</span></div>
+
+
+
+<div class="viewcode-block" id="teme_to_ecef">
+<a class="viewcode-back" href="../../apidoc/astra.frames.html#astra.frames.teme_to_ecef">[docs]</a>
+<span class="k">def</span> <span class="nf">teme_to_ecef</span><span class="p">(</span>
+    <span class="n">r_teme</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">times_jd</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">use_spacebook_eop</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Convert TEME position vectors to ECEF (ITRS) coordinates.</span>
+
+<span class="sd">    If `use_spacebook_eop` is True and Spacebook is enabled, precise COMSPOC EOP metrics</span>
+<span class="sd">    are fetched and mathematically integrated into the GCRS-ITRS rotation differential.</span>
+<span class="sd">    Otherwise, it natively uses Skyfield&#39;s fallback IERS tables.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        r_teme: (N, 3) matrix of TEME Cartesian coordinates (km)</span>
+<span class="sd">        times_jd: (N,) array of Julian Dates</span>
+<span class="sd">        use_spacebook_eop: Boolean toggle to inject precise parameters.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        (N, 3) matrix of ECEF (ITRS) coordinates.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">from</span> <span class="nn">astra</span> <span class="kn">import</span> <span class="n">data_pipeline</span> <span class="k">as</span> <span class="n">_dp</span>
+    <span class="kn">from</span> <span class="nn">skyfield.sgp4lib</span> <span class="kn">import</span> <span class="n">TEME</span>
+    <span class="kn">from</span> <span class="nn">skyfield.framelib</span> <span class="kn">import</span> <span class="n">itrs</span>
+
+    <span class="n">_dp</span><span class="o">.</span><span class="n">_ensure_skyfield</span><span class="p">()</span>
+    <span class="n">ts</span> <span class="o">=</span> <span class="n">_dp</span><span class="o">.</span><span class="n">_skyfield_ts</span>
+
+    <span class="c1"># 1. TEME -&gt; GCRS (Precession / Nutation is native and identical to both)</span>
+    <span class="n">_dp</span><span class="o">.</span><span class="n">_ensure_skyfield</span><span class="p">()</span>
+    <span class="n">ts</span> <span class="o">=</span> <span class="n">_dp</span><span class="o">.</span><span class="n">_skyfield_ts</span>
+    <span class="k">assert</span> <span class="n">ts</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">,</span> <span class="s2">&quot;_ensure_skyfield() failed to initialise Skyfield timescale&quot;</span>
+    <span class="n">t</span> <span class="o">=</span> <span class="n">ts</span><span class="o">.</span><span class="n">tt_jd</span><span class="p">(</span><span class="n">times_jd</span><span class="p">)</span>
+
+    <span class="n">R_teme_gcrs</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="n">np</span><span class="o">.</span><span class="n">transpose</span><span class="p">(</span><span class="n">TEME</span><span class="o">.</span><span class="n">rotation_at</span><span class="p">(</span><span class="n">t</span><span class="p">),</span> <span class="n">axes</span><span class="o">=</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">2</span><span class="p">))</span>
+        <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">t</span><span class="p">,</span> <span class="s2">&quot;shape&quot;</span><span class="p">)</span>
+        <span class="k">else</span> <span class="n">np</span><span class="o">.</span><span class="n">transpose</span><span class="p">(</span><span class="n">TEME</span><span class="o">.</span><span class="n">rotation_at</span><span class="p">(</span><span class="n">t</span><span class="p">))</span>
+    <span class="p">)</span>
+    <span class="n">r_gcrs</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="n">np</span><span class="o">.</span><span class="n">einsum</span><span class="p">(</span><span class="s2">&quot;ij...,j...-&gt;i...&quot;</span><span class="p">,</span> <span class="n">R_teme_gcrs</span><span class="p">,</span> <span class="n">r_teme</span><span class="o">.</span><span class="n">T</span><span class="p">)</span><span class="o">.</span><span class="n">T</span>
+        <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">t</span><span class="p">,</span> <span class="s2">&quot;shape&quot;</span><span class="p">)</span>
+        <span class="k">else</span> <span class="n">R_teme_gcrs</span><span class="o">.</span><span class="n">dot</span><span class="p">(</span><span class="n">r_teme</span><span class="o">.</span><span class="n">T</span><span class="p">)</span><span class="o">.</span><span class="n">T</span>
+    <span class="p">)</span>
+
+    <span class="c1"># 2. Base GCRS -&gt; ITRS using Skyfield cached baseline</span>
+    <span class="n">R_gcrs_itrs</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="n">np</span><span class="o">.</span><span class="n">transpose</span><span class="p">(</span><span class="n">itrs</span><span class="o">.</span><span class="n">rotation_at</span><span class="p">(</span><span class="n">t</span><span class="p">),</span> <span class="n">axes</span><span class="o">=</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">2</span><span class="p">))</span>
+        <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">t</span><span class="p">,</span> <span class="s2">&quot;shape&quot;</span><span class="p">)</span>
+        <span class="k">else</span> <span class="n">np</span><span class="o">.</span><span class="n">transpose</span><span class="p">(</span><span class="n">itrs</span><span class="o">.</span><span class="n">rotation_at</span><span class="p">(</span><span class="n">t</span><span class="p">))</span>
+    <span class="p">)</span>
+    <span class="n">r_itrs</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="n">np</span><span class="o">.</span><span class="n">einsum</span><span class="p">(</span><span class="s2">&quot;ij...,j...-&gt;i...&quot;</span><span class="p">,</span> <span class="n">R_gcrs_itrs</span><span class="p">,</span> <span class="n">r_gcrs</span><span class="o">.</span><span class="n">T</span><span class="p">)</span><span class="o">.</span><span class="n">T</span>
+        <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">t</span><span class="p">,</span> <span class="s2">&quot;shape&quot;</span><span class="p">)</span>
+        <span class="k">else</span> <span class="n">R_gcrs_itrs</span><span class="o">.</span><span class="n">dot</span><span class="p">(</span><span class="n">r_gcrs</span><span class="o">.</span><span class="n">T</span><span class="p">)</span><span class="o">.</span><span class="n">T</span>
+    <span class="p">)</span>
+
+    <span class="kn">import</span> <span class="nn">os</span>
+
+    <span class="n">spacebook_enabled</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;ASTRA_SPACEBOOK_ENABLED&quot;</span><span class="p">,</span> <span class="s2">&quot;true&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span> <span class="o">!=</span> <span class="s2">&quot;false&quot;</span>
+    <span class="p">)</span>
+
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">use_spacebook_eop</span> <span class="ow">or</span> <span class="ow">not</span> <span class="n">spacebook_enabled</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">r_itrs</span>  <span class="c1"># type: ignore[no-any-return]</span>
+
+    <span class="c1"># 3. Apply Spacebook EOP Differential (Correction Matrix)</span>
+    <span class="n">xp_sb</span><span class="p">,</span> <span class="n">yp_sb</span><span class="p">,</span> <span class="n">dut1_sb</span> <span class="o">=</span> <span class="n">get_eop_correction</span><span class="p">(</span><span class="n">times_jd</span><span class="p">)</span>
+
+    <span class="c1"># Only correct if we got actual data (non-zero combined norms)</span>
+    <span class="k">if</span> <span class="p">(</span>
+        <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">xp_sb</span><span class="p">))</span> <span class="o">==</span> <span class="mi">0</span>
+        <span class="ow">and</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">yp_sb</span><span class="p">))</span> <span class="o">==</span> <span class="mi">0</span>
+        <span class="ow">and</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">dut1_sb</span><span class="p">))</span> <span class="o">==</span> <span class="mi">0</span>
+    <span class="p">):</span>
+        <span class="k">return</span> <span class="n">r_itrs</span>  <span class="c1"># type: ignore[no-any-return]</span>
+
+    <span class="c1"># Skyfield base parameters</span>
+    <span class="c1"># AUDIT-C-02 Verification: Skyfield&#39;s Time.polar_motion_angles() returns</span>
+    <span class="c1"># (xp, yp, era_rad) where xp and yp are in ARCSECONDS (the IERS Bulletin A</span>
+    <span class="c1"># storage convention).  This matches the unit of xp_sb / yp_sb from</span>
+    <span class="c1"># Spacebook, so the delta below is correctly arc-second-valued before the</span>
+    <span class="c1"># (pi/648000) arcsec→radians conversion factor.  ERA (the third element) is</span>
+    <span class="c1"># in radians but is not used here.</span>
+    <span class="n">dut1_skyfield</span> <span class="o">=</span> <span class="n">t</span><span class="o">.</span><span class="n">dut1</span>
+    <span class="n">xp_sky</span><span class="p">,</span> <span class="n">yp_sky</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">t</span><span class="o">.</span><span class="n">polar_motion_angles</span><span class="p">()</span>  <span class="c1"># both xp_sky, yp_sky in arcsec</span>
+
+    <span class="c1"># Deltas</span>
+    <span class="n">d_dut1</span> <span class="o">=</span> <span class="n">dut1_sb</span> <span class="o">-</span> <span class="n">dut1_skyfield</span>
+    <span class="n">d_xp_rc</span> <span class="o">=</span> <span class="p">(</span><span class="n">xp_sb</span> <span class="o">-</span> <span class="n">xp_sky</span><span class="p">)</span> <span class="o">*</span> <span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">pi</span> <span class="o">/</span> <span class="p">(</span><span class="mf">180.0</span> <span class="o">*</span> <span class="mf">3600.0</span><span class="p">))</span>  <span class="c1"># arcsec to rad</span>
+    <span class="n">d_yp_rc</span> <span class="o">=</span> <span class="p">(</span><span class="n">yp_sb</span> <span class="o">-</span> <span class="n">yp_sky</span><span class="p">)</span> <span class="o">*</span> <span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">pi</span> <span class="o">/</span> <span class="p">(</span><span class="mf">180.0</span> <span class="o">*</span> <span class="mf">3600.0</span><span class="p">))</span>
+
+    <span class="c1"># [HIGH-06 fix] EOP sanity clamp: reject physically implausible deltas that</span>
+    <span class="c1"># indicate stale, corrupt, or unit-mismatched Spacebook EOP data.</span>
+    <span class="c1"># Limits: |ΔUT1| ≤ 1.0 s (IERS spec bound), |Δxp|/|Δyp| ≤ 0.01 rad (~2000 arcsec).</span>
+    <span class="kn">import</span> <span class="nn">logging</span> <span class="k">as</span> <span class="nn">_frames_log</span>
+
+    <span class="n">_flog</span> <span class="o">=</span> <span class="n">_frames_log</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="vm">__name__</span><span class="p">)</span>
+    <span class="c1"># [FIX] Define omega_earth BEFORE it is referenced in _MAX_THETA below.</span>
+    <span class="c1"># Previously this constant was defined at line ~199 (after the clamp section),</span>
+    <span class="c1"># causing an UnboundLocalError whenever the EOP correction branch executed.</span>
+    <span class="n">omega_earth</span> <span class="o">=</span> <span class="mf">7.292115146706979e-5</span>  <span class="c1"># rad/s  — IAU/IERS 2010 Earth rotation rate</span>
+    <span class="n">_MAX_DUT1</span> <span class="o">=</span> <span class="mf">1.0</span>  <span class="c1"># seconds — IERS hard limit for UT1-UTC</span>
+    <span class="n">_MAX_PM_RAD</span> <span class="o">=</span> <span class="mf">0.01</span>  <span class="c1"># radians ≈ 2062 arcsec — well beyond any observed value</span>
+    <span class="n">_MAX_THETA</span> <span class="o">=</span> <span class="n">_MAX_DUT1</span> <span class="o">*</span> <span class="n">omega_earth</span>  <span class="c1"># corresponding phase limit</span>
+
+    <span class="k">if</span> <span class="n">np</span><span class="o">.</span><span class="n">any</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">d_dut1</span><span class="p">)</span> <span class="o">&gt;</span> <span class="n">_MAX_DUT1</span><span class="p">):</span>
+        <span class="n">_flog</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span>
+            <span class="s2">&quot;EOP anomaly: |Δ-DUT1|=</span><span class="si">%.4f</span><span class="s2"> s exceeds </span><span class="si">%.1f</span><span class="s2"> s limit — clamping. &quot;</span>
+            <span class="s2">&quot;Check Spacebook EOP data freshness.&quot;</span><span class="p">,</span>
+            <span class="nb">float</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">max</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">d_dut1</span><span class="p">))),</span>
+            <span class="n">_MAX_DUT1</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="n">d_dut1</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">clip</span><span class="p">(</span><span class="n">d_dut1</span><span class="p">,</span> <span class="o">-</span><span class="n">_MAX_DUT1</span><span class="p">,</span> <span class="n">_MAX_DUT1</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">np</span><span class="o">.</span><span class="n">any</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">d_xp_rc</span><span class="p">)</span> <span class="o">&gt;</span> <span class="n">_MAX_PM_RAD</span><span class="p">):</span>
+        <span class="n">_flog</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span>
+            <span class="s2">&quot;EOP anomaly: |Δxp|=</span><span class="si">%.4e</span><span class="s2"> rad exceeds </span><span class="si">%.4e</span><span class="s2"> rad limit — clamping.&quot;</span><span class="p">,</span>
+            <span class="nb">float</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">max</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">d_xp_rc</span><span class="p">))),</span>
+            <span class="n">_MAX_PM_RAD</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="n">d_xp_rc</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">clip</span><span class="p">(</span><span class="n">d_xp_rc</span><span class="p">,</span> <span class="o">-</span><span class="n">_MAX_PM_RAD</span><span class="p">,</span> <span class="n">_MAX_PM_RAD</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">np</span><span class="o">.</span><span class="n">any</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">d_yp_rc</span><span class="p">)</span> <span class="o">&gt;</span> <span class="n">_MAX_PM_RAD</span><span class="p">):</span>
+        <span class="n">_flog</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span>
+            <span class="s2">&quot;EOP anomaly: |Δyp|=</span><span class="si">%.4e</span><span class="s2"> rad exceeds </span><span class="si">%.4e</span><span class="s2"> rad limit — clamping.&quot;</span><span class="p">,</span>
+            <span class="nb">float</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">max</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">d_yp_rc</span><span class="p">))),</span>
+            <span class="n">_MAX_PM_RAD</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="n">d_yp_rc</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">clip</span><span class="p">(</span><span class="n">d_yp_rc</span><span class="p">,</span> <span class="o">-</span><span class="n">_MAX_PM_RAD</span><span class="p">,</span> <span class="n">_MAX_PM_RAD</span><span class="p">)</span>
+
+    <span class="c1"># Earth rotation phase delta — omega_earth already defined above.</span>
+    <span class="n">d_theta</span> <span class="o">=</span> <span class="n">d_dut1</span> <span class="o">*</span> <span class="n">omega_earth</span>
+
+    <span class="c1"># Apply correcting rotational approximations</span>
+    <span class="c1"># R_diff = R_y(d_xp) @ R_x(d_yp) @ R_z(d_theta)</span>
+
+    <span class="n">cos_t</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">cos</span><span class="p">(</span><span class="n">d_theta</span><span class="p">)</span>
+    <span class="n">sin_t</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="n">d_theta</span><span class="p">)</span>
+
+    <span class="c1"># Pre-allocate array for corrected ITRS vectors</span>
+    <span class="n">r_itrs_corrected</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">empty_like</span><span class="p">(</span><span class="n">r_itrs</span><span class="p">)</span>
+
+    <span class="c1"># Vectorized application</span>
+    <span class="k">if</span> <span class="n">r_itrs</span><span class="o">.</span><span class="n">ndim</span> <span class="o">==</span> <span class="mi">2</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">r_itrs</span><span class="p">)):</span>
+            <span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">z</span> <span class="o">=</span> <span class="n">r_itrs</span><span class="p">[</span><span class="n">i</span><span class="p">]</span>
+
+            <span class="c1"># R_z Earth rotation adjustment</span>
+            <span class="n">x_rot</span> <span class="o">=</span> <span class="n">x</span> <span class="o">*</span> <span class="n">cos_t</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">+</span> <span class="n">y</span> <span class="o">*</span> <span class="n">sin_t</span><span class="p">[</span><span class="n">i</span><span class="p">]</span>
+            <span class="n">y_rot</span> <span class="o">=</span> <span class="o">-</span><span class="n">x</span> <span class="o">*</span> <span class="n">sin_t</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">+</span> <span class="n">y</span> <span class="o">*</span> <span class="n">cos_t</span><span class="p">[</span><span class="n">i</span><span class="p">]</span>
+            <span class="n">z_rot</span> <span class="o">=</span> <span class="n">z</span>
+
+            <span class="c1"># R_x, R_y Polar motion tilt adjustment (small-angle approximation)</span>
+            <span class="c1"># R_y(dx) @ R_x(dy) = [[1, 0, dx], [0, 1, -dy], [-dx, dy, 1]]</span>
+            <span class="n">dx</span> <span class="o">=</span> <span class="n">d_xp_rc</span><span class="p">[</span><span class="n">i</span><span class="p">]</span>
+            <span class="n">dy</span> <span class="o">=</span> <span class="n">d_yp_rc</span><span class="p">[</span><span class="n">i</span><span class="p">]</span>
+
+            <span class="n">x_f</span> <span class="o">=</span> <span class="n">x_rot</span> <span class="o">+</span> <span class="n">dx</span> <span class="o">*</span> <span class="n">z_rot</span>
+            <span class="n">y_f</span> <span class="o">=</span> <span class="n">y_rot</span> <span class="o">-</span> <span class="n">dy</span> <span class="o">*</span> <span class="n">z_rot</span>
+            <span class="n">z_f</span> <span class="o">=</span> <span class="o">-</span><span class="n">dx</span> <span class="o">*</span> <span class="n">x_rot</span> <span class="o">+</span> <span class="n">dy</span> <span class="o">*</span> <span class="n">y_rot</span> <span class="o">+</span> <span class="n">z_rot</span>
+
+            <span class="n">r_itrs_corrected</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="n">x_f</span><span class="p">,</span> <span class="n">y_f</span><span class="p">,</span> <span class="n">z_f</span><span class="p">]</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">z</span> <span class="o">=</span> <span class="n">r_itrs</span>
+        <span class="n">x_rot</span> <span class="o">=</span> <span class="n">x</span> <span class="o">*</span> <span class="n">cos_t</span> <span class="o">+</span> <span class="n">y</span> <span class="o">*</span> <span class="n">sin_t</span>
+        <span class="n">y_rot</span> <span class="o">=</span> <span class="o">-</span><span class="n">x</span> <span class="o">*</span> <span class="n">sin_t</span> <span class="o">+</span> <span class="n">y</span> <span class="o">*</span> <span class="n">cos_t</span>
+        <span class="n">z_rot</span> <span class="o">=</span> <span class="n">z</span>
+
+        <span class="n">dx</span> <span class="o">=</span> <span class="n">d_xp_rc</span>
+        <span class="n">dy</span> <span class="o">=</span> <span class="n">d_yp_rc</span>
+
+        <span class="n">x_f</span> <span class="o">=</span> <span class="n">x_rot</span> <span class="o">+</span> <span class="n">dx</span> <span class="o">*</span> <span class="n">z_rot</span>
+        <span class="n">y_f</span> <span class="o">=</span> <span class="n">y_rot</span> <span class="o">-</span> <span class="n">dy</span> <span class="o">*</span> <span class="n">z_rot</span>
+        <span class="n">z_f</span> <span class="o">=</span> <span class="o">-</span><span class="n">dx</span> <span class="o">*</span> <span class="n">x_rot</span> <span class="o">+</span> <span class="n">dy</span> <span class="o">*</span> <span class="n">y_rot</span> <span class="o">+</span> <span class="n">z_rot</span>
+
+        <span class="n">r_itrs_corrected</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="n">x_f</span><span class="p">,</span> <span class="n">y_f</span><span class="p">,</span> <span class="n">z_f</span><span class="p">])</span>
+
+    <span class="k">return</span> <span class="n">r_itrs_corrected</span>  <span class="c1"># type: ignore[no-any-return]</span></div>
+
+
+
+<div class="viewcode-block" id="ecef_to_geodetic_wgs84">
+<a class="viewcode-back" href="../../apidoc/astra.frames.html#astra.frames.ecef_to_geodetic_wgs84">[docs]</a>
+<span class="nd">@njit</span><span class="p">(</span><span class="n">fastmath</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">cache</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="k">def</span> <span class="nf">ecef_to_geodetic_wgs84</span><span class="p">(</span>
+    <span class="n">x</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">y</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">z</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Convert ECEF Cartesian coordinates (km) to WGS84 Geodetic coordinates.</span>
+
+<span class="sd">    Uses the Bowring (1976) single-pass iterative formula, which achieves</span>
+<span class="sd">    ~0.1 mm accuracy at sea level and better at orbital altitudes.</span>
+
+<span class="sd">    COORD-01 Fix: Handles the polar singularity (cos(lat)→0 at |lat|≥80°) by</span>
+<span class="sd">    using the z-based altitude formula for high latitudes:</span>
+<span class="sd">        alt = |z|/sin(lat) - N*(1-e²)</span>
+<span class="sd">    instead of the equatorial formula (alt = p/cos(lat) - N) which produces</span>
+<span class="sd">    infinite values when the satellite passes directly over a polar station.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        x, y, z: 1D arrays of cartesian coordinates in km.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        tuple of (latitude_deg, longitude_deg, altitude_km).</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">a</span> <span class="o">=</span> <span class="mf">6378.137</span>  <span class="c1"># WGS84 Semi-major axis (km)</span>
+    <span class="n">f</span> <span class="o">=</span> <span class="mf">1.0</span> <span class="o">/</span> <span class="mf">298.257223563</span>  <span class="c1"># Flattening</span>
+    <span class="n">b</span> <span class="o">=</span> <span class="n">a</span> <span class="o">*</span> <span class="p">(</span><span class="mf">1.0</span> <span class="o">-</span> <span class="n">f</span><span class="p">)</span>
+    <span class="n">e2</span> <span class="o">=</span> <span class="mf">1.0</span> <span class="o">-</span> <span class="p">(</span><span class="n">b</span><span class="o">**</span><span class="mi">2</span> <span class="o">/</span> <span class="n">a</span><span class="o">**</span><span class="mi">2</span><span class="p">)</span>
+    <span class="n">ep2</span> <span class="o">=</span> <span class="p">(</span><span class="n">a</span><span class="o">**</span><span class="mi">2</span> <span class="o">-</span> <span class="n">b</span><span class="o">**</span><span class="mi">2</span><span class="p">)</span> <span class="o">/</span> <span class="n">b</span><span class="o">**</span><span class="mi">2</span>
+
+    <span class="n">p</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">x</span><span class="o">**</span><span class="mi">2</span> <span class="o">+</span> <span class="n">y</span><span class="o">**</span><span class="mi">2</span><span class="p">)</span>
+    <span class="n">th</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arctan2</span><span class="p">(</span><span class="n">a</span> <span class="o">*</span> <span class="n">z</span><span class="p">,</span> <span class="n">b</span> <span class="o">*</span> <span class="n">p</span><span class="p">)</span>
+
+    <span class="n">lon</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arctan2</span><span class="p">(</span><span class="n">y</span><span class="p">,</span> <span class="n">x</span><span class="p">)</span>
+    <span class="n">lat</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arctan2</span><span class="p">(</span><span class="n">z</span> <span class="o">+</span> <span class="n">ep2</span> <span class="o">*</span> <span class="n">b</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="n">th</span><span class="p">)</span> <span class="o">**</span> <span class="mi">3</span><span class="p">,</span> <span class="n">p</span> <span class="o">-</span> <span class="n">e2</span> <span class="o">*</span> <span class="n">a</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">cos</span><span class="p">(</span><span class="n">th</span><span class="p">)</span> <span class="o">**</span> <span class="mi">3</span><span class="p">)</span>
+
+    <span class="n">N</span> <span class="o">=</span> <span class="n">a</span> <span class="o">/</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="mf">1.0</span> <span class="o">-</span> <span class="n">e2</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="n">lat</span><span class="p">)</span> <span class="o">**</span> <span class="mi">2</span><span class="p">)</span>
+
+    <span class="c1"># COORD-01: Use z-based altitude formula at high latitudes where cos(lat)→0.</span>
+    <span class="c1"># Threshold |lat| &gt; 80° (~1.396 rad) matches the standard geodetic convention</span>
+    <span class="c1"># used by IERS, Bowring, and Vermeille altitude calculators.</span>
+    <span class="n">lat_abs</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">lat</span><span class="p">)</span>
+    <span class="n">polar_mask</span> <span class="o">=</span> <span class="n">lat_abs</span> <span class="o">&gt;</span> <span class="p">(</span><span class="mf">80.0</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span> <span class="o">/</span> <span class="mf">180.0</span><span class="p">)</span>
+
+    <span class="c1"># AUDIT-A-08 Fix: Guard the equatorial branch against cos(lat)→0 at poles.</span>
+    <span class="c1"># Numba with fastmath=True evaluates BOTH branches of np.where before</span>
+    <span class="c1"># selecting, so p/cos(lat) would produce inf at the poles even though the</span>
+    <span class="c1"># polar_mask would select the other branch.  An inf intermediate can poison</span>
+    <span class="c1"># downstream computations under fastmath associativity relaxation.</span>
+    <span class="n">cos_lat</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">cos</span><span class="p">(</span><span class="n">lat</span><span class="p">)</span>
+    <span class="n">safe_cos</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">cos_lat</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mf">1e-10</span><span class="p">,</span> <span class="mf">1e-10</span><span class="p">,</span> <span class="n">cos_lat</span><span class="p">)</span>
+    <span class="n">alt_equatorial</span> <span class="o">=</span> <span class="n">p</span> <span class="o">/</span> <span class="n">safe_cos</span> <span class="o">-</span> <span class="n">N</span>
+
+    <span class="c1"># Polar formula (safe for |lat| &gt; 0, avoids 1/cos(lat) singularity)</span>
+    <span class="n">sin_lat</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="n">lat</span><span class="p">)</span>
+    <span class="c1"># Guard against |lat|=0 in the polar branch (shouldn&#39;t happen when polar_mask is True,</span>
+    <span class="c1"># but Numba requires scalar-safe expressions)</span>
+    <span class="n">safe_sin</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">sin_lat</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mf">1e-15</span><span class="p">,</span> <span class="mf">1e-15</span><span class="p">,</span> <span class="n">sin_lat</span><span class="p">)</span>
+    <span class="n">alt_polar</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">z</span><span class="p">)</span> <span class="o">/</span> <span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">safe_sin</span><span class="p">)</span> <span class="o">-</span> <span class="n">N</span> <span class="o">*</span> <span class="p">(</span><span class="mf">1.0</span> <span class="o">-</span> <span class="n">e2</span><span class="p">)</span>
+
+    <span class="n">alt</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">polar_mask</span><span class="p">,</span> <span class="n">alt_polar</span><span class="p">,</span> <span class="n">alt_equatorial</span><span class="p">)</span>
+
+    <span class="c1"># Radians to degrees</span>
+    <span class="n">lat_deg</span> <span class="o">=</span> <span class="n">lat</span> <span class="o">*</span> <span class="p">(</span><span class="mf">180.0</span> <span class="o">/</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span><span class="p">)</span>
+    <span class="n">lon_deg</span> <span class="o">=</span> <span class="n">lon</span> <span class="o">*</span> <span class="p">(</span><span class="mf">180.0</span> <span class="o">/</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">lat_deg</span><span class="p">,</span> <span class="n">lon_deg</span><span class="p">,</span> <span class="n">alt</span>  <span class="c1"># type: ignore[no-any-return]</span></div>
+
+</pre></div>
+        </article>
+      </div>
+      <footer>
+        
+        <div class="related-pages">
+          
+          
+        </div>
+        <div class="bottom-of-page">
+          <div class="left-details">
+            <div class="copyright">
+                Copyright &#169; 2026, Ishan Tare
+            </div>
+            Made with <a href="https://www.sphinx-doc.org/">Sphinx</a> and <a class="muted-link" href="https://pradyunsg.me">@pradyunsg</a>'s
+            
+            <a href="https://github.com/pradyunsg/furo">Furo</a>
+            
+          </div>
+          <div class="right-details">
+            
+          </div>
+        </div>
+        
+      </footer>
+    </div>
+    <aside class="toc-drawer no-toc">
+      
+      
+      
+    </aside>
+  </div>
+</div><script src="../../_static/documentation_options.js?v=c1362a89"></script>
+    <script src="../../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <script src="../../_static/scripts/furo.js?v=46bd48cc"></script>
+    <script src="../../_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="../../_static/copybutton.js?v=f281be69"></script>
+    </body>
+</html>

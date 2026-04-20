@@ -1,0 +1,7 @@
+astra.debris module
+===================
+
+.. automodule:: astra.debris
+   :members:
+   :show-inheritance:
+   :undoc-members:

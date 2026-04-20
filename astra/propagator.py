@@ -19,7 +19,7 @@ error-estimate 5th/3rd order) adaptive-step integrator via SciPy's
 
 - Two-body Keplerian gravity
 - J2, J3, J4 zonal harmonic perturbations (WGS84)
-- Empirical atmospheric drag (Jacchia-class with space weather)
+- Empirical atmospheric drag (NRLMSISE-00 with space weather)
 - Solar third-body point-mass perturbation (JPL DE421)
 - Lunar third-body point-mass perturbation (JPL DE421)
 - Finite continuous thrust (7-DOF powered arcs)
@@ -276,8 +276,8 @@ class DragConfig:
     cr: float = 1.5
     include_srp: bool = True
 
-    # Atmospheric model selection: "Jacchia" (default) or "NRLMSISE00"
-    model: str = "Jacchia"
+    # Atmospheric model selection: "NRLMSISE00" (default) or "Jacchia"
+    model: str = "NRLMSISE00"
 
     # [LOW-02 fix] `srp_conical_shadow` is the canonical name — the shadow model
     # is actually a high-fidelity *conical* Earth umbra/penumbra geometry,
@@ -481,7 +481,7 @@ def _atmospheric_density(
     """Get atmospheric density in kg/m³.
 
     If `use_empirical` is True and space-weather data is available,
-    uses the Jacchia-class model from data_pipeline.  Otherwise falls
+    uses the NRLMSISE-00 model from data_pipeline.  Otherwise falls
     back to the static exponential model.
 
     In STRICT_MODE, if space-weather data is unavailable, a SpaceWeatherError

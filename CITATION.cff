@@ -4,7 +4,7 @@ authors:
   - family-names: "Tare"
     given-names: "Ishan"
 title: "ASTRA: Autonomous Space Traffic Risk Analyzer"
-version: 3.3.0
-date-released: 2026-04-07
+version: 3.5.0
+date-released: 2026-04-19
 url: "https://github.com/ISHANTARE/ASTRA"
 doi: "10.5281/zenodo.19201701"

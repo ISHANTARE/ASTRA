@@ -1,4 +1,4 @@
-# ASTRA-Core v3.4.0 (Autonomous Space Traffic Risk Analyzer) 🛰️
+# ASTRA-Core v3.5.0 (Autonomous Space Traffic Risk Analyzer) 🛰️
 
 ![PyPI - Version](https://img.shields.io/pypi/v/astra-core-engine?color=blue&label=astra-core-engine)
 [![Documentation Status](https://readthedocs.org/projects/astra-core/badge/?version=latest)](https://astra-core.readthedocs.io/en/latest/?badge=latest)
@@ -98,11 +98,13 @@ If credentials are missing, ASTRA raises a clear error with setup hints.
 * **Spacebook Integration:** Direct streaming of Spacebook XP-TLEs, true observational covariance matrices, and live Space Weather priorities—bypassing heuristic estimation models for flight-grade accuracy.
 * **Dual format (TLE + OMM):** One API surface for parsing, propagation, filtering, and conjunctions.
 * **SGP4 at scale:** Vectorized propagation (`propagate_many`, generators) with UT1-aware handling where ephemeris data are available.
-* **Cowell propagation:** Dormand–Prince integration with **J₂–J₄**, empirical **drag** (space weather), **Sun/Moon** third-body gravity (**JPL DE421**), high-fidelity **solar radiation pressure** with **conical Earth shadow** (continuous penumbra modeling), and **7-DOF** finite burns with mass flow.
-* **Conjunction screening:** KD-tree prefilter over time steps (~14.8x speedup), spline refinement for TCA, Spacebook EOP coordinate mapping, and dynamic effective radius from metadata when available.
-* **Collision probability:** Analytical (Chan/Foster lineage), exact **2D Gaussian Quadrature** (`dblquad`), and **6D Monte Carlo** paths when full covariances are supplied; Seamless integration with Spacebook synthetic covariance matrices.
-* **Catalog ingestion:** CelesTrak and Space-Track helpers plus local **OMM** files.
+* **Cowell propagation:** Dormand–Prince DOP853 integration with **J₂–J₄**, empirical **drag** (NRLMSISE-00 + space weather), **Sun/Moon** third-body gravity (**JPL DE421**), high-fidelity **solar radiation pressure** with **conical Earth shadow** (continuous penumbra modeling), and **7-DOF** finite burns with mass depletion.
+* **STM covariance propagation:** Full **6×6** State Transition Matrix integration with analytical J₂ partial derivatives; co-rotating drag Jacobian correction maintains covariance symmetry.
+* **Conjunction screening:** KD-tree prefilter over time steps (~14.8x speedup), cubic spline TCA refinement, Spacebook EOP coordinate mapping, and dynamic effective radius from object metadata.
+* **Collision probability:** Analytical (Chan/Foster lineage), exact **2D Gaussian Quadrature** (`dblquad`), and **6D Monte Carlo** paths when full covariances are supplied; seamless integration with Spacebook synthetic covariance matrices.
+* **Catalog ingestion:** CelesTrak and Space-Track helpers plus local **OMM** files and Spacebook STK ephemeris parsing.
 * **Pass prediction:** TEME → ground observer pipeline (ENU), coarse grid + refinement for AOS/TCA/LOS.
+* **JIT warm-up:** `astra.warmup()` pre-compiles Numba kernels at startup to eliminate first-call latency in production workers.
 * **Optional 3D plots:** Interactive Plotly figures via the **`[viz]`** extra—core install stays lean for servers and CI.
 
 ---
@@ -129,7 +131,7 @@ cd ASTRA
 pip install -e ".[test]"
 ```
 
-Requires **Python 3.10+**. Core dependencies include NumPy, SciPy, Skyfield, SGP4, Requests, Numba, and defusedxml.
+Requires **Python 3.10+**. Core dependencies: NumPy, SciPy, Skyfield, SGP4, Requests, Numba, and defusedxml.
 
 ---
 
@@ -140,13 +142,15 @@ ASTRA-Core implements widely used models suitable for **research, education, int
 | Topic | What to know |
 |-------|----------------|
 | **Sun/Moon ephemeris** | Default kernel is **DE421** (roughly **1900–2050**). Very long or future-dated studies may need another ephemeris (e.g. DE440) and your own validation. |
-| **Atmosphere** | Empirical **Jacchia-class** density, not NRLMSISE. Not intended for detailed re-entry or the densest LEO regimes alone. |
-| **SRP** | Simple **cannonball** model; enhanced with high-fidelity **conical Earth shadow** capable of smoothly modeling fractional illumination through the penumbra. |
+| **Atmosphere** | **NRLMSISE-00** density model (with space weather F10.7 + Ap). Not intended for detailed re-entry or the densest LEO regimes alone. |
+| **SRP** | **Cannonball** model with flux scaled from 1 AU; enhanced with a high-fidelity **conical Earth shadow** that continuously models fractional illumination across the penumbra. The canonical field is `DragConfig.srp_conical_shadow` — the old name `srp_cylindrical_shadow` is deprecated and emits a `DeprecationWarning`. |
 | **P_c** | Depends on **covariance quality**. Built-in `estimate_covariance()` is a **rough heuristic**—for serious thresholds, use **CDM-class covariances**. Turn on **strict mode** to avoid silent fallbacks. |
 | **Monte Carlo P_c** | Uses a **straight-line** relative-motion model per sample; very **slow** co-orbital encounters need careful interpretation and finer time sampling. |
 | **Catalog quality** | Stale or poor elements dominate error—always check epoch and data source. |
 
 **Strict mode:** `astra.set_strict_mode(True)` or `astra.config.ASTRA_STRICT_MODE = True` makes many missing-data paths **raise** instead of warn-and-continue—recommended when building tools that must not guess.
+
+**Banner suppression:** Set `ASTRA_NO_BANNER=1` in the environment to suppress the startup banner—useful for production worker pools where each subprocess would otherwise emit it independently.
 
 More detail: [KNOWMORE.md](./KNOWMORE.md) and the **Limitations** page on [Read the Docs](https://astra-core.readthedocs.io/en/latest/).
 
@@ -210,6 +214,30 @@ catalog = astra.fetch_spacetrack_active()
 print(f"Loaded {len(catalog)} satellites.")
 ```
 
+### High-fidelity Cowell propagation
+
+```python
+from astra import propagate_cowell, NumericalState, DragConfig
+import numpy as np
+
+state = NumericalState(
+    t_jd=2460000.5,
+    position_km=np.array([7000.0, 0.0, 0.0]),
+    velocity_km_s=np.array([0.0, 7.5, 0.0]),
+)
+drag = DragConfig(cd=2.2, area_m2=10.0, mass_kg=500.0, srp_conical_shadow=True)
+
+trajectory = propagate_cowell(state, duration_s=3600.0, dt_out=60.0, drag_config=drag)
+```
+
+### Production warm-up (eliminate JIT cold-start)
+
+```python
+import astra
+
+astra.warmup()  # pre-compiles Numba kernels — call once at worker startup
+```
+
 ### Optional: Plotly (`[viz]` installed)
 
 ```python
@@ -249,9 +277,12 @@ Functions are available from the `astra` namespace.
 | Function | Returns |
 |----------|---------|
 | `fetch_xp_tle_catalog()` | Spacebook XP-TLE active subset |
+| `fetch_tle_catalog()` | Standard Spacebook TLE catalog |
 | `fetch_historical_tle(date)` | Historical TLEs |
-| `fetch_synthetic_covariance_stk(id)` | STK 6x6 observational errors |
+| `fetch_synthetic_covariance_stk(norad_id)` | STK 6×6 observational covariance (raw text) |
+| `fetch_satcat_details(norad_id)` | Per-object SATCAT metadata |
 | `get_space_weather_sb(jd)` | COMSPOC live SW parameters |
+| `get_eop_sb(jd)` | COMSPOC live Earth Orientation Parameters |
 
 ### OMM
 
@@ -259,12 +290,24 @@ Functions are available from the `astra` namespace.
 * `parse_omm_record(dict)` → `SatelliteOMM`
 * `load_omm_file(path)` → `list[SatelliteOMM]`
 * `validate_omm(dict)` → `bool`
+* `xptle_to_satellite_omm(record)` → `SatelliteOMM`  *(converts Spacebook XP-TLE dicts)*
 
 ### TLE
 
 * `load_tle_catalog(lines)` → `list[SatelliteTLE]`
 * `parse_tle(name, l1, l2)` → `SatelliteTLE`
 * `validate_tle(name, l1, l2)` → `bool`
+
+### STK Ephemeris (Spacebook Synthetic Covariance)
+
+* `parse_stk_ephemeris(text)` → `np.ndarray | None`  *(parses CovarianceTimePosVel block → 6×6 matrix)*
+
+### OCM (Orbit Comprehensive Message)
+
+* `parse_ocm(text)` → `list[NumericalState]` *(auto-detects XML or KVN)*
+* `parse_ocm_xml(text)` → `list[NumericalState]`
+* `parse_ocm_kvn(text)` → `list[NumericalState]`
+* `export_ocm_xml(states, name)` → `str` *(exports ASTRA states to CCSDS OCM XML)*
 
 ### Filtering & debris
 
@@ -274,28 +317,56 @@ Functions are available from the `astra` namespace.
 ### Propagation
 
 * `propagate_orbit`, `propagate_many`, `propagate_many_generator`, `propagate_trajectory`, `ground_track`
-* `propagate_cowell` — numerical Cowell + `DragConfig`
+* `propagate_cowell(initial_state, duration_s, dt_out, drag_config, burns)` — numerical Cowell + `DragConfig`
 
 ### Conjunctions & probability
 
 * `find_conjunctions`, `closest_approach`, `distance_3d`
 * `compute_collision_probability`, `compute_collision_probability_mc`
 * `estimate_covariance`, `propagate_covariance_stm`, `rotate_covariance_rtn_to_eci`
-* `parse_cdm_xml`
+* `load_spacebook_covariance`, `parse_cdm_xml`
 
 ### Space weather & ephemeris helpers
 
 * `get_space_weather`, `load_space_weather`, `atmospheric_density_empirical`
-* `sun_position_de`, `moon_position_de`, etc.
+* `sun_position_de`, `sun_position_teme`, `moon_position_de`, `moon_position_teme`
 
 ### Visibility
 
 * `passes_over_location`, `visible_from_location`
 
+### Maneuver planning
+
+* `validate_burn`, `validate_burn_sequence`
+* `rotation_vnb_to_inertial`, `rotation_rtn_to_inertial`, `frame_to_inertial`
+* `thrust_acceleration_inertial`
+
 ### Utilities & config
 
 * `convert_time`, `vincenty_distance`, `orbit_period`, `orbital_elements`
+* `teme_to_ecef`, `ecef_to_geodetic_wgs84`, `get_eop_correction`
+* `prefetch_iers_data_async`, `jd_utc_to_datetime`, `datetime_utc_to_jd`
 * `set_strict_mode`, `astra.config.ASTRA_STRICT_MODE`
+* `astra.constants` — physical and simulation constants
+* `warmup()` — pre-compiles Numba JIT kernels (call once at worker startup)
+* `SpatialIndex` — KD-tree wrapper for large catalog screening
+
+### Key data types
+
+| Type | Description |
+|------|-------------|
+| `SatelliteTLE` | Legacy TLE satellite record |
+| `SatelliteOMM` | Modern CCSDS OMM satellite record |
+| `SatelliteState` | `Union[SatelliteTLE, SatelliteOMM]` — accepted everywhere |
+| `DebrisObject` | Enriched object with altitude, period, radius |
+| `NumericalState` | Cowell integrator state (position, velocity, mass, optional 6×6 covariance) |
+| `DragConfig` | Drag + SRP parameters for `propagate_cowell` |
+| `SNCConfig` | State Noise Compensation (process noise) for covariance propagation |
+| `FiniteBurn` | Finite burn definition (thrust, Isp, direction, timing) |
+| `ConjunctionEvent` | Screening result with TCA, miss distance, P_c, risk level |
+| `ConjunctionDataMessage` | Parsed CDM XML |
+| `Observer` | Ground station (lat, lon, alt) |
+| `PassEvent` | Ground pass (AOS, TCA, LOS, max elevation) |
 
 ---
 
@@ -308,7 +379,8 @@ Functions are available from the `astra` namespace.
 | `examples/03_ground_station_visibility.py` | Pass prediction |
 | `examples/04_omm_pipeline.py` | OMM end-to-end |
 | `examples/05_compare_tle_omm.py` | TLE vs OMM |
-| `examples/06_spacetrack_pipeline.py` | Space-Track |
+| `examples/06_spacetrack_pipeline.py` | Space-Track (authenticated) |
+| `examples/07_spacebook_pipeline.py` | Spacebook / COMSPOC (XP-TLE, synthetic covariance, live SW, EOP) |
 
 ---
 
@@ -328,7 +400,7 @@ Release notes: [CHANGELOG.md](./CHANGELOG.md).
   publisher = {GitHub},
   journal = {GitHub repository},
   howpublished = {\url{https://github.com/ISHANTARE/ASTRA}},
-  version = {3.4.0}
+  version = {3.5.0}
 }
 ```
 

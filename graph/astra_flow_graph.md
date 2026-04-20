@@ -455,7 +455,7 @@ flowchart TD
 
     SW_OUT --> ATMO["atmospheric_density_empirical(
       alt_km, f107_obs, f107_adj, ap_daily)
-    Jacchia-71 hybrid model:
+    NRLMSISE-00 model:
     T_inf = T_c + 3.24*f107_adj + 1.3*(obs-adj) + 28*Ap^0.4
     H_km = kB*T_inf / (m_eff * g_local) / 1000
     rho = rho_ref * exp(-(alt-400)/H)
@@ -556,7 +556,7 @@ flowchart TD
     CW_CHEB --> CW_SWLOOKUP["_atmospheric_density(alt_km, t_jd)
     → get_space_weather(t_jd)
     → atmospheric_density_empirical()
-    (Jacchia-71, see Section C)"]
+    (NRLMSISE-00, see Section C)"]
     CW_SWLOOKUP --> CW_SEGLOOP["Segment Orchestrator:
     Slice t_span at burn ignition/cutoff boundaries
     for seg in segments:

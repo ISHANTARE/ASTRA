@@ -155,14 +155,39 @@ from astra.omm import (
 )
 
 # ---------------------------------------------------------------------------
-# STK Ephemeris Parser (Spacebook Synthetic Covariance output)
+# OCM Parser (CCSDS Orbit Comprehensive Message — XML and KVN)
 # ---------------------------------------------------------------------------
-from astra.ocm import parse_stk_ephemeris
+from astra.ocm import (
+    parse_stk_ephemeris,   # Spacebook STK DotE → list[NumericalState]
+    parse_ocm,             # Auto-detect XML vs KVN → list[NumericalState]
+    parse_ocm_xml,         # CCSDS OCM XML → list[NumericalState]
+    parse_ocm_kvn,         # CCSDS OCM KVN → list[NumericalState]
+    export_ocm_xml,        # list[NumericalState] → CCSDS OCM XML string
+)
+
+# ---------------------------------------------------------------------------
+# Coordinate Frame Transforms
+# ---------------------------------------------------------------------------
+from astra.frames import (
+    teme_to_ecef,               # TEME → ECEF with optional Spacebook EOP correction
+    ecef_to_geodetic_wgs84,     # ECEF (km) → (lat_deg, lon_deg, alt_km) WGS-84
+    get_eop_correction,         # Batch Spacebook EOP fetch for propagation time grids
+)
 
 # ---------------------------------------------------------------------------
 # TLE Parser (legacy format — backwards compatible)
 # ---------------------------------------------------------------------------
 from astra.tle import load_tle_catalog, parse_tle, validate_tle
+
+# ---------------------------------------------------------------------------
+# Julian Date / Datetime Utilities
+# ---------------------------------------------------------------------------
+from astra.jdutil import (
+    jd_utc_to_datetime,     # Julian Date → UTC-aware datetime
+    datetime_utc_to_jd,     # UTC datetime → Julian Date
+    jd_to_datetime,         # Alias for jd_utc_to_datetime
+    datetime_to_jd,         # Alias for datetime_utc_to_jd
+)
 
 # ---------------------------------------------------------------------------
 # Orbit Propagation (accepts both TLE and OMM)
@@ -181,6 +206,7 @@ from astra.orbit import (
 from astra.propagator import (
     NumericalState,
     DragConfig,
+    SNCConfig,
     propagate_cowell,
 )
 
@@ -212,10 +238,11 @@ from astra.data_pipeline import (
 # ---------------------------------------------------------------------------
 # Visualization & Utilities
 # ---------------------------------------------------------------------------
-from astra.time import convert_time
+from astra.time import convert_time, prefetch_iers_data_async
 from astra.utils import vincenty_distance, orbit_period, orbital_elements
 from astra.visibility import passes_over_location, visible_from_location
 from astra.spatial_index import SpatialIndex
+from astra import constants  # expose as astra.constants.*
 
 # ---------------------------------------------------------------------------
 # Public API Surface (__all__)
@@ -231,8 +258,12 @@ __all__ = [
     "load_omm_file",
     "validate_omm",
     "xptle_to_satellite_omm",
-    # --- STK Ephemeris Parser (Spacebook) ---
+    # --- OCM Parser (CCSDS 502.0-B-2 — XML and KVN) ---
     "parse_stk_ephemeris",
+    "parse_ocm",
+    "parse_ocm_xml",
+    "parse_ocm_kvn",
+    "export_ocm_xml",
     # --- Data Models ---
     "SatelliteTLE",
     "SatelliteOMM",
@@ -240,6 +271,7 @@ __all__ = [
     "OrbitalState",
     "DebrisObject",
     "ConjunctionEvent",
+    "ConjunctionDataMessage",
     "Observer",
     "PassEvent",
     "FilterConfig",
@@ -291,8 +323,18 @@ __all__ = [
     # --- Visibility ---
     "visible_from_location",
     "passes_over_location",
-    # --- Time & Utils ---
+    # --- Time & Datetime ---
     "convert_time",
+    "prefetch_iers_data_async",
+    "jd_utc_to_datetime",
+    "datetime_utc_to_jd",
+    "jd_to_datetime",
+    "datetime_to_jd",
+    # --- Coordinate Frame Transforms ---
+    "teme_to_ecef",
+    "ecef_to_geodetic_wgs84",
+    "get_eop_correction",
+    # --- General Utilities ---
     "vincenty_distance",
     "orbital_elements",
     "orbit_period",
@@ -305,7 +347,6 @@ __all__ = [
     # --- Maneuver & High-Fidelity Physics ---
     "ManeuverFrame",
     "FiniteBurn",
-    "ManeuverError",
     "rotation_vnb_to_inertial",
     "rotation_rtn_to_inertial",
     "frame_to_inertial",
@@ -333,6 +374,7 @@ __all__ = [
     "validate_burn_sequence",
     "NumericalState",
     "DragConfig",
+    "SNCConfig",
     "projected_area_m2",
     "TrajectoryMap",
     "VelocityMap",
