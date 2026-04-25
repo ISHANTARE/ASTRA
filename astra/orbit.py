@@ -125,13 +125,17 @@ def propagate_orbit(
 
             raise EphemerisError(f"Failed to fetch UT1-UTC correction: {exc}") from exc
         logger.warning(
-            "UT1-UTC correction unavailable for NORAD %s at JD %.8f; "
-            "falling back to UTC propagation in relaxed mode. (%r)",
+            "UT1-UTC correction unavailable for NORAD %s at JD %.8f — "
+            "falling back to UTC as UT1. This silently ignores the UT1-UTC "
+            "offset (current value ≈ ±1 s), introducing up to ~400 m of "
+            "along-track position error at LEO velocities. "
+            "Populate the EOP cache via astra.data_pipeline.load_eop_data() "
+            "or set ASTRA_STRICT_MODE=True to detect this in production. (%r)",
             satellite.norad_id,
             t_jd,
             exc,
         )
-        t_jd_ut1 = t_jd  # fallback
+        t_jd_ut1 = t_jd  # fallback: UTC used as UT1 (sub-second accuracy lost)
 
     fraction = 0.0
 
@@ -203,13 +207,17 @@ def propagate_many(
                 f"Failed to fetch UT1-UTC correction for batch: {exc}"
             ) from exc
         logger.warning(
-            "UT1-UTC correction unavailable for batch propagation (%d objects, %d epochs); "
-            "falling back to UTC propagation in relaxed mode. (%r)",
+            "UT1-UTC correction unavailable for batch propagation (%d objects, %d epochs) — "
+            "falling back to UTC as UT1. This silently ignores the UT1-UTC offset "
+            "(current value ≈ ±1 s), introducing up to ~400 m of along-track position "
+            "error at LEO velocities across all propagated states. "
+            "Populate the EOP cache via astra.data_pipeline.load_eop_data() "
+            "or set ASTRA_STRICT_MODE=True to detect this in production. (%r)",
             N,
             T,
             exc,
         )
-        jd_array = times_jd
+        jd_array = times_jd  # fallback: UTC used as UT1
 
     jd_fraction_array = np.zeros_like(jd_array)
 

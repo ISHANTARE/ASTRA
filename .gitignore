@@ -47,3 +47,6 @@ MANIFEST
 docs/apidoc/
 .gitnexus
 AGENTS.md
+
+#extras
+artefacts_downloaded_for_my_review/

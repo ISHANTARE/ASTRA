@@ -40,6 +40,7 @@ from astra.conjunction import (
     distance_3d,
     find_conjunctions,
     load_spacebook_covariance,
+    run_conjunction_sweep,
 )
 
 # ---------------------------------------------------------------------------
@@ -56,7 +57,7 @@ from astra.covariance import (
 # ---------------------------------------------------------------------------
 # CDM (Conjunction Data Message)
 # ---------------------------------------------------------------------------
-from astra.cdm import parse_cdm_xml, ConjunctionDataMessage
+from astra.cdm import parse_cdm_xml, export_cdm_xml, parse_cdm_kvn, export_cdm_kvn, ConjunctionDataMessage
 
 # ---------------------------------------------------------------------------
 # Data Ingestion: CelesTrak (no account required)
@@ -208,6 +209,7 @@ from astra.propagator import (
     DragConfig,
     SNCConfig,
     propagate_cowell,
+    propagate_cowell_batch,
 )
 
 # ---------------------------------------------------------------------------
@@ -220,6 +222,7 @@ from astra.maneuver import (
     thrust_acceleration_inertial,
     validate_burn,
     validate_burn_sequence,
+    plan_hohmann,
 )
 
 # ---------------------------------------------------------------------------
@@ -275,7 +278,6 @@ __all__ = [
     "Observer",
     "PassEvent",
     "FilterConfig",
-    "ConjunctionDataMessage",
     # --- Data Ingestion: CelesTrak (no account required) ---
     "fetch_celestrak_active",  # → list[SatelliteTLE]
     "fetch_celestrak_group",  # → list[SatelliteTLE]
@@ -313,13 +315,18 @@ __all__ = [
     "distance_3d",
     "closest_approach",
     "find_conjunctions",
+    "run_conjunction_sweep",
     "load_spacebook_covariance",
     "compute_collision_probability",
     "estimate_covariance",
     # --- CDM ---
     "parse_cdm_xml",
+    "export_cdm_xml",
+    "parse_cdm_kvn",
+    "export_cdm_kvn",
     # --- Visualization ---
     "plot_trajectories",
+    "plot_ground_track",
     # --- Visibility ---
     "visible_from_location",
     "passes_over_location",
@@ -343,6 +350,7 @@ __all__ = [
     "propagate_covariance_stm",
     "rotate_covariance_rtn_to_eci",
     "propagate_cowell",
+    "propagate_cowell_batch",
     "SpatialIndex",
     # --- Maneuver & High-Fidelity Physics ---
     "ManeuverFrame",
@@ -352,6 +360,7 @@ __all__ = [
     "frame_to_inertial",
     "thrust_acceleration_inertial",
     "validate_burn",
+    "plan_hohmann",
     # --- Space Weather ---
     "sun_position_de",
     "moon_position_de",
@@ -371,6 +380,7 @@ __all__ = [
     "SpacebookLookupError",
     # --- Config & Mode Control ---
     "set_strict_mode",
+    "set_spacebook_enabled",
     "validate_burn_sequence",
     "NumericalState",
     "DragConfig",
@@ -386,6 +396,7 @@ __all__ = [
 import sys
 from . import config
 from astra.config import set_strict_mode
+from astra.config import set_spacebook_enabled
 from typing import Any
 import numpy as np
 
@@ -446,6 +457,16 @@ def __getattr__(name: str) -> Any:
             ) from exc
         globals()["plot_trajectories"] = _plot_traj
         return _plot_traj
+    if name == "plot_ground_track":
+        try:
+            from astra.plot import plot_ground_track as _plot_gt
+        except ImportError as exc:
+            raise ImportError(
+                "plot_ground_track requires Plotly. Install with: "
+                "pip install 'astra-core-engine[viz]' or pip install plotly>=5.18"
+            ) from exc
+        globals()["plot_ground_track"] = _plot_gt
+        return _plot_gt
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 

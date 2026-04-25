@@ -37,6 +37,7 @@ import requests
 from skyfield.api import Loader
 
 from astra.log import get_logger
+from astra.constants import EARTH_EQUATORIAL_RADIUS_KM as _Re_km, G0_STD as _G0_M_S2
 
 logger = get_logger(__name__)
 
@@ -54,7 +55,9 @@ _DEFAULT_DATA_DIR = os.environ.get(
 _CELESTRAK_SW_URL = "https://celestrak.org/SpaceData/SW-All.csv"
 
 # Standard gravitational acceleration (m/s²)
-_G0_M_S2 = 9.80665
+# [FM-9 Fix - Finding #22] Imported from constants.py (as _G0_M_S2 alias for
+# backward compatibility with NRLMSISE-00 internal functions below).
+# Canonical definition: astra.constants.G0_STD = 9.80665 m/s².
 
 # ---------------------------------------------------------------------------
 # NRLMSISE-00 Reference Constants (Atomic masses, gas constant)
@@ -553,7 +556,8 @@ def get_space_weather(
     # ── 1. Spacebook (Primary) ──
     from astra import spacebook
 
-    if spacebook.SPACEBOOK_ENABLED:
+    from astra import config as _astra_cfg
+    if _astra_cfg.SPACEBOOK_ENABLED:
         try:
             # Spacebook handles its own background refreshing
             return spacebook.get_space_weather_sb(t_jd)  # type: ignore[no-any-return]
@@ -638,7 +642,8 @@ def _msis_bates_temperature(
     """
     if z_km <= z_lb_km:
         return T_lb  # type: ignore[no-any-return]
-    xi = (z_km - z_lb_km) * (6378.137 + z_lb_km) / (6378.137 + z_km)
+    # [FM-9 Fix - Finding #22] Use _Re_km from constants.EARTH_EQUATORIAL_RADIUS_KM
+    xi = (z_km - z_lb_km) * (_Re_km + z_lb_km) / (_Re_km + z_km)
     return T_inf - (T_inf - T_lb) * math.exp(-s * xi)  # type: ignore[no-any-return]
 
 
@@ -683,7 +688,7 @@ def nrlmsise00_density(
     s = 0.02  # Bates slope parameter
 
     def _bates_T(z: Any, Tinf: Any) -> float:
-        xi = (z - z_lb) * (6378.137 + z_lb) / (6378.137 + z)
+        xi = (z - z_lb) * (_Re_km + z_lb) / (_Re_km + z)
         return Tinf - (Tinf - T_lb) * math.exp(-s * xi)  # type: ignore[no-any-return]
 
     # ── 4. Effective molecular weight (blends from N2/O-dominated at 120 km to He
@@ -695,7 +700,7 @@ def nrlmsise00_density(
 
     # ── 5. Scale height at the target altitude ───────────────────────────────────
     T_z = _bates_T(altitude_km, T_inf)
-    g_z = 9.80665 * (6378.137 / (6378.137 + altitude_km)) ** 2  # m/s²
+    g_z = _G0_M_S2 * (_Re_km / (_Re_km + altitude_km)) ** 2  # m/s²  [FM-9 Fix - Finding #22]
     H_z = _R_GAS * T_z / (M_eff * g_z) / 1000.0  # effective scale height [km]
 
     # ── 6. Density at 400 km for the *current* activity ──────────────────────────
@@ -703,7 +708,7 @@ def nrlmsise00_density(
     # the change in integrated scale height from z_lb=120 km to 400 km.
     T_z_ref_400 = _bates_T(400.0, T_inf_ref)
     T_z_cur_400 = _bates_T(400.0, T_inf)
-    g_400 = 9.80665 * (6378.137 / (6378.137 + 400.0)) ** 2
+    g_400 = _G0_M_S2 * (_Re_km / (_Re_km + 400.0)) ** 2  # [FM-9 Fix - Finding #22]
     M_400 = 4.0e-3 + (28.0 - 4.0) * 1e-3 * math.exp(-(400.0 - 120.0) / 160.0)
     H_ref_400 = _R_GAS * T_z_ref_400 / (M_400 * g_400) / 1000.0
     H_cur_400 = _R_GAS * T_z_cur_400 / (M_400 * g_400) / 1000.0

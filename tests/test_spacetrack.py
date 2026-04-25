@@ -179,8 +179,36 @@ class TestFetchSpacetrackOMM:
             results = fetch_spacetrack_group("active")
 
         assert len(results) == 1
-        assert isinstance(results[0], SatelliteOMM)
-        assert results[0].norad_id == "25544"
+        omm = results[0]
+        assert isinstance(omm, SatelliteOMM), (
+            f"Expected SatelliteOMM, got {type(omm).__name__}"
+        )
+        # --- Finding #7 Fix: assert specific parsed orbital elements ---
+        # A function returning an empty or zeroed SatelliteOMM must fail here.
+        assert omm.norad_id == "25544", (
+            f"NORAD ID mismatch: expected '25544', got {omm.norad_id!r}"
+        )
+        import math
+        # Inclination: 51.6442° → radians
+        expected_inc_rad = math.radians(51.6442)
+        assert abs(omm.inclination_rad - expected_inc_rad) < 1e-6, (
+            f"Inclination mismatch: expected {expected_inc_rad:.6f} rad, "
+            f"got {omm.inclination_rad:.6f} rad"
+        )
+        # Mean motion: 15.48922536 rev/day → rad/min
+        expected_mm_rad_min = 15.48922536 * 2.0 * math.pi / 1440.0
+        assert abs(omm.mean_motion_rad_min - expected_mm_rad_min) < 1e-9, (
+            f"Mean motion mismatch: expected {expected_mm_rad_min:.9f} rad/min, "
+            f"got {omm.mean_motion_rad_min:.9f} rad/min"
+        )
+        # Eccentricity: 0.0001364
+        assert abs(omm.eccentricity - 0.0001364) < 1e-7, (
+            f"Eccentricity mismatch: expected 0.0001364, got {omm.eccentricity}"
+        )
+        # Epoch must be a valid Julian Date (> J2000)
+        assert omm.epoch_jd > 2451545.0, (
+            f"Epoch JD looks wrong: {omm.epoch_jd} (expected > J2000=2451545.0)"
+        )
 
     @patch("astra.spacetrack.requests.Session")
     def test_fetch_active_returns_omm_list(self, mock_session_cls):
@@ -199,7 +227,20 @@ class TestFetchSpacetrackOMM:
         with patch.dict(os.environ, env):
             results = fetch_spacetrack_active()
 
-        assert isinstance(results[0], SatelliteOMM)
+        omm = results[0]
+        assert isinstance(omm, SatelliteOMM), (
+            f"Expected SatelliteOMM, got {type(omm).__name__}"
+        )
+        # --- Finding #7 Fix: assert specific orbital elements ---
+        assert omm.norad_id == "25544", (
+            f"fetch_spacetrack_active NORAD ID mismatch: got {omm.norad_id!r}"
+        )
+        import math
+        expected_inc_rad = math.radians(51.6442)
+        assert abs(omm.inclination_rad - expected_inc_rad) < 1e-6, (
+            f"fetch_spacetrack_active inclination mismatch: "
+            f"expected {expected_inc_rad:.6f} rad, got {omm.inclination_rad:.6f} rad"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -227,7 +268,25 @@ class TestFetchSpacetrackTLE:
             results = fetch_spacetrack_group("active", format="tle")
 
         assert len(results) >= 1
-        assert isinstance(results[0], SatelliteTLE)
+        tle = results[0]
+        assert isinstance(tle, SatelliteTLE), (
+            f"Expected SatelliteTLE, got {type(tle).__name__}"
+        )
+        # --- Finding #7 Fix: assert specific parsed TLE fields ---
+        assert tle.norad_id == "25544", (
+            f"TLE NORAD ID mismatch: expected '25544', got {tle.norad_id!r}"
+        )
+        assert tle.name.strip() == "ISS (ZARYA)", (
+            f"TLE name mismatch: expected 'ISS (ZARYA)', got {tle.name!r}"
+        )
+        # Epoch JD must be valid (> J2000)
+        assert tle.epoch_jd > 2451545.0, (
+            f"TLE epoch_jd looks wrong: {tle.epoch_jd}"
+        )
+        # BSTAR drag term: 0.34282e-4 (from line 1 field)
+        assert abs(tle.bstar - 0.34282e-4) < 1e-9, (
+            f"TLE BSTAR mismatch: expected 3.4282e-5, got {tle.bstar}"
+        )
 
 
 # ---------------------------------------------------------------------------

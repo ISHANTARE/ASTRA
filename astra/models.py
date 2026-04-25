@@ -16,6 +16,7 @@ from enum import Enum
 from typing import Optional, Union
 
 import numpy as np
+from astra.constants import G0_STD as _G0_STD  # [FM-9 Fix — Finding #12/22]
 
 # ---------------------------------------------------------------------------
 # Type Aliases
@@ -155,8 +156,8 @@ class FiniteBurn:
         Derived from the Tsiolkovsky relation:
             dm/dt = F / (Isp * g₀)
         """
-        G0 = 9.80665  # m/s², standard gravitational acceleration
-        return self.thrust_N / (self.isp_s * G0)
+        # [FM-9 Fix — Finding #12/22] Import from constants instead of local literal.
+        return self.thrust_N / (self.isp_s * _G0_STD)
 
     def __post_init__(self) -> None:
         """Validate burn parameters at construction time.

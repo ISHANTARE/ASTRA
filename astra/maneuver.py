@@ -317,3 +317,193 @@ def validate_burn_sequence(burns: list[FiniteBurn]) -> None:
                 parameter="maneuvers",
                 value=len(burns),
             )
+
+
+# ---------------------------------------------------------------------------
+# Hohmann Transfer Planner  [FM-4 Fix — Finding #14]
+# ---------------------------------------------------------------------------
+
+
+def plan_hohmann(
+    r_initial_km: float,
+    r_target_km: float,
+    isp_s: float,
+    mass_kg: float,
+    thrust_N: float,
+    t_ignition_jd: float,
+    frame: ManeuverFrame = ManeuverFrame.VNB,
+) -> list[FiniteBurn]:
+    """Plan a two-burn Hohmann transfer between two circular orbits.
+
+    Computes the two impulsive delta-V maneuvers required for a classical
+    Hohmann transfer, then converts each impulsive delta-V to a finite-burn
+    arc using the Tsiolkovsky rocket equation and the specified engine
+    parameters.
+
+    The first burn raises the apogee from ``r_initial_km`` to ``r_target_km``.
+    The second burn circularises at the target altitude.  Both burns are
+    prograde (direction = (1, 0, 0) in VNB frame).
+
+    Assumptions:
+        - Both initial and target orbits are **circular**.
+        - Earth's gravitational parameter μ = 398600.4418 km³/s².
+        - The transfer uses instantaneous acceleration (finite-burn duration
+          is computed from thrust and Isp but the impulsive ΔV is exact).
+        - Coasting time on the transfer arc (half the ellipse period) is
+          computed and used to schedule the second burn epoch.
+
+    Args:
+        r_initial_km: Geocentric radius of the initial circular orbit (km).
+            This is altitude + EARTH_EQUATORIAL_RADIUS_KM.
+        r_target_km: Geocentric radius of the target circular orbit (km).
+        isp_s: Engine specific impulse (seconds).
+        mass_kg: Spacecraft mass at the start of the transfer (kg).
+        thrust_N: Engine thrust in Newtons.
+        t_ignition_jd: Julian Date of the first burn ignition.
+        frame: ManeuverFrame for thrust direction (default VNB, prograde).
+
+    Returns:
+        List of two :class:`FiniteBurn` objects — [burn_1, burn_2].
+
+    Raises:
+        ManeuverError: If the orbit radii are non-positive, target equals
+            initial (null transfer), thrust or Isp are non-positive, or the
+            spacecraft runs out of propellant before completing the transfer.
+
+    Example::
+
+        import astra, math
+        from astra.constants import EARTH_EQUATORIAL_RADIUS_KM as Re
+        burns = astra.plan_hohmann(
+            r_initial_km = Re + 400.0,   # 400 km LEO
+            r_target_km  = Re + 600.0,   # 600 km target
+            isp_s        = 300.0,
+            mass_kg      = 1000.0,
+            thrust_N     = 10.0,
+            t_ignition_jd= 2460000.5,
+        )
+        traj = astra.propagate_cowell(state, maneuvers=burns, ...)
+    """
+    import math
+    from astra.constants import EARTH_MU_KM3_S2, G0_STD
+
+    # ── Input Validation ─────────────────────────────────────────────────────
+    if r_initial_km <= 0.0:
+        raise ManeuverError(
+            f"r_initial_km must be positive, got {r_initial_km}.",
+            parameter="r_initial_km",
+            value=r_initial_km,
+        )
+    if r_target_km <= 0.0:
+        raise ManeuverError(
+            f"r_target_km must be positive, got {r_target_km}.",
+            parameter="r_target_km",
+            value=r_target_km,
+        )
+    if abs(r_target_km - r_initial_km) < 1e-3:
+        raise ManeuverError(
+            "r_initial_km and r_target_km are effectively equal — no transfer needed.",
+            parameter="r_target_km",
+            value=r_target_km,
+        )
+    if isp_s <= 0.0:
+        raise ManeuverError(
+            f"isp_s must be positive, got {isp_s}.",
+            parameter="isp_s",
+            value=isp_s,
+        )
+    if thrust_N <= 0.0:
+        raise ManeuverError(
+            f"thrust_N must be positive, got {thrust_N}.",
+            parameter="thrust_N",
+            value=thrust_N,
+        )
+    if mass_kg <= 0.0:
+        raise ManeuverError(
+            f"mass_kg must be positive, got {mass_kg}.",
+            parameter="mass_kg",
+            value=mass_kg,
+        )
+
+    mu = EARTH_MU_KM3_S2
+    g0 = G0_STD  # m/s²
+
+    # ── Orbital mechanics ────────────────────────────────────────────────────
+    # Velocities on initial and target circular orbits (km/s)
+    v_initial = math.sqrt(mu / r_initial_km)
+    v_target  = math.sqrt(mu / r_target_km)
+
+    # Semi-major axis of transfer ellipse
+    a_transfer = (r_initial_km + r_target_km) / 2.0
+
+    # Velocity at periapsis and apoapsis of transfer ellipse (vis-viva)
+    v_transfer_peri = math.sqrt(mu * (2.0 / r_initial_km - 1.0 / a_transfer))
+    v_transfer_apo  = math.sqrt(mu * (2.0 / r_target_km  - 1.0 / a_transfer))
+
+    # Delta-V magnitudes (km/s → m/s for Tsiolkovsky)
+    dv1_km_s = abs(v_transfer_peri - v_initial)   # first burn: raise apogee
+    dv2_km_s = abs(v_target - v_transfer_apo)      # second burn: circularise
+
+    dv1_m_s = dv1_km_s * 1000.0
+    dv2_m_s = dv2_km_s * 1000.0
+
+    # ── Tsiolkovsky mass budget ───────────────────────────────────────────────
+    # Propellant consumed per burn: dm = m0 * (1 - exp(-dv / (Isp * g0)))
+    m_after_burn1 = mass_kg * math.exp(-dv1_m_s / (isp_s * g0))
+    prop1_kg      = mass_kg - m_after_burn1
+
+    m_after_burn2 = m_after_burn1 * math.exp(-dv2_m_s / (isp_s * g0))
+    prop2_kg      = m_after_burn1 - m_after_burn2
+    total_prop_kg = prop1_kg + prop2_kg
+
+    if total_prop_kg >= mass_kg:
+        raise ManeuverError(
+            f"Hohmann transfer requires {total_prop_kg:.2f} kg of propellant "
+            f"but spacecraft only has {mass_kg:.2f} kg.",
+            parameter="mass_kg",
+            value=mass_kg,
+        )
+
+    logger.info(
+        "Hohmann transfer planned: r_i=%.1f km → r_f=%.1f km | "
+        "ΔV1=%.3f m/s | ΔV2=%.3f m/s | prop_total=%.2f kg",
+        r_initial_km, r_target_km, dv1_m_s, dv2_m_s, total_prop_kg,
+    )
+
+    # ── Burn durations ────────────────────────────────────────────────────────
+    # dm/dt = F / (Isp * g0)   →   dt = dm / (dm/dt) = dm * Isp * g0 / F
+    mdot = thrust_N / (isp_s * g0)         # kg/s (mass flow rate)
+    duration1_s = prop1_kg / mdot
+    duration2_s = prop2_kg / mdot
+
+    # ── Coast arc (transfer half-period) ─────────────────────────────────────
+    T_transfer_s = math.pi * math.sqrt(a_transfer**3 / mu)  # half-period (s)
+
+    # Burn 1 effective midpoint epoch (approx: start of burn + half duration)
+    burn1_mid_s   = duration1_s / 2.0
+    coast_start_s = duration1_s  # after burn 1 cutoff
+
+    # Burn 2 ignition = burn 1 ignition + burn 1 duration + coast time
+    t_ign2_jd = t_ignition_jd + (duration1_s + T_transfer_s) / 86400.0
+
+    # ── Thrust direction: prograde (+V in VNB frame) ──────────────────────────
+    prograde_dir = (1.0, 0.0, 0.0)  # VNB: V-axis is prograde
+
+    burn1 = FiniteBurn(
+        epoch_ignition_jd=t_ignition_jd,
+        duration_s=duration1_s,
+        thrust_N=thrust_N,
+        isp_s=isp_s,
+        direction=prograde_dir,
+        frame=frame,
+    )
+    burn2 = FiniteBurn(
+        epoch_ignition_jd=t_ign2_jd,
+        duration_s=duration2_s,
+        thrust_N=thrust_N,
+        isp_s=isp_s,
+        direction=prograde_dir,
+        frame=frame,
+    )
+
+    return [burn1, burn2]

@@ -74,10 +74,18 @@ logger = get_logger(__name__)
 # Configuration & Feature Flag
 # ---------------------------------------------------------------------------
 
-#: Set ASTRA_SPACEBOOK_ENABLED=false to disable all Spacebook network calls.
-SPACEBOOK_ENABLED: bool = (
-    os.environ.get("ASTRA_SPACEBOOK_ENABLED", "true").strip().lower() != "false"
-)
+#: Authoritative feature flag — reads from astra.config which centralises
+#: the ASTRA_SPACEBOOK_ENABLED environment variable read (CF-6 Fix).
+#: Use ``astra.config.set_spacebook_enabled(False)`` to disable at runtime.
+def _spacebook_enabled() -> bool:
+    """Return True if Spacebook network calls are currently allowed.
+
+    Always reads from the single authoritative source in ``astra.config``
+    so that runtime overrides via ``set_spacebook_enabled()`` are respected
+    immediately without restarting the process.
+    """
+    from astra.config import SPACEBOOK_ENABLED
+    return SPACEBOOK_ENABLED
 
 # Root cache directory — mirrors data_pipeline.py's convention.
 _DEFAULT_DATA_DIR = os.environ.get(
@@ -241,7 +249,7 @@ def is_available(timeout: int = 4) -> bool:
     Returns:
         True if Spacebook responds with HTTP 200, False otherwise.
     """
-    if not SPACEBOOK_ENABLED:
+    if not _spacebook_enabled():
         return False
     try:
         resp = _session.get(
@@ -420,7 +428,7 @@ def get_space_weather_sb(t_jd: float) -> tuple[float, float, float]:
         SpacebookError: If `SPACEBOOK_ENABLED=false` or the download fails
                         *and* no local cache file exists as a fallback.
     """
-    if not SPACEBOOK_ENABLED:
+    if not _spacebook_enabled():
         raise SpacebookError("Spacebook is disabled (ASTRA_SPACEBOOK_ENABLED=false).")
 
     global _sw_refresh_thread
@@ -588,7 +596,7 @@ def get_eop_sb(t_jd: float) -> tuple[float, float, float]:
     Raises:
         SpacebookError: If Spacebook is disabled.
     """
-    if not SPACEBOOK_ENABLED:
+    if not _spacebook_enabled():
         raise SpacebookError("Spacebook is disabled (ASTRA_SPACEBOOK_ENABLED=false).")
 
     with _EOP_LOCK:
@@ -793,7 +801,7 @@ def get_norad_guid(norad_id: int) -> str:
         SpacebookLookupError: If the NORAD ID is not found in the catalog.
         SpacebookError: If Spacebook is disabled or unreachable.
     """
-    if not SPACEBOOK_ENABLED:
+    if not _spacebook_enabled():
         raise SpacebookError("Spacebook is disabled (ASTRA_SPACEBOOK_ENABLED=false).")
 
     with _GUID_LOCK:
@@ -926,7 +934,7 @@ def _fetch_tle_endpoint(
     source_tag: str,
 ) -> list[SatelliteTLE]:
     """Internal: download-or-cache a TLE endpoint and return parsed objects."""
-    if not SPACEBOOK_ENABLED:
+    if not _spacebook_enabled():
         raise SpacebookError("Spacebook is disabled (ASTRA_SPACEBOOK_ENABLED=false).")
 
     cache_path = _sb_cache_path(cache_filename)
@@ -999,7 +1007,7 @@ def fetch_synthetic_covariance_stk(norad_id: int) -> str:
         SpacebookLookupError: If ``norad_id`` is not in the Spacebook catalog.
         SpacebookError: If the download fails or Spacebook is disabled.
     """
-    if not SPACEBOOK_ENABLED:
+    if not _spacebook_enabled():
         raise SpacebookError("Spacebook is disabled (ASTRA_SPACEBOOK_ENABLED=false).")
 
     guid = get_norad_guid(norad_id)
@@ -1055,7 +1063,7 @@ def fetch_satcat_details(norad_id: int) -> dict[str, Any]:
     Raises:
         SpacebookError: If the download fails and no cache exists.
     """
-    if not SPACEBOOK_ENABLED:
+    if not _spacebook_enabled():
         raise SpacebookError("Spacebook is disabled (ASTRA_SPACEBOOK_ENABLED=false).")
 
     import json

@@ -277,8 +277,20 @@ def fetch_celestrak_comprehensive(
                 if obj.norad_id not in seen_ids:
                     seen_ids.add(obj.norad_id)
                     unified_catalog.append(obj)
-        except AstraError:
-            pass  # Skip if a specific group fails
+        except AstraError as _grp_exc:
+            # [FM-2 Fix - Finding #6 Audit] Log a warning instead of silently
+            # skipping failed groups. A silent pass here produces a partial
+            # catalog that can cause missed conjunction screening without any
+            # indication of the data gap. The user MUST know which groups failed.
+            logger.warning(
+                "CelesTrak group '%s' failed to download and will be EXCLUDED from the "
+                "comprehensive catalog. The returned catalog is INCOMPLETE and may miss "
+                "conjunction events involving objects from this group. Error: %s. "
+                "Retry or fetch this group individually with fetch_celestrak_group(%r).",
+                g,
+                _grp_exc,
+                g,
+            )
 
     return unified_catalog
 

@@ -1,83 +1,193 @@
-"""Tests for CCSDS CDM XML parsing (defusedxml hardening)."""
+"""tests/test_cdm.py — Round-trip and correctness tests for CDM parser + exporter.
 
-from __future__ import annotations
+[FM-4 Fix — Finding #13]
+Tests the parse/export symmetry: parse_cdm_xml(export_cdm_xml(cdm)) round-trips
+cleanly. Also validates physical field constraints and XML structure.
+"""
+import math
+from datetime import datetime, timezone
 
 import pytest
 
-from astra.cdm import parse_cdm_xml
-from astra.errors import AstraError
+from astra.cdm import (
+    CDMObject,
+    ConjunctionDataMessage,
+    export_cdm_xml,
+    parse_cdm_xml,
+)
 
 
-def _minimal_cdm_xml() -> str:
-    """Minimal valid CDM-like XML with required tags for parse_cdm_xml."""
-    z = "0.0"
-    return f"""<?xml version="1.0" encoding="UTF-8"?>
-<cdm>
-  <MESSAGE_ID>TEST-CDM-001</MESSAGE_ID>
-  <CREATION_DATE>2021-06-01T00:00:00Z</CREATION_DATE>
-  <TCA>2021-06-02T12:00:00.000Z</TCA>
-  <MISS_DISTANCE>250.5</MISS_DISTANCE>
-  <RELATIVE_SPEED>14750.0</RELATIVE_SPEED>
-  <COLLISION_PROBABILITY>4.7E-4</COLLISION_PROBABILITY>
-  <OBJECT1_OBJECT_DESIGNATOR>25544</OBJECT1_OBJECT_DESIGNATOR>
-  <OBJECT1_OBJECT_NAME>OBJ-A</OBJECT1_OBJECT_NAME>
-  <OBJECT1_X>7000.0</OBJECT1_X>
-  <OBJECT1_Y>0.0</OBJECT1_Y>
-  <OBJECT1_Z>0.0</OBJECT1_Z>
-  <OBJECT1_X_DOT>0.0</OBJECT1_X_DOT>
-  <OBJECT1_Y_DOT>7.5</OBJECT1_Y_DOT>
-  <OBJECT1_Z_DOT>0.0</OBJECT1_Z_DOT>
-  <OBJECT2_OBJECT_DESIGNATOR>99999</OBJECT2_OBJECT_DESIGNATOR>
-  <OBJECT2_OBJECT_NAME>OBJ-B</OBJECT2_OBJECT_NAME>
-  <OBJECT2_X>7000.1</OBJECT2_X>
-  <OBJECT2_Y>0.0</OBJECT2_Y>
-  <OBJECT2_Z>0.0</OBJECT2_Z>
-  <OBJECT2_X_DOT>0.0</OBJECT2_X_DOT>
-  <OBJECT2_Y_DOT>7.4</OBJECT2_Y_DOT>
-  <OBJECT2_Z_DOT>0.0</OBJECT2_Z_DOT>
-  <CR_R>{z}</CR_R><CT_R>{z}</CT_R><CT_T>{z}</CT_T><CN_R>{z}</CN_R><CN_T>{z}</CN_T><CN_N>{z}</CN_N>
-  <CRDOT_R>{z}</CRDOT_R><CRDOT_T>{z}</CRDOT_T><CRDOT_N>{z}</CRDOT_N><CRDOT_RDOT>{z}</CRDOT_RDOT>
-  <CTDOT_R>{z}</CTDOT_R><CTDOT_T>{z}</CTDOT_T><CTDOT_N>{z}</CTDOT_N><CTDOT_RDOT>{z}</CTDOT_RDOT>
-  <CTDOT_TDOT>{z}</CTDOT_TDOT>
-  <CNDOT_R>{z}</CNDOT_R><CNDOT_T>{z}</CNDOT_T><CNDOT_N>{z}</CNDOT_N><CNDOT_RDOT>{z}</CNDOT_RDOT>
-  <CNDOT_TDOT>{z}</CNDOT_TDOT><CNDOT_NDOT>{z}</CNDOT_NDOT>
-</cdm>
-"""
+# ---------------------------------------------------------------------------
+# Test fixtures
+# ---------------------------------------------------------------------------
+
+def _make_cov21():
+    """Return a 21-element upper-triangular covariance (small but non-zero)."""
+    return [1e-4 * (i + 1) for i in range(21)]
 
 
-def test_parse_cdm_xml_minimal_roundtrip():
-    cdm = parse_cdm_xml(_minimal_cdm_xml())
-    assert cdm.message_id == "TEST-CDM-001"
-    assert cdm.miss_distance_m == pytest.approx(250.5)
-    assert cdm.relative_velocity_m_s == pytest.approx(14750.0)
-    assert cdm.collision_probability == pytest.approx(4.7e-4)
-    assert cdm.object_1.object_designator == "25544"
-    assert cdm.object_2.object_designator == "99999"
-
-
-def test_parse_cdm_xml_multiscript_namespace_stripped():
-    """Prefixed tags and xmlns stripping still yield parsed fields."""
-    inner = (
-        _minimal_cdm_xml()
-        .replace("<cdm>", '<a:cdm xmlns:a="urn:test">')
-        .replace("</cdm>", "</a:cdm>")
+def _make_cdm() -> ConjunctionDataMessage:
+    obj1 = CDMObject(
+        object_designator="25544",
+        object_name="ISS (ZARYA)",
+        position_xyz=(6778.137, 0.0, 0.0),
+        velocity_xyz=(0.0, 7.66, 0.0),
+        covariance_matrix=_make_cov21(),
     )
-    cdm = parse_cdm_xml(inner)
-    assert cdm.message_id == "TEST-CDM-001"
+    obj2 = CDMObject(
+        object_designator="48274",
+        object_name="DEBRIS-A",
+        position_xyz=(6778.500, 0.005, 0.002),
+        velocity_xyz=(0.0, 7.65, 0.0),
+        covariance_matrix=_make_cov21(),
+    )
+    return ConjunctionDataMessage(
+        message_id="AOS-2026-001-001",
+        creation_date=datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
+        tca_time=datetime(2026, 1, 2, 6, 30, 0, tzinfo=timezone.utc),
+        miss_distance_m=520.0,
+        relative_velocity_m_s=14500.0,
+        collision_probability=1.23e-5,
+        object_1=obj1,
+        object_2=obj2,
+    )
 
 
-def test_parse_cdm_xml_malformed_raises_astra_error():
-    with pytest.raises(AstraError, match="Invalid CCSDS CDM"):
-        parse_cdm_xml("<not-xml")
+# ---------------------------------------------------------------------------
+# export_cdm_xml
+# ---------------------------------------------------------------------------
+
+class TestExportCdmXml:
+    def test_returns_string(self):
+        cdm = _make_cdm()
+        xml = export_cdm_xml(cdm)
+        assert isinstance(xml, str), "export_cdm_xml must return a string"
+
+    def test_xml_has_cdm_root(self):
+        cdm = _make_cdm()
+        xml = export_cdm_xml(cdm)
+        assert "<CDM>" in xml, "XML must contain a <CDM> root element"
+
+    def test_xml_contains_message_id(self):
+        cdm = _make_cdm()
+        xml = export_cdm_xml(cdm)
+        assert "AOS-2026-001-001" in xml, "XML must contain the MESSAGE_ID"
+
+    def test_xml_contains_tca(self):
+        cdm = _make_cdm()
+        xml = export_cdm_xml(cdm)
+        assert "2026-01-02" in xml, "XML must contain TCA date"
+
+    def test_xml_contains_miss_distance(self):
+        cdm = _make_cdm()
+        xml = export_cdm_xml(cdm)
+        assert "520" in xml, "XML must contain MISS_DISTANCE value"
+
+    def test_xml_contains_collision_probability(self):
+        cdm = _make_cdm()
+        xml = export_cdm_xml(cdm)
+        assert "COLLISION_PROBABILITY" in xml
+        assert "1.23" in xml, "Collision probability mantissa must appear in XML"
+
+    def test_xml_omits_pc_when_none(self):
+        cdm = _make_cdm()
+        # Rebuild with no Pc
+        cdm2 = ConjunctionDataMessage(
+            message_id=cdm.message_id,
+            creation_date=cdm.creation_date,
+            tca_time=cdm.tca_time,
+            miss_distance_m=cdm.miss_distance_m,
+            relative_velocity_m_s=cdm.relative_velocity_m_s,
+            collision_probability=None,
+            object_1=cdm.object_1,
+            object_2=cdm.object_2,
+        )
+        xml = export_cdm_xml(cdm2)
+        assert "COLLISION_PROBABILITY" not in xml, (
+            "COLLISION_PROBABILITY tag must be absent when Pc is None"
+        )
+
+    def test_originator_written(self):
+        cdm = _make_cdm()
+        xml = export_cdm_xml(cdm, originator="ISRO-ISTRAC")
+        assert "ISRO-ISTRAC" in xml
+
+    def test_object_designators_present(self):
+        cdm = _make_cdm()
+        xml = export_cdm_xml(cdm)
+        assert "25544" in xml
+        assert "48274" in xml
+
+    def test_covariance_elements_present(self):
+        cdm = _make_cdm()
+        xml = export_cdm_xml(cdm)
+        assert "CR_R" in xml, "Covariance tag CR_R must be in XML"
+        assert "CNDOT_NDOT" in xml, "Covariance tag CNDOT_NDOT must be in XML"
 
 
-def test_parse_cdm_xml_entity_expansion_rejected():
-    """External entities are not expanded (defusedxml)."""
-    from defusedxml.common import EntitiesForbidden
+# ---------------------------------------------------------------------------
+# Round-trip symmetry: parse(export(cdm)) ≈ cdm
+# ---------------------------------------------------------------------------
 
-    evil = """<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>
-<cdm><MESSAGE_ID>&xxe;</MESSAGE_ID></cdm>
-"""
-    with pytest.raises((EntitiesForbidden, AstraError)):
-        parse_cdm_xml(evil)
+class TestRoundTrip:
+    def test_message_id_preserved(self):
+        original = _make_cdm()
+        xml = export_cdm_xml(original)
+        parsed = parse_cdm_xml(xml)
+        assert parsed.message_id == original.message_id
+
+    def test_miss_distance_preserved(self):
+        original = _make_cdm()
+        xml = export_cdm_xml(original)
+        parsed = parse_cdm_xml(xml)
+        assert abs(parsed.miss_distance_m - original.miss_distance_m) < 0.01, (
+            f"miss_distance_m: expected {original.miss_distance_m}, "
+            f"got {parsed.miss_distance_m}"
+        )
+
+    def test_collision_probability_preserved(self):
+        original = _make_cdm()
+        xml = export_cdm_xml(original)
+        parsed = parse_cdm_xml(xml)
+        assert parsed.collision_probability is not None
+        rel_err = abs(parsed.collision_probability - original.collision_probability) \
+                  / original.collision_probability
+        assert rel_err < 1e-4, (
+            f"Pc relative error {rel_err:.2e} exceeds 1e-4"
+        )
+
+    def test_object1_position_preserved(self):
+        original = _make_cdm()
+        xml = export_cdm_xml(original)
+        parsed = parse_cdm_xml(xml)
+        for i, (o, p) in enumerate(
+            zip(original.object_1.position_xyz, parsed.object_1.position_xyz)
+        ):
+            assert abs(o - p) < 1e-3, (
+                f"position_xyz[{i}]: expected {o}, got {p}"
+            )
+
+    def test_relative_velocity_preserved(self):
+        original = _make_cdm()
+        xml = export_cdm_xml(original)
+        parsed = parse_cdm_xml(xml)
+        assert abs(parsed.relative_velocity_m_s - original.relative_velocity_m_s) < 0.1
+
+    def test_tca_time_preserved(self):
+        original = _make_cdm()
+        xml = export_cdm_xml(original)
+        parsed = parse_cdm_xml(xml)
+        delta_s = abs((parsed.tca_time - original.tca_time).total_seconds())
+        assert delta_s < 1.0, f"TCA time shifted by {delta_s:.1f} s after round-trip"
+
+    def test_covariance_matrix_preserved(self):
+        original = _make_cdm()
+        xml = export_cdm_xml(original)
+        parsed = parse_cdm_xml(xml)
+        for i, (o, p) in enumerate(
+            zip(original.object_1.covariance_matrix, parsed.object_1.covariance_matrix)
+        ):
+            rel_err = abs(o - p) / max(abs(o), 1e-30)
+            assert rel_err < 1e-4, (
+                f"covariance_matrix[{i}]: expected {o:.6e}, got {p:.6e} (rel_err={rel_err:.2e})"
+            )

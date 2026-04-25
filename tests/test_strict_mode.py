@@ -74,26 +74,34 @@ def _make_debris(perigee=400, apogee=420, inclination=53, eccentricity=0.01):
 
 class TestSpaceWeatherStrict:
     def test_get_space_weather_raises_in_strict_with_no_data(self, monkeypatch):
-        """get_space_weather should raise SpaceWeatherError in STRICT when cache empty."""
+        """get_space_weather should raise SpaceWeatherError in STRICT when cache empty.
+
+        [CF-6 Fix] SPACEBOOK_ENABLED is now patched via astra.config (the single
+        authoritative location), not astra.spacebook which no longer holds the flag.
+        """
         # Ensure cache is empty and Spacebook is disabled
-        from astra import data_pipeline, spacebook
+        from astra import data_pipeline
 
         monkeypatch.setattr(data_pipeline, "_sw_loaded", True)  # prevent download
         monkeypatch.setattr(data_pipeline, "_sw_cache", {})  # empty cache
-        monkeypatch.setattr(spacebook, "SPACEBOOK_ENABLED", False)
+        monkeypatch.setattr(config, "SPACEBOOK_ENABLED", False)  # CF-6: patch config
 
         with _StrictMode(True):
             with pytest.raises(SpaceWeatherError, match=r"\[ASTRA STRICT\]"):
                 astra.get_space_weather(t_jd=2451545.0)  # J2000 epoch
 
     def test_get_space_weather_returns_default_in_relaxed(self, monkeypatch, caplog):
-        """get_space_weather should return synthetic default with WARNING in Relaxed."""
-        from astra import data_pipeline, spacebook
+        """get_space_weather should return synthetic default with WARNING in Relaxed.
+
+        [CF-6 Fix] SPACEBOOK_ENABLED is now patched via astra.config (the single
+        authoritative location), not astra.spacebook which no longer holds the flag.
+        """
+        from astra import data_pipeline
         import logging
 
         monkeypatch.setattr(data_pipeline, "_sw_loaded", True)
         monkeypatch.setattr(data_pipeline, "_sw_cache", {})
-        monkeypatch.setattr(spacebook, "SPACEBOOK_ENABLED", False)
+        monkeypatch.setattr(config, "SPACEBOOK_ENABLED", False)  # CF-6: patch config
 
         logger = logging.getLogger("astra.data_pipeline")
         orig_prop = logger.propagate
@@ -202,24 +210,48 @@ class TestVincentyAntipodal:
 
 
 class TestFilterRegionLongitudeGate:
-    def test_lon_raises_in_strict(self):
+    """[FM-2 Fix - Finding #5] longitude filtering is now IMPLEMENTED, not ignored.
+    The old behavior raised FilterError in STRICT and emitted 'IGNORED' warning in Relaxed.
+    The new behavior silently applies the RAAN-based heuristic filter.
+    """
+
+    def test_lon_no_longer_raises_in_strict(self):
+        """Since longitude is now handled, FilterError must NOT be raised."""
         debri = _make_debris()
         with _StrictMode(True):
-            with pytest.raises(FilterError):
-                filter_region([debri], -90, 90, lon_min_deg=-180, lon_max_deg=180)
+            # Must not raise — longitude filter is implemented, not forbidden
+            result = filter_region([debri], -90, 90, lon_min_deg=-180, lon_max_deg=180)
+        # LEO object (period=92 min < 1440) passes any longitude band
+        assert isinstance(result, list)
+        assert len(result) == 1, (
+            "LEO object (period=92 min) must pass any longitude band since it "
+            "sweeps all longitudes within 24 h."
+        )
 
-    def test_lon_warns_in_relaxed(self, caplog):
+    def test_lon_no_longer_warns_ignored(self, caplog):
+        """The 'IGNORED' warning must NOT appear since longitude IS processed."""
         debri = _make_debris()
         with _StrictMode(False), caplog.at_level(logging.WARNING):
             result = filter_region([debri], -90, 90, lon_min_deg=-180, lon_max_deg=180)
         assert len(result) >= 0  # filter runs without error
-        assert any("IGNORED" in r.message for r in caplog.records)
+        assert not any("IGNORED" in r.message for r in caplog.records), (
+            "'IGNORED' warning must not appear now that longitude filtering is implemented."
+        )
 
     def test_no_lon_no_warning(self, caplog):
         debri = _make_debris()
         with _StrictMode(False), caplog.at_level(logging.WARNING):
             filter_region([debri], -90, 90)
         assert not any("IGNORED" in r.message for r in caplog.records)
+
+    def test_lon_zero_activates_filter(self):
+        """lon_min_deg=0.0 must activate the filter (not be treated as falsy)."""
+        debri = _make_debris()  # LEO, period=92 min → passes any longitude
+        with _StrictMode(False):
+            result = filter_region([debri], -90, 90, lon_min_deg=0.0, lon_max_deg=180.0)
+        assert len(result) == 1, (
+            "LEO object must pass even with lon_min_deg=0.0 (all lons covered in 24 h)"
+        )
 
 
 # ---------------------------------------------------------------------------

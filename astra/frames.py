@@ -1,4 +1,5 @@
 from typing import Any
+import os  # [FM-2 Fix — Finding #8] Moved from inside hot function bodies to module level.
 
 # astra/frames.py
 """ASTRA Core Coordinate Frame Transformations.
@@ -71,12 +72,11 @@ def get_eop_correction(
         (xp_arcsec, yp_arcsec, dut1_s) arrays matching times_jd shape.
         If Spacebook is disabled or offline, returns arrays of zeros.
     """
-    import os
-
     times_arr = np.atleast_1d(np.asarray(times_jd, dtype=float))
     zeros = np.zeros(len(times_arr))
 
-    if os.environ.get("ASTRA_SPACEBOOK_ENABLED", "true").lower() == "false":
+    from astra.config import SPACEBOOK_ENABLED
+    if not SPACEBOOK_ENABLED:
         return (zeros.copy(), zeros.copy(), zeros.copy()) if times_arr.ndim else (0.0, 0.0, 0.0)  # type: ignore[no-any-return]
 
     try:
@@ -165,11 +165,8 @@ def teme_to_ecef(
         else R_gcrs_itrs.dot(r_gcrs.T).T
     )
 
-    import os
-
-    spacebook_enabled = (
-        os.environ.get("ASTRA_SPACEBOOK_ENABLED", "true").lower() != "false"
-    )
+    from astra.config import SPACEBOOK_ENABLED as _sb_enabled
+    spacebook_enabled = _sb_enabled
 
     if not use_spacebook_eop or not spacebook_enabled:
         return r_itrs  # type: ignore[no-any-return]

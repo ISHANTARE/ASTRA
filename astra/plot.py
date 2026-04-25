@@ -1,10 +1,11 @@
+from __future__ import annotations
 """ASTRA Core 3D Visualization Module.
 
 Provides interactive 3D rendering of orbital trajectories and conjunction
 events utilizing Plotly.
 """
 
-from __future__ import annotations
+from typing import Any
 
 import numpy as np
 import plotly.graph_objects as go
@@ -100,6 +101,140 @@ def plot_trajectories(
             yaxis_title="Y (km TEME)",
             zaxis_title="Z (km TEME)",
             aspectmode="data",
+        ),
+        margin=dict(l=0, r=0, b=0, t=40),
+    )
+
+    return fig
+
+
+def plot_ground_track(
+    satellite: "Any",
+    t_start_jd: float,
+    t_end_jd: float,
+    observers: "list[Any] | None" = None,
+    step_s: float = 60.0,
+    title: str = "ASTRA Core: Ground Track",
+) -> "go.Figure":
+    """Plot the ground track of a satellite on a 2-D world map.
+
+    Propagates the satellite using SGP4 and projects positions to geodetic
+    coordinates, then renders an interactive Plotly Scattergeo figure.
+
+    The data pipeline is already fully implemented:
+    ``ground_track()`` in ``orbit.py`` → ``teme_to_ecef()`` + ``ecef_to_geodetic_wgs84()``
+    in ``frames.py``.  This function assembles the final visualisation layer.
+
+    Args:
+        satellite: A ``SatelliteTLE`` or ``SatelliteOMM`` instance.
+        t_start_jd: Propagation start epoch as Julian Date.
+        t_end_jd: Propagation end epoch as Julian Date.
+        observers: Optional list of ``Observer`` objects to mark on the map.
+        step_s: Time step between ground-track points in seconds (default 60 s).
+        title: Figure title.
+
+    Returns:
+        Interactive Plotly ``go.Figure`` with a Scattergeo world-map trace.
+
+    Example::
+
+        import astra
+        iss = astra.parse_tle("ISS", line1, line2)
+        fig = astra.plot_ground_track(iss, t_start_jd, t_end_jd)
+        fig.show()
+    """
+    from astra.orbit import propagate_trajectory, ground_track
+
+    # Step 1: propagate trajectory to get TEME positions and Julian Date array.
+    # propagate_trajectory(satellite, t_start_jd, t_end_jd, step_minutes) is the
+    # current public API — ground_track() is a post-propagation TEME→geodetic converter.
+    step_min = step_s / 60.0
+    times_jd, positions_teme, _ = propagate_trajectory(
+        satellite, t_start_jd, t_end_jd, step_minutes=step_min
+    )
+
+    # Step 2: convert TEME positions to geodetic (lat, lon, alt) tuples.
+    points = ground_track(positions_teme, times_jd)
+
+    if not points:
+        fig = go.Figure()
+        fig.update_layout(title=f"{title} (no data)")
+        return fig
+
+    lats = [p[0] for p in points]
+    lons = [p[1] for p in points]
+    alts = [p[2] for p in points]
+
+    # Detect and break longitude wrap-arounds (>180 deg jump) for clean lines
+    # Insert None to lift the pen when the track wraps around 180 deg.
+    lat_plot: list = []
+    lon_plot: list = []
+    for i in range(len(lons)):
+        if i > 0 and abs(lons[i] - lons[i - 1]) > 180.0:
+            lat_plot.append(None)
+            lon_plot.append(None)
+        lat_plot.append(lats[i])
+        lon_plot.append(lons[i])
+
+    fig = go.Figure()
+
+    fig.add_trace(
+        go.Scattergeo(
+            lat=lat_plot,
+            lon=lon_plot,
+            mode="lines",
+            line=dict(width=1.5, color="royalblue"),
+            name=getattr(satellite, "name", "Satellite"),
+            hovertemplate=(
+                "Lat: %{lat:.2f}°<br>Lon: %{lon:.2f}°<extra></extra>"
+            ),
+        )
+    )
+
+    # Mark start and end
+    fig.add_trace(
+        go.Scattergeo(
+            lat=[lats[0], lats[-1]],
+            lon=[lons[0], lons[-1]],
+            mode="markers+text",
+            marker=dict(size=8, color=["green", "red"], symbol="circle"),
+            text=["Start", "End"],
+            textposition="top center",
+            name="Endpoints",
+        )
+    )
+
+    # Mark observer locations if provided
+    if observers:
+        obs_lats = [o.latitude_deg for o in observers]
+        obs_lons = [o.longitude_deg for o in observers]
+        obs_names = [o.name for o in observers]
+        fig.add_trace(
+            go.Scattergeo(
+                lat=obs_lats,
+                lon=obs_lons,
+                mode="markers+text",
+                marker=dict(size=10, color="orange", symbol="triangle-up"),
+                text=obs_names,
+                textposition="top center",
+                name="Ground Stations",
+            )
+        )
+
+    fig.update_layout(
+        title=title,
+        geo=dict(
+            showland=True,
+            landcolor="rgb(230, 230, 230)",
+            showocean=True,
+            oceancolor="rgb(200, 220, 255)",
+            showcoastlines=True,
+            coastlinecolor="gray",
+            showlakes=True,
+            lakecolor="rgb(200, 220, 255)",
+            showcountries=True,
+            countrycolor="gray",
+            projection_type="natural earth",
         ),
         margin=dict(l=0, r=0, b=0, t=40),
     )

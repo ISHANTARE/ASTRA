@@ -23,6 +23,13 @@ from astra.constants import (
     J2,
 )
 
+# [FM-3 Fix — Finding #2] Import the Numba-compiled NRLMSISE-00 density kernel
+# at module scope so it is available in Numba's global closure when
+# _acceleration_njit is compiled. Numba @njit functions can only call other
+# @njit functions that are in their global namespace at compile time;
+# a deferred or local import is invisible to the type-inference pass.
+from astra.propagator import _nrlmsise00_density_njit  # noqa: E402
+
 
 def rotate_covariance_rtn_to_eci(
     cov_rtn: np.ndarray,
@@ -613,7 +620,26 @@ def _acceleration_njit(
     rho_ref: float,
     H_km: float,
     rho_ref_alt_km: float,
+    f107_obs: float = 150.0,
+    f107_adj: float = 150.0,
+    ap_daily: float = 15.0,
+    use_nrlmsise: bool = False,
 ) -> np.ndarray:
+    """Covariance-STM acceleration kernel: J2/J3/J4 + drag.
+
+    Supports two atmosphere models controlled by ``use_nrlmsise``:
+
+    * ``use_nrlmsise=False`` (default): simple exponential density profile
+      anchored at ``rho_ref_alt_km``.  Fast; suitable when space-weather data
+      is unavailable.
+    * ``use_nrlmsise=True``: calls the native Numba NRLMSISE-00 implementation
+      (``_nrlmsise00_density_njit``) with the supplied F10.7 / Ap indices.
+      **This mode must be selected when the Cowell propagator uses the
+      NRLMSISE-00 model** (``DragConfig.model == "NRLMSISE00"``) so that the
+      trajectory and its covariance use the same atmospheric drag model.
+      Mismatched models cause 3-5× covariance growth-rate errors at solar max.
+      [FM-3 Fix — Finding #2 Audit]
+    """
     x, y, z = r[0], r[1], r[2]
     r_mag = np.linalg.norm(r)
     r2 = r_mag**2
@@ -647,10 +673,20 @@ def _acceleration_njit(
     a_total[2] += fJ4 * z * (63.0 * z4 / r2 - 70.0 * z2 + 15.0 * r2)
 
     # --- Atmospheric Drag (LEO Only) ---
+    # [FM-3 Fix - Finding #2 Audit] When use_nrlmsise=True, use the native
+    # Numba NRLMSISE-00 implementation (_nrlmsise00_density_njit) to match
+    # the drag model used by the Cowell propagator. Previously this kernel
+    # always used the exponential profile regardless of the flag, causing
+    # the propagated trajectory and covariance matrix to diverge physically
+    # by 3-5x during solar maximum conditions.
     alt = r_mag - Re
     if alt < 1500.0 and Bc > 0.0:
-        # DEF-001: reference density at rho_ref_alt_km (initial orbit altitude, not hardcoded 400 km)
-        rho = rho_ref * math.exp(-(alt - rho_ref_alt_km) / H_km)
+        if use_nrlmsise and alt >= 100.0:
+            # NRLMSISE-00 Bates-profile model — consistent with Cowell propagator.
+            rho = _nrlmsise00_density_njit(alt, f107_obs, f107_adj, ap_daily)
+        else:
+            # Exponential fallback for altitudes < 100 km or when model is disabled.
+            rho = rho_ref * math.exp(-(alt - rho_ref_alt_km) / H_km)
 
         # DEF-002: co-rotating atmosphere correction (CRITICAL FIX)
         # v_rel = v - omega_earth x r  subtracts the ~0.46 km/s equatorial rotation.
@@ -680,6 +716,10 @@ def _stm_jacobian_njit(
     rho_ref: float,
     H_km: float,
     rho_ref_alt_km: float,
+    f107_obs: float = 150.0,
+    f107_adj: float = 150.0,
+    ap_daily: float = 15.0,
+    use_nrlmsise: bool = False,
 ) -> np.ndarray:
     # Central-difference Jacobian step (km)
     eps_r = 1e-4
@@ -697,8 +737,8 @@ def _stm_jacobian_njit(
         r_minus = r.copy()
         r_plus[i] += eps_r
         r_minus[i] -= eps_r
-        a_plus = _acceleration_njit(r_plus, v, Bc, rho_ref, H_km, rho_ref_alt_km)
-        a_minus = _acceleration_njit(r_minus, v, Bc, rho_ref, H_km, rho_ref_alt_km)
+        a_plus = _acceleration_njit(r_plus, v, Bc, rho_ref, H_km, rho_ref_alt_km, f107_obs, f107_adj, ap_daily, use_nrlmsise)
+        a_minus = _acceleration_njit(r_minus, v, Bc, rho_ref, H_km, rho_ref_alt_km, f107_obs, f107_adj, ap_daily, use_nrlmsise)
         J[3:, i] = (a_plus - a_minus) / (2.0 * eps_r)
 
     # Lower-right: da/dv (mainly for drag; captures co-rotation effect too)
@@ -707,8 +747,8 @@ def _stm_jacobian_njit(
         v_minus = v.copy()
         v_plus[i] += eps_v
         v_minus[i] -= eps_v
-        a_plus = _acceleration_njit(r, v_plus, Bc, rho_ref, H_km, rho_ref_alt_km)
-        a_minus = _acceleration_njit(r, v_minus, Bc, rho_ref, H_km, rho_ref_alt_km)
+        a_plus = _acceleration_njit(r, v_plus, Bc, rho_ref, H_km, rho_ref_alt_km, f107_obs, f107_adj, ap_daily, use_nrlmsise)
+        a_minus = _acceleration_njit(r, v_minus, Bc, rho_ref, H_km, rho_ref_alt_km, f107_obs, f107_adj, ap_daily, use_nrlmsise)
         J[3:, 3 + i] = (a_plus - a_minus) / (2.0 * eps_v)
 
     return J
@@ -722,13 +762,17 @@ def _stm_derivatives_njit(
     rho_ref: float,
     H_km: float,
     rho_ref_alt_km: float,
+    f107_obs: float = 150.0,
+    f107_adj: float = 150.0,
+    ap_daily: float = 15.0,
+    use_nrlmsise: bool = False,
 ) -> np.ndarray:
     r = y[:3]
     v = y[3:6]
     Phi = y[6:].reshape((6, 6))
 
-    a_total = _acceleration_njit(r, v, Bc, rho_ref, H_km, rho_ref_alt_km)
-    A = _stm_jacobian_njit(r, v, Bc, rho_ref, H_km, rho_ref_alt_km)
+    a_total = _acceleration_njit(r, v, Bc, rho_ref, H_km, rho_ref_alt_km, f107_obs, f107_adj, ap_daily, use_nrlmsise)
+    A = _stm_jacobian_njit(r, v, Bc, rho_ref, H_km, rho_ref_alt_km, f107_obs, f107_adj, ap_daily, use_nrlmsise)
 
     dPhi = A @ Phi
 
@@ -797,40 +841,72 @@ def propagate_covariance_stm(
             rho_ref = atmospheric_density_empirical(
                 rho_ref_alt_km, f107_obs, f107_adj, ap
             )
-        except Exception:
+        except Exception as _sw_exc:
+            from astra import config
+            if config.ASTRA_STRICT_MODE:
+                from astra.errors import PropagationError
+                raise PropagationError(
+                    "[ASTRA STRICT] STM covariance propagation: space-weather lookup "
+                    f"failed ({_sw_exc}). Falling back to the reference density "
+                    f"DRAG_REF_DENSITY_KG_M3={DRAG_REF_DENSITY_KG_M3} kg/m³ would "
+                    "silently degrade covariance accuracy and corrupt downstream Pc "
+                    "estimates. Run astra.data_pipeline.load_space_weather() to "
+                    "populate the cache, or set ASTRA_STRICT_MODE=False to allow "
+                    "the empirical fallback.",
+                    norad_id="COVARIANCE_STM",
+                ) from _sw_exc
+            import logging as _cov_log
+            _cov_log.getLogger(__name__).warning(
+                "STM atmosphere: space-weather lookup failed (%s). "
+                "Falling back to DRAG_REF_DENSITY_KG_M3=%.3e kg/m³ at 400 km. "
+                "Covariance accuracy degraded. Set ASTRA_STRICT_MODE=True to "
+                "detect this silently in production.",
+                _sw_exc, DRAG_REF_DENSITY_KG_M3,
+            )
             rho_ref = DRAG_REF_DENSITY_KG_M3  # fallback
             rho_ref_alt_km = 400.0
         H_km = DRAG_SCALE_HEIGHT_KM
+
+    # [FM-3 Fix - Finding #9] Pass space-weather params and use_nrlmsise flag
+    # so the STM Jacobian uses the same atmosphere model as the trajectory.
+    use_nrlmsise_stm = False
+    f107_stm = 150.0
+    f107_adj_stm = 150.0
+    ap_stm = 15.0
+    if drag_config is not None:
+        use_nrlmsise_stm = getattr(drag_config, "model", "EXPONENTIAL") == "NRLMSISE00"
+        if use_nrlmsise_stm:
+            try:
+                from astra.data_pipeline import get_space_weather
+                f107_stm, f107_adj_stm, ap_stm = get_space_weather(t_jd0)
+            except Exception:
+                pass  # fall back to defaults
 
     sol = solve_ivp(
         _stm_derivatives_njit,
         t_span=(0.0, duration_s),
         y0=y0,
-        args=(Bc, rho_ref, H_km, rho_ref_alt_km),
+        args=(Bc, rho_ref, H_km, rho_ref_alt_km, f107_stm, f107_adj_stm, ap_stm, use_nrlmsise_stm),
         method="DOP853",
         rtol=1e-10,
         atol=1e-12,
     )
 
     if not sol.success:
-        # STRICT_MODE: do not silently degrade Pc inputs
-        from astra import config
+        # [FM-1 Fix - Finding #1 Audit] ALWAYS raise PropagationError on STM
+        # integration failure. Silently returning the initial covariance is
+        # life-threatening: uncertainty does not grow over time, producing
+        # artificially low Pc values and false-negative miss classifications.
+        # This is unconditional — there is no safe fallback for a failed STM.
+        from astra.errors import PropagationError
 
-        if config.ASTRA_STRICT_MODE:
-            from astra.errors import PropagationError
-
-            raise PropagationError(
-                f"[ASTRA STRICT] STM covariance propagation failed: {sol.message}. "
-                "Returning initial covariance would silently degrade accuracy. "
-                "Set ASTRA_STRICT_MODE=False to allow fallback to initial covariance.",
-                norad_id="COVARIANCE_STM",
-            )
-        import logging
-
-        logging.getLogger(__name__).warning(
-            f"STM integration failed ({sol.message}) — returning initial covariance as conservative fallback."
+        raise PropagationError(
+            f"STM covariance propagation failed: {sol.message}. "
+            "Cannot return initial covariance as a fallback — this would freeze "
+            "uncertainty at epoch and produce falsely low collision probabilities. "
+            "Inspect drag_config, initial state, and integration tolerances.",
+            norad_id="COVARIANCE_STM",
         )
-        return cov0_6x6  # Fallback to initial
 
     Phi_final = sol.y[6:, -1].reshape(6, 6)
     return Phi_final @ cov0_6x6 @ Phi_final.T  # type: ignore[no-any-return]

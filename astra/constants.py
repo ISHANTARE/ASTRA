@@ -112,11 +112,21 @@ AU_KM: float = 149597870.7  # Astronomical Unit (km) — IAU 2012
 SRP_P0_N_M2: float = 4.56e-6  # Solar radiation pressure at 1 AU (N/m²)
 
 # ---------------------------------------------------------------------------
-# Compile-time guard: ensure Numba inlined literals stay in sync [LOW-01]
-# The Numba JIT kernels in propagator.py cannot import this module at compile
-# time, so they inline numeric literals.  If SRP_P0_N_M2 or AU_KM are ever
-# updated here, the corresponding literals MUST be updated manually.
-# This assertion will catch the drift at Python import time.
+# Physical scalars used inside Numba JIT kernels — must never drift.
+# ---------------------------------------------------------------------------
+#: Universal gas constant (J/K/mol) — inlined in propagator._nrlmsise00_density_njit.
+R_GAS: float = 8.314462618
+
+#: G0 expressed in km/s² for use inside Numba kernels that work in km.
+#: propagator._powered_derivative_njit inlines ``g0 = 9.80665e-3`` directly;
+#: this constant documents the conversion and is guarded below.
+G0_STD_KM_S2: float = G0_STD * 1e-3  # 9.80665e-3 km/s²
+
+# ---------------------------------------------------------------------------
+# Compile-time guards: ensure Numba inlined literals stay in sync [LOW-01]
+# The Numba JIT kernels in propagator.py, covariance.py, and frames.py cannot
+# import this module at compile time, so they inline numeric literals.
+# These assertions fire at Python import time to catch any drift.
 # ---------------------------------------------------------------------------
 assert SRP_P0_N_M2 == 4.56e-6, (
     f"SRP_P0_N_M2 ({SRP_P0_N_M2}) does not match the Numba inlined literal "
@@ -125,4 +135,51 @@ assert SRP_P0_N_M2 == 4.56e-6, (
 assert AU_KM == 149597870.7, (
     f"AU_KM ({AU_KM}) does not match the Numba inlined literal "
     "149597870.7 in propagator.py._acceleration_njit. Update both in sync."
+)
+# [FM-3/FM-9 Fix — Finding #10] Earth rotation rate guard.
+assert EARTH_OMEGA_RAD_S == 7.292115146706979e-5, (
+    f"EARTH_OMEGA_RAD_S ({EARTH_OMEGA_RAD_S}) does not match the inlined literal "
+    "7.292115146706979e-5 in propagator.py, covariance.py, frames.py. Update all in sync."
+)
+# [FM-3/FM-9 Fix — Finding #11] WGS84 equatorial radius guard.
+assert EARTH_EQUATORIAL_RADIUS_KM == 6378.137, (
+    f"EARTH_EQUATORIAL_RADIUS_KM ({EARTH_EQUATORIAL_RADIUS_KM}) does not match the "
+    "Numba inlined literal 6378.137 in frames.py.ecef_to_geodetic_wgs84. Update both in sync."
+)
+# [FM-9 Fix — Finding #22] Standard gravity guard.
+assert G0_STD == 9.80665, (
+    f"G0_STD ({G0_STD}) does not match the IAU standard 9.80665 m/s². "
+    "Update constants.py and all import sites in sync."
+)
+# [FM-9A Fix] J2 zonal harmonic guard.
+# propagator._acceleration_njit inlines J2 = 0.00108262668 at line ~636 (J2c).
+# _compute_force_jacobian also inlines J2c = 0.00108262668 at line ~636.
+# Both must match constants.J2 exactly.
+assert abs(J2 - 1.08262668e-3) < 1e-15, (
+    f"J2 ({J2!r}) diverged from canonical EGM96/WGS-84 value 1.08262668e-3. "
+    "Update constants.py AND propagator.py J2 / J2c inlined literals in sync."
+)
+# [FM-9A Fix] Earth gravitational parameter guard.
+# propagator._acceleration_njit inlines mu = 398600.4418.
+assert EARTH_MU_KM3_S2 == 398600.4418, (
+    f"EARTH_MU_KM3_S2 ({EARTH_MU_KM3_S2}) does not match the Numba inlined literal "
+    "398600.4418 in propagator.py._acceleration_njit. Update both in sync."
+)
+# [FM-9A Fix] G0 in km/s² guard.
+# propagator._powered_derivative_njit inlines ``g0 = 9.80665e-3`` (km/s²).
+assert abs(G0_STD_KM_S2 - 9.80665e-3) < 1e-20, (
+    f"G0_STD_KM_S2 ({G0_STD_KM_S2!r}) diverged from 9.80665e-3 km/s². "
+    "Update constants.py AND propagator.py._powered_derivative_njit in sync."
+)
+# [FM-9A Fix] Universal gas constant guard.
+# propagator._nrlmsise00_density_njit inlines R_GAS = 8.314462618 J/(K·mol).
+assert abs(R_GAS - 8.314462618) < 1e-9, (
+    f"R_GAS ({R_GAS!r}) diverged from CODATA 2018 value 8.314462618 J/(K·mol). "
+    "Update constants.py AND propagator.py._nrlmsise00_density_njit in sync."
+)
+# [FM-9A Fix] Sun radius guard.
+# propagator._acceleration_njit inlines 695700.0 for Sun radius in SRP shadow.
+assert SUN_RADIUS_KM == 695700.0, (
+    f"SUN_RADIUS_KM ({SUN_RADIUS_KM}) does not match the Numba inlined literal "
+    "695700.0 in propagator.py._srp_illumination_factor_dual_cone_njit. Update both in sync."
 )

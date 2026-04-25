@@ -120,58 +120,96 @@ def filter_region(
 ) -> list[DebrisObject]:
     """Retain objects whose ground track could pass through a bounding box.
 
-    Approximation based on orbital inclination. It is an over-inclusive filter.
+    Uses a two-stage filter:
 
-    .. warning::
-        The longitude arguments are silently ignored — the inclination-based
-        approximation cannot restrict longitude. In STRICT_MODE a
-        ``FilterError`` is raised if either longitude bound is set.
+    **Stage 1 - Latitude (inclination-based):**
+    An object with inclination *i* reaches latitudes up to ``i`` (prograde)
+    or ``180 - i`` (retrograde). Objects whose latitude band does not
+    overlap ``[lat_min_deg, lat_max_deg]`` are excluded immediately.
+
+    **Stage 2 - Longitude (RAAN-based, if bounds are supplied):**
+    For short-period orbits (period < 1440 min / 24 h), Earth's rotation
+    causes the satellite's ground track to sweep all longitudes within a day,
+    so the longitude filter is vacuous and all Stage-1 survivors are kept.
+    For long-period orbits (GEO / HEO / deep-space), the ascending node is
+    anchored near RAAN for the duration of interest, so a window check around
+    RAAN is applied with a margin equal to the longitude swept in half an
+    orbital period.  This remains an **over-inclusive** pre-filter.
+
+    Note:
+        For hard longitude exclusion use ``propagate_trajectory()`` followed
+        by manual geodetic post-filtering.
 
     Args:
         objects: List of DebrisObjects.
-        lat_min_deg: Minimum latitude bound.
-        lat_max_deg: Maximum latitude bound.
-        lon_min_deg: NOT IMPLEMENTED. Triggers a warning (or error in STRICT_MODE).
-        lon_max_deg: NOT IMPLEMENTED. Triggers a warning (or error in STRICT_MODE).
+        lat_min_deg: Minimum latitude bound (degrees).
+        lat_max_deg: Maximum latitude bound (degrees).
+        lon_min_deg: Minimum longitude bound (degrees, -180 to +180).
+            ``None`` disables longitude filtering entirely.
+        lon_max_deg: Maximum longitude bound (degrees, -180 to +180).
+            ``None`` disables longitude filtering entirely.
 
     Returns:
         Filtered list of DebrisObjects.
+
+    Example::
+
+        # Retain objects that could pass over India (lat 8-37, lon 68-97)
+        filtered = filter_region(
+            objects,
+            lat_min_deg=8.0, lat_max_deg=37.0,
+            lon_min_deg=68.0, lon_max_deg=97.0,
+        )
     """
+    # [FM-2 Fix - Finding #5] Use `is not None` - NOT truthiness - so that
+    # lon_min_deg=0.0 correctly activates the longitude filter path.
+    apply_lon_filter = (lon_min_deg is not None) and (lon_max_deg is not None)
+
     results = []
     for obj in objects:
-        # For inclination > 90 (retrograde), the maximum latitude reached
-        # is 180 - inclination.
+        # ── Stage 1: Latitude ────────────────────────────────────────────────
         inc = obj.inclination_deg
         max_lat_reached = inc if inc <= 90.0 else 180.0 - inc
 
-        # Object latitude bounds during its orbit: [-max_lat_reached, +max_lat_reached]
-        # Bounding box latitude: [lat_min_deg, lat_max_deg]
+        # Object latitude band: [-max_lat_reached, +max_lat_reached]
+        if not (lat_min_deg <= max_lat_reached and lat_max_deg >= -max_lat_reached):
+            continue  # latitude bands do not overlap → skip
 
-        # Check if the two intervals overlap
-        if lat_min_deg <= max_lat_reached and lat_max_deg >= -max_lat_reached:
-            # Overlap exists. Longitude is skipped since the Earth rotates underneath,
-            # meaning all longitudes are eventually covered in the operational band.
-            results.append(obj)
+        # ── Stage 2: Longitude (if bounds supplied) ──────────────────────────
+        if apply_lon_filter:
+            # [FM-1 Fix - Finding #1] RAAN + inclination-based longitude pre-filter.
+            #
+            # For orbits with period < 24 h (LEO/MEO), Earth's rotation (~360°/day)
+            # means the ascending node sweeps every longitude within <= 1 day
+            # regardless of RAAN. All such objects that pass Stage 1 are kept.
+            period_min = obj.period_minutes
+            if period_min <= 0.0 or period_min < 1440.0:
+                # Short-period orbit: ascending node covers all longitudes in 24 h.
+                results.append(obj)
+                continue
 
-    # Longitude filters are not implemented for this inclination-only heuristic
-    if lon_min_deg is not None or lon_max_deg is not None:
-        from astra import config
+            # Long-period orbit (GEO / HEO): ascending node stays near RAAN.
+            # Apply a window check with margin for half-period nodal drift.
+            raan = obj.raan_deg % 360.0       # normalise to [0, 360)
+            lmin = float(lon_min_deg) % 360.0  # type: ignore[arg-type]
+            lmax = float(lon_max_deg) % 360.0  # type: ignore[arg-type]
 
-        lon_msg = (
-            "filter_region() longitude bounds are set but IGNORED. "
-            "This filter uses inclination-only approximation and cannot restrict longitude — "
-            "all longitudes within the inclination band are included. "
-            "Use propagate_trajectory() + post-filtering for ground-track longitude restriction."
-        )
-        if config.ASTRA_STRICT_MODE:
-            from astra.errors import FilterError
+            # Half-period longitude drift: Earth rotates 360/day, so the node
+            # drifts ~360*(P_min/1440)/2 degrees in half an orbital period.
+            lon_half_sweep_deg = 360.0 * (period_min / 1440.0) / 2.0
+            lo = (lmin - lon_half_sweep_deg) % 360.0
+            hi = (lmax + lon_half_sweep_deg) % 360.0
 
-            raise FilterError(
-                f"[ASTRA STRICT] {lon_msg}", parameter="lon_min_deg/lon_max_deg"
-            )
-        import logging
+            if lo <= hi:
+                in_band = lo <= raan <= hi
+            else:
+                # Band wraps through 0 degrees (e.g. lo=350, hi=10)
+                in_band = raan >= lo or raan <= hi
 
-        logging.getLogger(__name__).warning(lon_msg)
+            if not in_band:
+                continue  # RAAN outside reachable longitude band → skip
+
+        results.append(obj)
 
     return results
 

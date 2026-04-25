@@ -28,7 +28,7 @@ from astra.covariance import (
     estimate_covariance,
     rotate_covariance_rtn_to_eci,
 )
-from astra.spacebook import fetch_synthetic_covariance_stk, SPACEBOOK_ENABLED
+from astra.spacebook import fetch_synthetic_covariance_stk
 from astra.log import get_logger
 from astra.spatial_index import SpatialIndex
 
@@ -149,6 +149,7 @@ def load_spacebook_covariance(norad_id: int) -> np.ndarray | None:
         download fails, parsing fails, unit mismatch is detected, or Spacebook
         is disabled.
     """
+    from astra.config import SPACEBOOK_ENABLED
     if not SPACEBOOK_ENABLED:
         return None  # type: ignore[no-any-return]
 
@@ -266,10 +267,35 @@ def closest_approach(
     idx_low = max(0, t_idx - 1)
     idx_high = min(len(times_jd) - 1, t_idx + 1)
 
+    # [FM-1 Fix - Finding #2] Brent minimization on the CubicSpline distance.
+    # This replaces the fixed 100-point dense scan with a bounded scalar
+    # optimization, improving TCA precision from ~0.5 s to sub-millisecond
+    # with typically 8-15 function evaluations instead of 100.
+    try:
+        from scipy.optimize import minimize_scalar
+
+        def _dist_fn(t_jd: float) -> float:
+            return float(np.linalg.norm(spline_A(t_jd) - spline_B(t_jd)))
+
+        _lo = float(times_jd[idx_low])
+        _hi = float(times_jd[idx_high])
+        _res = minimize_scalar(
+            _dist_fn,
+            bounds=(_lo, _hi),
+            method="bounded",
+            options={"xatol": 1.16e-8},  # 1.16e-8 JD ≈ 1 ms
+        )
+        if _res.success and _lo <= _res.x <= _hi:
+            tca_jd_fine = float(_res.x)
+            min_dist_fine = float(_res.fun)
+            return min_dist_fine, tca_jd_fine, t_idx  # type: ignore[no-any-return]
+    except Exception:
+        pass  # fall back to coarse scan
+
+    # Coarse fallback: dense 100-point bracket scan
     t_dense = np.linspace(times_jd[idx_low], times_jd[idx_high], 100)
     rA_dense = spline_A(t_dense)
     rB_dense = spline_B(t_dense)
-
     dense_dists = distance_3d(rA_dense, rB_dense)
     t_dense_idx = int(np.argmin(dense_dists))
 
@@ -306,9 +332,10 @@ def find_conjunctions(
         List of ConjunctionEvent objects, sorted by miss_distance_km.
 
     Note:
-        TCA refinement uses a fixed-density scan bracket plus cubic splines.
-        A Brent-style minimization on the spline could reduce samples for
-        marginal geometries; the present scheme prioritizes robustness.
+        TCA refinement uses a CubicSpline + Brent scalar minimization
+        (scipy.optimize.minimize_scalar, method='bounded') for sub-millisecond
+        TCA precision. Falls back to 100-point dense scan if Brent fails.
+        [FM-1 Fix - Finding #2]
 
         ``max_workers`` caps the thread-pool size.  Defaults to
         ``min(cpu_count, 16)`` to prevent thread storms on large catalogs
@@ -445,8 +472,27 @@ def find_conjunctions(
 
         tca_jd = float(t_dense[tca_dense_idx])
 
-        pos_A = rA_dense[tca_dense_idx]
-        pos_B = rB_dense[tca_dense_idx]
+        # [FM-1 Fix - Finding #2] Brent refinement of TCA within 1-s bracket.
+        # Improves precision from ~0.5 s to sub-millisecond.
+        try:
+            from scipy.optimize import minimize_scalar
+
+            _spline_dist = lambda t: float(np.linalg.norm(spline_A(t) - spline_B(t)))  # noqa: E731
+            _lo_t = float(t_dense[max(0, tca_dense_idx - 1)])
+            _hi_t = float(t_dense[min(len(t_dense) - 1, tca_dense_idx + 1)])
+            _brent = minimize_scalar(
+                _spline_dist,
+                bounds=(_lo_t, _hi_t),
+                method="bounded",
+                options={"xatol": 1.16e-8},  # ~1 ms in JD units
+            )
+            if _brent.success and _lo_t <= _brent.x <= _hi_t:
+                tca_jd = float(_brent.x)
+                min_dist = float(_brent.fun)
+                pos_A = spline_A(tca_jd)
+                pos_B = spline_B(tca_jd)
+        except Exception:
+            pass  # keep coarse scan result
 
         # Prefer SGP4 velocity spline at TCA; else spline derivative (km/JD → km/s).
         if vel_spline_A is not None:
@@ -667,3 +713,171 @@ def find_conjunctions(
     events.sort(key=lambda x: x.miss_distance_km)
     logger.info(f"Conjunction Sweep Complete: {len(events)} events detected.")
     return events  # type: ignore[no-any-return]
+
+
+def run_conjunction_sweep(
+    catalog: "list[Any]",
+    t_start_jd: float,
+    t_end_jd: float,
+    step_minutes: float = 5.0,
+    threshold_km: float = 5.0,
+    coarse_threshold_km: float = 50.0,
+    cov_map: "Optional[dict[str, np.ndarray]]" = None,
+    max_workers: "Optional[int]" = None,
+) -> "list[ConjunctionEvent]":
+    """High-level conjunction sweep pipeline: catalog → ConjunctionEvent list.
+
+    **Replaces the 5-step manual orchestration** (fetch → map → propagate →
+    index → screen) with a single call.  Internally handles:
+
+    1. Converting ``catalog`` entries (SatelliteTLE or SatelliteOMM) to
+       :class:`DebrisObject` instances via :func:`make_debris_object`.
+    2. Building the Julian-Date time grid between ``t_start_jd`` and
+       ``t_end_jd`` at ``step_minutes`` resolution.
+    3. Batch-propagating all satellites over the grid via :func:`propagate_many`.
+    4. Dropping any satellite whose trajectory contains NaN values (SGP4
+       error; typically very decayed TLEs).
+    5. Running :func:`find_conjunctions` with the 3-phase KD-tree + spline +
+       Pc pipeline on the resulting trajectory map.
+
+    [FM-7 Fix — Finding #8 Audit]
+
+    Args:
+        catalog: List of ``SatelliteTLE`` or ``SatelliteOMM`` objects.
+            Obtain via ``fetch_celestrak_group``, ``fetch_spacetrack_group``,
+            or any other ingestion function.
+        t_start_jd: Window start as Julian Date (UTC).
+        t_end_jd: Window end as Julian Date (UTC). Must be > t_start_jd.
+        step_minutes: Propagation step size in minutes (default 5.0).
+            Smaller values improve TCA precision at the cost of memory.
+        threshold_km: Fine-filter conjunction threshold in km (default 5.0).
+        coarse_threshold_km: KD-tree pre-filter radius in km (default 50.0).
+        cov_map: Optional NORAD-ID → (3,3) or (6,6) covariance in km².
+            When omitted, synthetic covariance estimation is used.
+        max_workers: Maximum thread-pool size for concurrent pair evaluation.
+            Defaults to ``min(cpu_count, 16)``.
+
+    Returns:
+        List of :class:`ConjunctionEvent` objects sorted by miss distance,
+        ready for downstream Pc ranking or CDM generation.
+
+    Raises:
+        AstraError: If ``t_end_jd <= t_start_jd`` or ``catalog`` is empty.
+        PropagationError: Propagation failure for any object in STRICT_MODE.
+
+    Example::
+
+        import astra
+        import math
+
+        catalog = astra.fetch_celestrak_group("starlink")
+        t0 = astra.datetime_utc_to_jd(datetime(2026, 5, 1, tzinfo=timezone.utc))
+        t1 = t0 + 1.0  # 24-hour window
+
+        events = astra.run_conjunction_sweep(catalog, t0, t1, threshold_km=5.0)
+        for ev in events[:10]:
+            print(f"{ev.object_a_id} vs {ev.object_b_id}  "
+                  f"miss={ev.miss_distance_km:.3f} km  Pc={ev.collision_probability:.2e}")
+    """
+    if not catalog:
+        raise AstraError("run_conjunction_sweep: catalog is empty.")
+    if t_end_jd <= t_start_jd:
+        raise AstraError(
+            f"run_conjunction_sweep: t_end_jd ({t_end_jd}) must be "
+            f"strictly greater than t_start_jd ({t_start_jd})."
+        )
+    if step_minutes <= 0:
+        raise AstraError(
+            f"run_conjunction_sweep: step_minutes must be positive, got {step_minutes}."
+        )
+
+    # ── 1. Convert catalog entries to DebrisObjects ─────────────────────────
+    from astra.debris import make_debris_object
+
+    elements_map: dict[str, DebrisObject] = {}
+    skipped_build = 0
+    for sat in catalog:
+        try:
+            obj = make_debris_object(sat)
+            elements_map[sat.norad_id] = obj
+        except Exception as _be:
+            skipped_build += 1
+            logger.debug(
+                "run_conjunction_sweep: skipping NORAD %s during DebrisObject "
+                "construction (%r).", getattr(sat, "norad_id", "?"), _be
+            )
+
+    if not elements_map:
+        raise AstraError(
+            "run_conjunction_sweep: no valid DebrisObjects could be constructed "
+            "from the supplied catalog."
+        )
+    if skipped_build:
+        logger.warning(
+            "run_conjunction_sweep: %d catalog entries skipped during DebrisObject "
+            "construction (malformed data or missing fields).", skipped_build
+        )
+
+    satellites = [obj.source for obj in elements_map.values()]
+
+    # ── 2. Build Julian-Date time grid ───────────────────────────────────────
+    total_minutes = (t_end_jd - t_start_jd) * 1440.0
+    n_steps = max(3, int(total_minutes / step_minutes) + 1)
+    times_jd = np.linspace(t_start_jd, t_end_jd, n_steps)
+
+    logger.info(
+        "run_conjunction_sweep: %d objects, %.2f-hr window, %d time steps "
+        "(step=%.1f min), threshold=%.1f km.",
+        len(satellites),
+        (t_end_jd - t_start_jd) * 24.0,
+        n_steps,
+        step_minutes,
+        threshold_km,
+    )
+
+    # ── 3. Batch propagate all satellites ────────────────────────────────────
+    from astra.orbit import propagate_many
+
+    trajectories, vel_map = propagate_many(satellites, times_jd)
+
+    # ── 4. Drop NaN trajectories (SGP4 failures) ─────────────────────────────
+    valid_traj: "dict[str, np.ndarray]" = {}
+    valid_vel: "dict[str, np.ndarray]" = {}
+    nan_count = 0
+    for nid, traj in trajectories.items():
+        if np.any(~np.isfinite(traj)):
+            nan_count += 1
+        else:
+            valid_traj[nid] = traj
+            if nid in vel_map:
+                valid_vel[nid] = vel_map[nid]
+
+    if nan_count:
+        logger.warning(
+            "run_conjunction_sweep: %d satellites excluded due to SGP4 NaN "
+            "trajectories (likely decayed or invalid TLEs).", nan_count
+        )
+
+    if len(valid_traj) < 2:
+        logger.info(
+            "run_conjunction_sweep: fewer than 2 valid trajectories remain after "
+            "NaN filtering. Returning empty event list."
+        )
+        return []
+
+    # Restrict elements_map to valid trajectories only
+    valid_elements: dict[str, DebrisObject] = {
+        nid: obj for nid, obj in elements_map.items() if nid in valid_traj
+    }
+
+    # ── 5. Run the conjunction screening pipeline ────────────────────────────
+    return find_conjunctions(
+        trajectories=valid_traj,
+        times_jd=times_jd,
+        elements_map=valid_elements,
+        threshold_km=threshold_km,
+        coarse_threshold_km=coarse_threshold_km,
+        cov_map=cov_map,
+        vel_map=valid_vel,
+        max_workers=max_workers,
+    )

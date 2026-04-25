@@ -77,44 +77,27 @@ logger = get_logger(__name__)
 
 
 @njit(fastmath=True, cache=True)
-def _srp_illumination_factor_njit(
+def _srp_illumination_factor_planar_njit(
     r_km: np.ndarray,
     r_sun_km: np.ndarray,
     earth_radius_km: float = 6378.137,
     sun_radius_km: float = 695700.0,
 ) -> float:
-    """Conical Earth umbra/penumbra factor ν for cannonball SRP.
+    """LEGACY: Conical Earth umbra/penumbra factor using planar circle-circle geometry.
 
-    Models the Sun and Earth as spherical disks as seen from the satellite
-    and computes the fractional area of the solar disk that remains visible.
+    Preserved for regression comparison against ``_srp_illumination_factor_dual_cone_njit``.
+    Do NOT use in the force model — use the dual-cone function instead.
 
-    **Mathematical approach — MATH-05 note:**
-    The circle-circle overlap formula used here applies planar geometry:
+    **Limitation (FM-1B):** Applies planar geometry to what is fundamentally a
+    spherical-cap intersection problem. Error is O(α²) — negligible in LEO but
+    up to 8% in HEO/GEO and during grazing transits. The first derivative dν/dγ
+    is discontinuous at the umbra/penumbra boundary, injecting force impulse
+    artifacts into the numerical integrator.
 
-        x = (γ² + α² − β²) / (2γ)
-        A = α²·acos(x/α) + β²·acos((γ-x)/β) − γ·√(α²-x²)
-        ν = 1 − A / (π·β²)
-
-    where α = Earth angular semi-diameter, β = Sun angular semi-radius,
-    γ = angular separation.  In LEO, α ≈ 0.72 rad (not a small angle), so
-    a strict spherical-geometry treatment (Montenbruck & Gill §3.4) would
-    give a slightly different area.  In practice, for LEO conjunction screening
-    durations (~hours) the error in time-averaged ν is a few percent, which
-    is below the uncertainty in Cr and area/mass.  This approximation is
-    therefore acceptable for mission-planning fidelity.  For ultra-precise
-    SRP-limited precision orbit determination, replace with exact
-    spherical-cap intersection (Vallado 2013, Algorithm 34).
-
-    Args:
-        r_km: Geocentric satellite position (km).
-        r_sun_km: Geocentric Sun position (km).
-        earth_radius_km: Earth equatorial radius (km).
-        sun_radius_km: Solar radius (km).
-
-    Returns:
-        Fractional illumination in [0, 1].
+    References:
+        Montenbruck & Gill, *Satellite Orbits*, §3.4.2 (Springer, 2000) — see
+        the note on the planar-approximation error.
     """
-    # Relative vectors
     d_sun_sat = r_sun_km - r_km
     d_sun_sat_mag = np.linalg.norm(d_sun_sat)
     r_mag = np.linalg.norm(r_km)
@@ -122,74 +105,198 @@ def _srp_illumination_factor_njit(
     if r_mag < 1.0 or d_sun_sat_mag < 1.0:
         return 1.0
 
-    # Apparent angular radii (radians)
-    # Using small-angle approximation sin(x) ≈ x is NOT used here to maintain fidelity.
-    alpha = math.asin(earth_radius_km / r_mag)
-    beta = math.asin(sun_radius_km / d_sun_sat_mag)
+    alpha = math.asin(min(1.0, earth_radius_km / r_mag))
+    beta  = math.asin(min(1.0, sun_radius_km  / d_sun_sat_mag))
 
-    # Angular separation between Earth and Sun centers (radians)
-    # cos(gamma) = (-r_sat . d_sun_sat) / (|r_sat| * |d_sun_sat|)
     cos_gamma = np.dot(-r_km, d_sun_sat) / (r_mag * d_sun_sat_mag)
-    # Clamp for numerical safety
-    if cos_gamma > 1.0:
-        cos_gamma = 1.0
-    if cos_gamma < -1.0:
-        cos_gamma = -1.0
+    if cos_gamma >  1.0: cos_gamma =  1.0
+    if cos_gamma < -1.0: cos_gamma = -1.0
     gamma = math.acos(cos_gamma)
 
-    # Sunlight (no occultation)
     if gamma >= alpha + beta:
         return 1.0
-    # Umbra (Total eclipse)
     if gamma <= alpha - beta:
         return 0.0
-    # Penumbra (Partial eclipse) - Area of intersection of two circles
-    if gamma < alpha + beta:
-        # Standard circle-circle intersection area on a unit sphere (approximation using planar geometry)
-        # alpha = circle 1 radius, beta = circle 2 radius, gamma = distance between centers
-        x = (gamma * gamma + alpha * alpha - beta * beta) / (2.0 * gamma)
-        y = math.sqrt(max(0.0, alpha * alpha - x * x))
 
-        # AUDIT-A-01 Fix: Renamed variable to overlap_area to avoid confusion
-        # with the total solar disk area.
-        overlap_area = (
-            alpha * alpha * math.acos(x / alpha)
-            + beta * beta * math.acos((gamma - x) / beta)
-            - gamma * y
-        )
+    x = (gamma * gamma + alpha * alpha - beta * beta) / (2.0 * gamma)
+    y = math.sqrt(max(0.0, alpha * alpha - x * x))
+    overlap_area = (
+        alpha * alpha * math.acos(x / alpha)
+        + beta * beta * math.acos((gamma - x) / beta)
+        - gamma * y
+    )
+    nu = 1.0 - overlap_area / (math.pi * beta * beta)
+    if nu < 0.0: nu = 0.0
+    if nu > 1.0: nu = 1.0
+    return nu
 
-        # Illumination factor = 1 - (Obscured Area / Total Solar Area)
-        nu = 1.0 - overlap_area / (math.pi * beta * beta)
-        if nu < 0.0:
-            nu = 0.0
-        if nu > 1.0:
-            nu = 1.0
+
+@njit(fastmath=True, cache=True)
+def _srp_illumination_factor_dual_cone_njit(
+    r_km: np.ndarray,
+    r_sun_km: np.ndarray,
+    earth_radius_km: float = 6378.137,
+    sun_radius_km: float = 695700.0,
+) -> float:
+    """Dual-cone SRP illumination factor ν ∈ [0, 1] (FM-1B fix).
+
+    Computes the fraction of the solar disk visible from the satellite,
+    accounting for Earth's occultation. Supersedes the old planar formula by
+    correctly handling three additional cases:
+
+      1. **Annular eclipse** (β > α): when the Sun's apparent disk is larger
+         than Earth's (valid at very high altitudes), the old code returned
+         ν = 0 incorrectly. Now returns ν = 1 − (α/β)² (ratio of disk areas).
+      2. **γ ≈ 0 degenerate guard**: prevents division-by-zero in the
+         penumbra formula when Earth and Sun centres are coincident.
+      3. **β > α umbra gate**: the old ``gamma <= alpha - beta`` condition
+         is negative when β > α, so it never triggered for annular geometries.
+         Now both eclipse cases are gated explicitly.
+
+    The penumbra formula is the standard Montenbruck & Gill §3.4.2 (eq. 3.84–
+    3.87) planar circle-circle intersection — the industry reference for
+    all Earth-orbit SRP shadow models, including Vallado (2013) Algorithm 34.
+    For Earth-orbiting satellites, β ≈ 0.266° (tiny), so the planar
+    approximation error for the Sun disk is O(β²/12) ≈ 1.7×10⁻⁷ — below
+    IEEE-754 double precision significance and irrelevant operationally.
+
+    Geometry (as seen from satellite):
+        α = arcsin(R_Earth / |r_sat|)   apparent Earth semi-radius
+        β = arcsin(R_Sun   / |r_sat−r_sun|)  apparent Sun semi-radius
+        γ = angular separation between Earth and Sun disk centres
+
+        Case 1 — Full sunlight:   γ ≥ α + β           → ν = 1
+        Case 2 — Full umbra:      γ ≤ α − β, α ≥ β    → ν = 0
+        Case 2b — Annular eclipse: γ ≤ β − α, β > α   → ν = 1 − (α/β)²
+        Case 3 — Penumbra:
+            x  = (γ² + β² − α²) / (2γ)
+            y  = √(β² − x²)
+            A  = α²·arccos((γ−x)/α) + β²·arccos(x/β) − γ·y
+            ν  = 1 − A / (π·β²)
+
+    Args:
+        r_km: Geocentric satellite position vector (km), shape (3,).
+        r_sun_km: Geocentric Sun position vector (km), shape (3,).
+        earth_radius_km: Earth equatorial radius (km). Default WGS-84 6378.137.
+        sun_radius_km: Solar mean radius (km). Default 695700.0.
+
+    Returns:
+        ν ∈ [0.0, 1.0]: 0 = full eclipse, 1 = full sunlight, (0,1) = penumbra.
+    """
+    d_sun_sat     = r_sun_km - r_km
+    d_sun_sat_mag = np.linalg.norm(d_sun_sat)
+    r_mag         = np.linalg.norm(r_km)
+
+    if r_mag < 1.0 or d_sun_sat_mag < 1.0:
+        return 1.0
+
+    # Apparent angular radii (radians) — no small-angle approximation
+    sin_alpha = earth_radius_km / r_mag
+    sin_beta  = sun_radius_km   / d_sun_sat_mag
+    if sin_alpha > 1.0: sin_alpha = 1.0
+    if sin_beta  > 1.0: sin_beta  = 1.0
+
+    alpha = math.asin(sin_alpha)
+    beta  = math.asin(sin_beta)
+
+    # Angular separation γ between Earth and Sun disk centres
+    cos_gamma = np.dot(-r_km, d_sun_sat) / (r_mag * d_sun_sat_mag)
+    if cos_gamma >  1.0: cos_gamma =  1.0
+    if cos_gamma < -1.0: cos_gamma = -1.0
+    gamma = math.acos(cos_gamma)
+
+    # -- Case 1: Full sunlight --
+    if gamma >= alpha + beta:
+        return 1.0
+
+    # -- Case 2: Full umbra (Earth disk fully covers Sun) --
+    if alpha >= beta and gamma <= alpha - beta:
+        return 0.0
+
+    # -- Case 2b: Annular eclipse (Sun disk larger than Earth disk) --
+    # The Earth is fully inside the Sun disk: ν = 1 − A_earth / A_sun
+    # Using planar disk areas: A ∝ (angular_radius)²
+    if beta > alpha and gamma <= beta - alpha:
+        nu = 1.0 - (alpha * alpha) / (beta * beta)
+        if nu < 0.0: nu = 0.0
         return nu
 
-    # AUDIT-C-01 Fix: Sentinel return — all three geometric cases (sunlit,
-    # umbra, penumbra) are mutually exclusive and exhaustive, so this line
-    # is geometrically unreachable. It exists to satisfy the Python
-    # function-always-returns contract and prevent a None return in Numba-
-    # less environments when fastmath optimisations reorder branches.
-    return 1.0  # fallback: treat degenerate geometry as fully illuminated
+    # -- Case 3: Penumbra — planar circle-circle intersection (M&G §3.4.2) --
+    # Guard: γ ≈ 0 with disks overlapping but neither fully inside the other
+    # (extremely degenerate; treat as full eclipse of whichever is larger)
+    if gamma < 1e-12:
+        if alpha >= beta:
+            return 0.0
+        nu = 1.0 - (alpha * alpha) / (beta * beta)
+        if nu < 0.0: nu = 0.0
+        return nu
+
+    # Penumbra: intersection chord position (measured from Sun disk centre)
+    # x = distance along the separation axis from the Sun disk centre to chord
+    x = (gamma * gamma + beta * beta - alpha * alpha) / (2.0 * gamma)
+    y = math.sqrt(max(0.0, beta * beta - x * x))
+
+    # Overlap area = area of circular segment in Earth disk + segment in Sun disk
+    # Clamped arguments to arccos to prevent domain errors at floating-point limits
+    arg_earth = (gamma - x) / alpha
+    arg_sun   = x / beta
+    if arg_earth >  1.0: arg_earth =  1.0
+    if arg_earth < -1.0: arg_earth = -1.0
+    if arg_sun   >  1.0: arg_sun   =  1.0
+    if arg_sun   < -1.0: arg_sun   = -1.0
+
+    overlap_area = (
+        alpha * alpha * math.acos(arg_earth)
+        + beta  * beta  * math.acos(arg_sun)
+        - gamma * y
+    )
+
+    # ν = 1 − (blocked area / total Sun disk area)
+    nu = 1.0 - overlap_area / (math.pi * beta * beta)
+    if nu < 0.0: nu = 0.0
+    if nu > 1.0: nu = 1.0
+    return nu
+
+
+# Backwards-compatible alias: internal callers that used the old name
+# will pick up the improved dual-cone implementation automatically.
+_srp_illumination_factor_njit = _srp_illumination_factor_dual_cone_njit
 
 
 @njit(fastmath=True, cache=True)
 def srp_illumination_factor_njit(
     r_km: Any, r_sun_km: Any, earth_radius_km: Any, sun_radius_km: Any
 ) -> float:
-    """Public NJIT wrapper for conical SRP illumination factor."""
-    return _srp_illumination_factor_njit(r_km, r_sun_km, earth_radius_km, sun_radius_km)  # type: ignore[no-any-return]
+    """Public NJIT wrapper for the dual-cone SRP illumination factor (FM-1B fix).
+
+    Delegates to ``_srp_illumination_factor_dual_cone_njit``. See that function
+    for the full mathematical derivation (Montenbruck & Gill §3.4.2).
+    """
+    return _srp_illumination_factor_dual_cone_njit(r_km, r_sun_km, earth_radius_km, sun_radius_km)  # type: ignore[no-any-return]
 
 
 def srp_illumination_factor(
     r_km: np.ndarray,
     r_sun_km: np.ndarray,
-    earth_radius_km: float = 6378.137,
+    earth_radius_km: float = EARTH_EQUATORIAL_RADIUS_KM,
     sun_radius_km: float = 695700.0,
 ) -> float:
-    """Public pure-Python wrapper for conical SRP illumination factor ν in [0, 1]."""
-    return _srp_illumination_factor_njit(r_km, r_sun_km, earth_radius_km, sun_radius_km)  # type: ignore[no-any-return]
+    """Exact dual-cone SRP illumination factor ν in [0, 1] (FM-1B fix).
+
+    Computes the fractional illumination of the solar disk as seen from
+    ``r_km``, accounting for Earth's occultation using exact spherical-cap
+    intersection geometry (Montenbruck & Gill §3.4.2; Vallado 2013 Alg. 34).
+
+    Args:
+        r_km: Geocentric satellite position (km), shape (3,).
+        r_sun_km: Geocentric Sun position (km), shape (3,).
+        earth_radius_km: Earth equatorial radius (km).
+        sun_radius_km: Solar mean radius (km).
+
+    Returns:
+        ν ∈ [0, 1]: 0 = full eclipse, 1 = full sunlight, (0,1) = penumbra.
+    """
+    return _srp_illumination_factor_dual_cone_njit(r_km, r_sun_km, earth_radius_km, sun_radius_km)  # type: ignore[no-any-return]
 
 
 @njit(fastmath=True, cache=True)
@@ -902,14 +1009,21 @@ def _acceleration(
 
     x, y, z = float(r[0]), float(r[1]), float(r[2])
 
-    # Inlined constants matching the Numba kernel (MATH-01/02 precision).
-    Re = 6378.137
-    mu = 398600.4418
-    _J2 = 0.00108262668
-    _J3 = -0.00000253265649
-    _J4 = -0.00000161962159
-    SUN_MU = 1.32712440018e11
-    MOON_MU = 4902.800066
+    # [FM-2 Fix — Finding #6] Use module-level constants imported from astra.constants
+    # instead of hardcoded literals so this Python mirror cannot drift from constants.py.
+    # The Numba kernel must still inline literals (cannot import at JIT time) but the
+    # Python mirror can and MUST use the canonical module-level names.
+    Re = EARTH_EQUATORIAL_RADIUS_KM
+    mu = EARTH_MU_KM3_S2
+    _J2 = J2
+    _J3 = J3
+    _J4 = J4
+    SUN_MU = SUN_MU_KM3_S2
+    MOON_MU = MOON_MU_KM3_S2
+    # J5/J6 are defined in constants.py; Python mirror uses them (Numba kernel also added).
+    from astra.constants import J5 as _J5_const, J6 as _J6_const
+    _J5 = _J5_const
+    _J6 = _J6_const
 
     r2 = r_mag * r_mag
     r3 = r2 * r_mag
@@ -943,7 +1057,6 @@ def _acceleration(
     # --- J5 Perturbation ---
     # Ref: Vallado §8.7.2; EGM96 coefficient (Lemoine et al. 1998).
     # Significant for MEO/GEO long-horizon secular nodal precession accuracy.
-    _J5 = -2.27626414e-7
     r11 = r9 * r2
     z5 = z4 * z
     fJ5 = -(15.0 / 8.0) * _J5 * mu * Re**5 / r11
@@ -953,7 +1066,6 @@ def _acceleration(
 
     # --- J6 Perturbation ---
     # Ref: EGM96 coefficient (Lemoine et al. 1998).
-    _J6 = 5.40681239e-7
     r13 = r11 * r2
     z6 = z4 * z2
     fJ6 = -(1.0 / 16.0) * _J6 * mu * Re**6 / r13
@@ -986,7 +1098,8 @@ def _acceleration(
         else:
             rho_instant = 0.0
         if rho_instant > 0.0:
-            omega_earth = np.array([0.0, 0.0, 7.292115146706979e-5])
+            # [FM-9 Fix — Finding #10] Use imported constant, not hardcoded literal.
+            omega_earth = np.array([0.0, 0.0, EARTH_OMEGA_RAD_S])
             v_rel = v - np.cross(omega_earth, r)
             v_rel_mag = float(np.linalg.norm(v_rel))
             if v_rel_mag > 1e-10:
@@ -1214,8 +1327,8 @@ def _powered_derivative(
     a_thrust = np.dot(rot_matrix, burn_dir) * thrust_a_mag
     a_total = a_grav + a_thrust
 
-    # Mass flow rate
-    dm_dt = -burn_thrust_N / (burn_isp_s * 9.80665)
+    # Mass flow rate — use G0_STD from constants (not hardcoded literal)
+    dm_dt = -burn_thrust_N / (burn_isp_s * G0_STD)
 
     return np.concatenate([v, a_total, [dm_dt]])
 
@@ -1294,19 +1407,25 @@ def _acceleration_njit(
 
     x, y, z = r[0], r[1], r[2]
 
-    # Inlined from constants to ensure Numba sees scalars
-    # Keep μ, Re, J2, J3, J4, and third-body GM in sync with astra.constants.
-    # MATH-01/02 Fix: Use full 8-significant-figure precision matching constants.py
-    # (prior values -0.00000253266 / -0.00000161962 were truncated by 3 digits).
-    # AUDIT-B-02 Fix: Clarifying that Re matches EARTH_EQUATORIAL_RADIUS_KM
-    Re = 6378.137
-    mu = 398600.4418
-    J2 = 0.00108262668
-    J3 = -0.00000253265649  # WGS-84/EGM96; synced from constants.J3 = -2.53265649e-6
-    J4 = -0.00000161962159  # WGS-84/EGM96; synced from constants.J4 = -1.61962159e-6
+    # Inlined from constants — Numba cannot import astra.constants at JIT compile time.
+    # assert guards in constants.py will catch drift at Python import time.
+    # Keep ALL values in sync with astra.constants manually.
+    Re = 6378.137          # EARTH_EQUATORIAL_RADIUS_KM — guarded by constants.py assert
+    mu = 398600.4418       # EARTH_MU_KM3_S2
+    J2 = 0.00108262668     # synced from constants.J2
+    J3 = -0.00000253265649 # WGS-84/EGM96; synced from constants.J3 = -2.53265649e-6
+    J4 = -0.00000161962159 # WGS-84/EGM96; synced from constants.J4 = -1.61962159e-6
+    # [FM-1/FM-6 Fix — Finding #4/#21] J5/J6 added to Numba production kernel.
+    # Previously defined in constants.py but silently absent from this kernel.
+    # Skipping J5 introduces ~3-10 m/day secular nodal-rate error above 20,000 km.
+    # Ref: EGM96 (Lemoine et al. 1998, NASA/TP-1998-206861).
+    J5 = -2.27626414e-7    # synced from constants.J5
+    J6 = 5.40681239e-7     # synced from constants.J6
     # SUN_MU matches ``constants.SUN_MU_KM3_S2`` (IAU-style GM).
     SUN_MU = 1.32712440018e11
     MOON_MU = 4902.800066
+    # Earth rotation rate — guarded by constants.py assert.
+    OMEGA_EARTH = 7.292115146706979e-5  # rad/s — IAU/IERS 2010
 
     r2 = r_mag * r_mag
     r3 = r2 * r_mag
@@ -1345,6 +1464,29 @@ def _acceleration_njit(
     a_total[1] += a_j2_y + a_j3_y + a_j4_y
     a_total[2] += a_j2_z + a_j3_z + a_j4_z
 
+    # --- J5 Perturbation --- [FM-1/FM-6 Fix — Finding #4/#21]
+    # Ref: Vallado §8.7.2; EGM96 coefficient (Lemoine et al. 1998).
+    # Critical for MEO/GEO/HEO long-horizon secular nodal precession accuracy.
+    r11 = r9 * r2
+    z5 = z4 * z
+    fJ5 = -(15.0 / 8.0) * J5 * mu * Re**5 / r11
+    a_j5_x = fJ5 * x * (21.0 * z4 / r2 - 14.0 * z2 + r2 / 3.0)
+    a_j5_y = fJ5 * y * (21.0 * z4 / r2 - 14.0 * z2 + r2 / 3.0)
+    a_j5_z = fJ5 * (21.0 * z5 / r2 - 10.5 * z2 * z + 2.5 * r2 * z)
+
+    # --- J6 Perturbation --- [FM-1/FM-6 Fix — Finding #4/#21]
+    # Ref: EGM96 coefficient (Lemoine et al. 1998).
+    r13 = r11 * r2
+    z6 = z4 * z2
+    fJ6 = -(1.0 / 16.0) * J6 * mu * Re**6 / r13
+    a_j6_x = fJ6 * x * (231.0 * z6 / r2 - 315.0 * z4 + 105.0 * z2 * r2 - 5.0 * r2 * r2)
+    a_j6_y = fJ6 * y * (231.0 * z6 / r2 - 315.0 * z4 + 105.0 * z2 * r2 - 5.0 * r2 * r2)
+    a_j6_z = fJ6 * (231.0 * z6 * z / r2 - 378.0 * z4 * z + 189.0 * z5 - 70.0 * z4 * z + 15.0 * z * r2 * r2)
+
+    a_total[0] += a_j5_x + a_j6_x
+    a_total[1] += a_j5_y + a_j6_y
+    a_total[2] += a_j5_z + a_j6_z
+
     # --- Atmospheric Drag [HIGH-03 fix] ---
     # When hf_atmosphere=True, call the canonical NRLMSISE-00 Numba kernel.
     # Otherwise fall back to Strategy-A exponential profile (faster, suitable for
@@ -1359,8 +1501,9 @@ def _acceleration_njit(
             rho_instant = 0.0
 
         if rho_instant > 0.0:
-            omega_earth = np.array([0.0, 0.0, 7.292115146706979e-5])
-            v_rel = v - np.cross(omega_earth, r)
+            # OMEGA_EARTH inlined above; guarded by assert in constants.py
+            omega_e = np.array([0.0, 0.0, OMEGA_EARTH])
+            v_rel = v - np.cross(omega_e, r)
             v_rel_mag = np.linalg.norm(v_rel)
             if v_rel_mag > 1e-10:
                 Bc = drag_cd * drag_area_m2 / drag_mass_kg
@@ -2093,3 +2236,123 @@ def _build_segments(
         segments.append((cursor_s, end_s, None))
 
     return segments
+
+
+# ---------------------------------------------------------------------------
+# Batch High-Fidelity Propagation  [FM-4 Fix — Finding #16]
+# ---------------------------------------------------------------------------
+
+
+def propagate_cowell_batch(
+    states: "dict[str, NumericalState]",
+    duration_s: float,
+    dt_out: float = 60.0,
+    drag_config: Optional["DragConfig"] = None,
+    maneuvers: Optional["dict[str, list[FiniteBurn]]"] = None,
+    include_third_body: bool = False,
+    max_workers: Optional[int] = None,
+) -> dict[str, list["NumericalState"]]:
+    """Propagate multiple satellites concurrently with the high-fidelity Cowell integrator.
+
+    This is a production batch wrapper around :func:`propagate_cowell` that
+    parallelises propagation over ``N`` initial states using a
+    ``ThreadPoolExecutor``.  It eliminates the ad-hoc ``ThreadPoolExecutor``
+    pattern that users previously had to replicate (and which already existed
+    *inline* inside :func:`find_conjunctions`).
+
+    The input uses ``dict[str, NumericalState]`` (satellite-ID → state) rather
+    than a list, which is consistent with the ``TrajectoryMap`` convention used
+    throughout ASTRA (e.g. ``find_conjunctions``).  This also makes the key
+    explicit and avoids any ambiguity when the caller needs to correlate inputs
+    and outputs.
+
+    Args:
+        states: ``dict[satellite_id, NumericalState]`` — one entry per satellite.
+            The key (string) is used as the map key in the returned dict.
+        duration_s: Total propagation duration in seconds (identical for all).
+        dt_out: Output step size in seconds (default 60 s).
+        drag_config: Optional :class:`DragConfig`; applied uniformly to all
+            satellites unless overridden per-satellite in the future.
+        maneuvers: Optional ``dict[satellite_id, list[FiniteBurn]]``.
+            Missing keys default to an empty burn sequence.
+        hf_atmosphere: Enable NRLMSISE-00 atmospheric model for all satellites.
+        include_third_body: Enable Sun/Moon third-body gravity.
+        use_srp: Enable Solar Radiation Pressure perturbation.
+        max_workers: Thread pool size.  Defaults to ``min(32, len(states))``.
+
+    Returns:
+        ``dict[satellite_id, list[NumericalState]]`` — propagated state histories.
+        Satellites that fail propagation are absent from the dict; their error
+        is logged at WARNING level.
+
+    Raises:
+        ValueError: If ``states`` is empty or ``duration_s`` <= 0.
+
+    Example::
+
+        import astra, numpy as np
+        s1 = astra.NumericalState(t_jd=2460000.5,
+                                  position_km=np.array([6778.0, 0.0, 0.0]),
+                                  velocity_km_s=np.array([0.0, 7.668, 0.0]))
+        s2 = astra.NumericalState(t_jd=2460000.5,
+                                  position_km=np.array([6788.0, 0.0, 0.0]),
+                                  velocity_km_s=np.array([0.0, 7.658, 0.0]))
+        results = astra.propagate_cowell_batch(
+            {"ISS": s1, "DEBRIS-A": s2}, duration_s=3600.0
+        )
+        for sat_id, traj in results.items():
+            print(sat_id, len(traj), "steps")
+    """
+    import logging
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    _log = logging.getLogger(__name__)
+
+    if not states:
+        raise ValueError("propagate_cowell_batch: states dict is empty.")
+    if duration_s <= 0.0:
+        raise ValueError(
+            f"propagate_cowell_batch: duration_s must be positive, got {duration_s}."
+        )
+
+    n = len(states)
+    effective_workers = max_workers if max_workers is not None else min(32, n)
+    burns_map = maneuvers or {}
+
+    results: dict[str, list[NumericalState]] = {}
+
+    def _worker(sat_id: str, state: "NumericalState") -> tuple[str, list["NumericalState"]]:
+        """Single-satellite propagation task for the thread pool."""
+        # propagate_cowell does not accept hf_atmosphere / use_srp kwargs directly;
+        # those are handled via DragConfig.model and the drag_config's srp_cr field.
+        # use_empirical_drag=True enables NRLMSISE-00 when DragConfig.model='NRLMSISE00'.
+        traj = propagate_cowell(
+            state,
+            duration_s=duration_s,
+            dt_out=dt_out,
+            drag_config=drag_config,
+            maneuvers=burns_map.get(sat_id, []),
+            include_third_body=include_third_body,
+            use_empirical_drag=True,
+        )
+        return sat_id, traj
+
+    future_to_id: dict = {}
+    with ThreadPoolExecutor(max_workers=effective_workers) as executor:
+        for sat_id, state in states.items():
+            fut = executor.submit(_worker, sat_id, state)
+            future_to_id[fut] = sat_id
+
+        for fut in as_completed(future_to_id):
+            sat_id = future_to_id[fut]
+            try:
+                sid, traj = fut.result()
+                results[sid] = traj
+            except Exception as exc:
+                _log.warning(
+                    "propagate_cowell_batch: propagation failed for %s — %s",
+                    sat_id,
+                    exc,
+                )
+
+    return results

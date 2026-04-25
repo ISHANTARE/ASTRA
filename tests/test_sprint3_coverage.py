@@ -323,6 +323,9 @@ def test_teme_to_ecef_eci_earth_rotation():
 def test_stk_covariance_unit_rejection():
     """DATA-03: load_spacebook_covariance must reject a covariance block
     declared in metres by returning None (not raising, not silently accepting).
+
+    [CF-6 Fix] SPACEBOOK_ENABLED is now patched via astra.config, not
+    astra.conjunction, since the flag was centralised in the CF-6 remediation.
     """
     from unittest.mock import patch
     from astra.conjunction import load_spacebook_covariance
@@ -337,7 +340,7 @@ END Ephemeris
     with patch(
         "astra.conjunction.fetch_synthetic_covariance_stk", return_value=bad_stk
     ):
-        with patch("astra.conjunction.SPACEBOOK_ENABLED", True):
+        with patch("astra.config.SPACEBOOK_ENABLED", True):
             result = load_spacebook_covariance(25544)
 
     assert (
@@ -346,7 +349,11 @@ END Ephemeris
 
 
 def test_stk_covariance_km_accepted():
-    """DATA-03: load_spacebook_covariance must accept a km-unit block normally."""
+    """DATA-03: load_spacebook_covariance must accept a km-unit block normally.
+
+    [CF-6 Fix] SPACEBOOK_ENABLED is now patched via astra.config, not
+    astra.conjunction, since the flag was centralised in the CF-6 remediation.
+    """
     from unittest.mock import patch
     from astra.conjunction import load_spacebook_covariance
 
@@ -363,7 +370,7 @@ END Ephemeris
     with patch(
         "astra.conjunction.fetch_synthetic_covariance_stk", return_value=good_stk
     ):
-        with patch("astra.conjunction.SPACEBOOK_ENABLED", True):
+        with patch("astra.config.SPACEBOOK_ENABLED", True):
             result = load_spacebook_covariance(25544)
 
     assert result is not None, "DATA-03: km-unit covariance should be accepted."
