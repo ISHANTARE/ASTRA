@@ -126,7 +126,7 @@ def propagate_orbit(
             raise EphemerisError(f"Failed to fetch UT1-UTC correction: {exc}") from exc
         logger.warning(
             "UT1-UTC correction unavailable for NORAD %s at JD %.8f — "
-            "falling back to UTC as UT1. This silently ignores the UT1-UTC "
+            "falling back to UTC propagation. This silently ignores the UT1-UTC "
             "offset (current value ≈ ±1 s), introducing up to ~400 m of "
             "along-track position error at LEO velocities. "
             "Populate the EOP cache via astra.data_pipeline.load_eop_data() "
@@ -208,7 +208,7 @@ def propagate_many(
             ) from exc
         logger.warning(
             "UT1-UTC correction unavailable for batch propagation (%d objects, %d epochs) — "
-            "falling back to UTC as UT1. This silently ignores the UT1-UTC offset "
+            "falling back to UTC propagation. This silently ignores the UT1-UTC offset "
             "(current value ≈ ±1 s), introducing up to ~400 m of along-track position "
             "error at LEO velocities across all propagated states. "
             "Populate the EOP cache via astra.data_pipeline.load_eop_data() "

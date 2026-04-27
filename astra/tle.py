@@ -241,6 +241,21 @@ def parse_tle(name: str, line1: str, line2: str) -> SatelliteTLE:
     # Object type (PAYLOAD/DEBRIS/ROCKET_BODY) requires SATCAT lookup.
     classification_flag = line1[7]
 
+    bstar_str = line1[53:61].strip()
+    try:
+        if bstar_str.startswith("-"):
+            bstar_sign = "-"
+            bstar_str = bstar_str[1:]
+        else:
+            bstar_sign = ""
+        bstar_str = bstar_str.replace(" ", "")
+        if len(bstar_str) >= 2 and bstar_str[-2] in "+-":
+            bstar = float(f"{bstar_sign}0.{bstar_str[:-2]}e{bstar_str[-2:]}")
+        else:
+            bstar = float(f"{bstar_sign}0.{bstar_str[:-1]}e{bstar_str[-1:]}")
+    except Exception:
+        bstar = 0.0
+
     # 8. Default object_type to UNKNOWN — to be overridden by SATCAT enrichment
     object_type = "UNKNOWN"
 
@@ -253,6 +268,7 @@ def parse_tle(name: str, line1: str, line2: str) -> SatelliteTLE:
         epoch_jd=epoch_jd,
         object_type=object_type,
         classification_flag=classification_flag,
+        bstar=bstar,
     )
 
 

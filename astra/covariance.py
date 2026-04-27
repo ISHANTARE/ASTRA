@@ -221,10 +221,10 @@ def compute_collision_probability(
                 f"axis (singular C_p). Inspect covariance source quality. ({_lae})"
             ) from _lae
         _cov_log.warning(
-            "Singular 2D encounter covariance (det ≈ 0) — Pc returned as None to prevent "
+            "Singular 2D encounter covariance (det ≈ 0) — Pc returned as 1.0 to prevent "
             "false alarms. This is a DATA QUALITY failure, not a verified safe miss."
         )
-        return None  # type: ignore[no-any-return]
+        return 1.0  # type: ignore[no-any-return]
 
     if det_C_p <= 0:
         import logging
@@ -237,10 +237,10 @@ def compute_collision_probability(
                 f"det(C_p)={det_C_p:.3e}. Pc computation aborted; covariance is invalid."
             )
         _cov_log.warning(
-            f"Non-positive det(C_p)={det_C_p:.3e} in encounter plane — Pc returned as None "
+            f"Non-positive det(C_p)={det_C_p:.3e} in encounter plane — Pc returned as 1.0 "
             "to prevent false alarms. Verify covariance source quality (DATA QUALITY failure)."
         )
-        return None  # type: ignore[no-any-return]
+        return 1.0  # type: ignore[no-any-return]
 
     # Mahalanobis distance squared (u^2)
     mahalanobis_sq = float(r_p.T @ inv_C_p @ r_p)

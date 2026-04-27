@@ -113,6 +113,9 @@ def _srp_illumination_factor_planar_njit(
     if cos_gamma < -1.0: cos_gamma = -1.0
     gamma = math.acos(cos_gamma)
 
+    if gamma <= 1e-12:
+        return 0.0
+
     if gamma >= alpha + beta:
         return 1.0
     if gamma <= alpha - beta:

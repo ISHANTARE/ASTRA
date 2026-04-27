@@ -211,6 +211,7 @@ class SatelliteTLE:
     epoch_jd: float
     object_type: str
     classification_flag: str = "U"  # 'U'=Unclassified, 'C'=Classified, 'S'=Secret
+    bstar: float = 0.0
     # NOTE: This is a security classification, NOT an object type.
     # object_type requires separate SATCAT enrichment.
     rcs_m2: Optional[float] = (
