@@ -252,16 +252,17 @@ def propagate_many_generator(
     satrecs = [_build_satrec(sat) for sat in satellites]
     satrec_array = SatrecArray(satrecs)
 
+    # [P-03 fix] Verify epoch staleness for all satellites ONCE over the full time bounds.
+    # Previously this was inside the chunk loop, checking the same TLEs repeatedly
+    # and obliterating batch throughput for long multi-month ephemeris queries.
+    from astra.tle import check_tle_staleness
+    for sat in satellites:
+        check_tle_staleness(sat, times_jd)
+
     for start_idx in range(0, T, chunk_size):
         end_idx = min(start_idx + chunk_size, T)
 
         jd_chunk = times_jd[start_idx:end_idx]
-
-        # Verify epoch staleness for each chunk (SE-J)
-        from astra.tle import check_tle_staleness
-
-        for sat in satellites:
-            check_tle_staleness(sat, jd_chunk)
 
         try:
             from astra.data_pipeline import get_ut1_utc_correction

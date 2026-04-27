@@ -418,9 +418,9 @@ def test_7dof_powered_arc_tsiolkovsky():
     dm_actual = initial_mass - mass_final
 
     assert dm_actual > 0, "Propellant must have been consumed"
-    assert abs(dm_actual - dm_expected) < 1.0, (  # 1 kg tolerance
-        f"Mass depletion {dm_actual:.3f} kg deviates from Tsiolkovsky "
-        f"{dm_expected:.3f} kg by {abs(dm_actual - dm_expected):.3f} kg"
+    assert abs(dm_actual - dm_expected) < 0.01, (  # 10 g — ~32% of expected dm; catches integrator drift
+        f"Mass depletion {dm_actual:.4f} kg deviates from Tsiolkovsky "
+        f"{dm_expected:.4f} kg by {abs(dm_actual - dm_expected):.4f} kg"
     )
 
 

@@ -308,3 +308,48 @@ class TestFM3AtmosphereSync:
             f"{np.trace(cov_propagated):.4e} — indicates integration failure or "
             "negative divergence in the drag Jacobian."
         )
+
+
+# ===========================================================================
+# T-02: Integration test for propagate_cowell(include_stm=True)
+# ===========================================================================
+
+class TestT02CowellSTMIntegration:
+    """Verify covariance growth and PSD properties through propagate_cowell."""
+
+    def test_propagate_cowell_stm_growth_and_psd(self) -> None:
+        """propagate_cowell(include_stm=True) must return Positive Semi-Definite STMs."""
+        from astra.propagator import NumericalState, propagate_cowell
+
+        state0 = NumericalState(
+            t_jd=2451545.0,
+            position_km=np.array([6778.0, 0.0, 0.0]),
+            velocity_km_s=np.array([0.0, 7.668, 0.0]),
+            mass_kg=1000.0,
+            covariance_km2=np.eye(6)  # Initial identity covariance
+        )
+
+        states = propagate_cowell(
+            state0=state0,
+            duration_s=3600.0,
+            dt_out=600.0,
+            include_stm=True
+        )
+
+        assert len(states) > 1, "Propagation returned insufficient states"
+        
+        for state in states[1:]:  # skip initial identity
+            assert state.covariance_km2 is not None, "Covariance was not populated in NumericalState"
+            assert state.covariance_km2.shape == (6, 6), "Covariance must be 6x6 when STM is included"
+            
+            # Check Positive Semi-Definite (PSD) property:
+            # We use eigvalsh for real symmetric matrices
+            eigvals = np.linalg.eigvalsh(state.covariance_km2)
+            assert np.all(eigvals > -1e-12), f"Covariance matrix is not PSD at t={state.t_jd}: min_eig={np.min(eigvals)}"
+
+        # The trace should grow over time as uncertainties in velocity map into position errors
+        final_trace = np.trace(states[-1].covariance_km2)
+        initial_trace = np.trace(states[0].covariance_km2)
+        assert final_trace > initial_trace, f"Covariance failed to grow: {final_trace} <= {initial_trace}"
+
+

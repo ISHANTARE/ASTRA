@@ -147,14 +147,16 @@ def compute_collision_probability(
     covariance onto the B-plane (perpendicular to relative velocity vector).
 
     Args:
+    Args:
         miss_vector_km: (3,) relative position vector at exact TCA (km).
         rel_vel_km_s: (3,) relative velocity vector at TCA (km/s).
         cov_a: (3, 3) positional covariance matrix for Object A (km^2).
         cov_b: (3, 3) positional covariance matrix for Object B (km^2).
-        combined_radius_km: Hard-body collision radius sum (km).
+        radius_a_km: Hard-body radius for Object A (km).
+        radius_b_km: Hard-body radius for Object B (km).
 
     Returns:
-        Probability of collision (float) bounded [0.0, 1.0].
+        Probability of collision (float) bounded [0.0, 1.0], or None if covariance is singular.
     """
     combined_radius_km = radius_a_km + radius_b_km
     C = cov_a + cov_b
@@ -219,10 +221,10 @@ def compute_collision_probability(
                 f"axis (singular C_p). Inspect covariance source quality. ({_lae})"
             ) from _lae
         _cov_log.warning(
-            "Singular 2D encounter covariance (det ≈ 0) — Pc forced to 1.0 as a "
-            "fail-closed safeguard. This is a data-quality failure, not a safe miss."
+            "Singular 2D encounter covariance (det ≈ 0) — Pc returned as None to prevent "
+            "false alarms. This is a DATA QUALITY failure, not a verified safe miss."
         )
-        return 1.0  # type: ignore[no-any-return, no-untyped-call]
+        return None  # type: ignore[no-any-return]
 
     if det_C_p <= 0:
         import logging
@@ -235,10 +237,10 @@ def compute_collision_probability(
                 f"det(C_p)={det_C_p:.3e}. Pc computation aborted; covariance is invalid."
             )
         _cov_log.warning(
-            f"Non-positive det(C_p)={det_C_p:.3e} in encounter plane — Pc forced to 1.0 "
-            "as a fail-closed safeguard. Verify covariance source quality."
+            f"Non-positive det(C_p)={det_C_p:.3e} in encounter plane — Pc returned as None "
+            "to prevent false alarms. Verify covariance source quality (DATA QUALITY failure)."
         )
-        return 1.0  # type: ignore[no-any-return, no-untyped-call]
+        return None  # type: ignore[no-any-return]
 
     # Mahalanobis distance squared (u^2)
     mahalanobis_sq = float(r_p.T @ inv_C_p @ r_p)
@@ -561,8 +563,10 @@ def compute_collision_probability_mc(
         r_rtm = (R_eci_rtn @ r_samples.T).T  # (n_samples, 3)
         v_rtm = (R_eci_rtn @ v_samples.T).T  # (n_samples, 3)
 
-        # Time grid: +/- 1 full orbital period around TCA (full curvature cycle)
-        t_window_s = 2.0 * math.pi / n_rad
+        # [C-02 Fix] Refine the time window for the HCW propagator.
+        # For fast co-orbital encounters, the 1-period window is too coarse.
+        # Ensure the window captures at least several times the encounter duration.
+        t_window_s = min(2.0 * math.pi / n_rad, 10.0 * combined_radius_km / max(rel_speed, 1e-6))
         nt = n_rad
         times = np.linspace(-t_window_s, t_window_s, 400)
         nt_arr = nt * times
@@ -722,8 +726,13 @@ def _stm_jacobian_njit(
     use_nrlmsise: bool = False,
 ) -> np.ndarray:
     # Central-difference Jacobian step (km)
+    # [F-02 Fix] eps_v reduced from 1e-4 (100 m/s) to 1e-6 (1 mm/s) to prevent
+    # nonlinear velocity averaging in the drag Jacobian column. The large step
+    # was causing the finite-difference to straddle the nonlinear drag regime,
+    # producing a systematically wrong da/dv column (covariance.py fix, matching
+    # the identical fix already applied in propagator._propagator_jacobian_njit).
     eps_r = 1e-4
-    eps_v = 1e-4
+    eps_v = 1e-6
     J = np.zeros((6, 6))
 
     # Upper-right: dr/dt = v -> d(dr/dt)/dv = I

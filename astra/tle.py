@@ -26,20 +26,6 @@ _J2000_JD = 2451545.0
 _J2000_EPOCH = datetime(2000, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
 
 
-def _compute_checksum(line: str) -> int:
-    """Compute the TLE checksum for a given line (excluding the last char).
-
-    The checksum is the sum of all digits, with minus signs counting as 1.
-    All other characters are ignored. The result is modulo 10.
-    """
-    total = 0
-    for char in line[:-1]:
-        if char.isdigit():
-            total += int(char)
-        elif char == "-":
-            total += 1
-    return total % 10
-
 
 def _parse_epoch_to_jd(epoch_str: str) -> float:
     """Convert TLE epoch string (YYDDD.FFFFFFFF) to Julian Date.
@@ -321,6 +307,23 @@ def _chunk_tle_lines(tle_lines: list[str]) -> list[tuple[str, str, str]]:
         else:
             i += 1
     return triplets
+
+
+def _compute_checksum(line: str) -> int:
+    """Compute the modulo-10 checksum of a TLE line.
+
+    The checksum is the sum of all digits in the line, plus 1 for each
+    minus sign (-). All other characters are ignored. The final sum
+    is calculated modulo 10.
+    """
+    total = 0
+    # The checksum is calculated over the first 68 characters.
+    for char in line[:68]:
+        if char.isdigit():
+            total += int(char)
+        elif char == "-":
+            total += 1
+    return total % 10
 
 
 def load_tle_catalog(tle_lines: list[str]) -> list[SatelliteTLE]:

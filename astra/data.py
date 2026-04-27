@@ -239,6 +239,7 @@ def fetch_celestrak_group(
 
 def fetch_celestrak_comprehensive(
     format: FormatLiteral = "tle",
+    strict_mode: bool = False,
 ) -> Union[list[SatelliteTLE], list[SatelliteOMM]]:
     """Fetch active payloads plus major debris clouds for a pseudo-full catalog.
 
@@ -248,6 +249,8 @@ def fetch_celestrak_comprehensive(
     Args:
         format: ``"tle"`` (default) for legacy TLE format,
                 ``"json"`` for modern OMM JSON with physical metadata.
+        strict_mode: If True, raises an AstraError immediately if any group fails to
+                     download. If False (default), logs a warning and continues.
 
     Returns:
         Deduplicated list of ``SatelliteTLE`` or ``SatelliteOMM`` objects.
@@ -278,6 +281,12 @@ def fetch_celestrak_comprehensive(
                     seen_ids.add(obj.norad_id)
                     unified_catalog.append(obj)
         except AstraError as _grp_exc:
+            if strict_mode:
+                raise AstraError(
+                    f"CelesTrak group '{g}' failed to download during comprehensive fetch. "
+                    f"Strict mode is enabled. Error: {_grp_exc}"
+                ) from _grp_exc
+
             # [FM-2 Fix - Finding #6 Audit] Log a warning instead of silently
             # skipping failed groups. A silent pass here produces a partial
             # catalog that can cause missed conjunction screening without any

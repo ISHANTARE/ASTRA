@@ -16,7 +16,7 @@ import numpy as np  # noqa: E402
 from astra._numba_compat import njit  # noqa: E402
 
 
-@njit(fastmath=True, cache=True)
+@njit(cache=True)
 def _build_vnb_matrix_njit(pos: np.ndarray, vel: np.ndarray) -> np.ndarray:
     """Build the 3x3 rotation matrix from ECI to VNB frame.
 
@@ -37,7 +37,7 @@ def _build_vnb_matrix_njit(pos: np.ndarray, vel: np.ndarray) -> np.ndarray:
     return mat  # type: ignore[no-any-return]
 
 
-@njit(fastmath=True, cache=True)
+@njit(cache=True)
 def _build_rtn_matrix_njit(pos: np.ndarray, vel: np.ndarray) -> np.ndarray:
     """Build the 3x3 rotation matrix from ECI to RTN (RIC) frame.
 
@@ -140,7 +140,11 @@ def teme_to_ecef(
     _dp._ensure_skyfield()
     ts = _dp._skyfield_ts
     assert ts is not None, "_ensure_skyfield() failed to initialise Skyfield timescale"
-    t = ts.tt_jd(times_jd)
+    # [T-01 fix] times_jd in ASTRA is universally passed around as UTC.
+    # The previous code forcibly cast them to TT (t = ts.tt_jd(times_jd)),
+    # which created a ~69s (32.184s + 37s leap) offset in Earth rotation phase,
+    # causing ~35km ground-track errors in HEO geometries.
+    t = ts._utc_jd(times_jd, 0.0)
 
     R_teme_gcrs = (
         np.transpose(TEME.rotation_at(t), axes=(1, 0, 2))
@@ -286,7 +290,7 @@ def teme_to_ecef(
     return r_itrs_corrected  # type: ignore[no-any-return]
 
 
-@njit(fastmath=True, cache=True)
+@njit(cache=True)
 def ecef_to_geodetic_wgs84(
     x: np.ndarray, y: np.ndarray, z: np.ndarray
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:

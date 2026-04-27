@@ -75,9 +75,6 @@ def visible_from_location(
         return np.array([])  # type: ignore[no-any-return]
 
     _dp._ensure_skyfield()
-    ts = _dp._skyfield_ts
-    assert ts is not None
-    ts.tt_jd(times_jd)
 
     from astra.frames import teme_to_ecef
 
@@ -106,9 +103,6 @@ def get_azimuths(
 ) -> np.ndarray:
     """Companion function for azimuth processing using the same fast matrix algebra."""
     _dp._ensure_skyfield()
-    ts = _dp._skyfield_ts
-    assert ts is not None
-    ts.tt_jd(times_jd)
 
     from astra.frames import teme_to_ecef
 
@@ -130,22 +124,16 @@ def get_azimuths(
 def _visible_from_location_cached(
     positions_teme: np.ndarray,
     times_jd: np.ndarray,
-    observer: Observer,
-    ts: Any,
-    R_teme_to_gcrs: np.ndarray,
+    r_obs: np.ndarray,
+    R_enu: np.ndarray,
 ) -> np.ndarray:
-    """Compute topocentric elevation angles using cached timescale and TEME->GCRS rotation."""
+    """Compute topocentric elevation angles using cached observer position and ENU matrix (P-04)."""
     from astra.frames import teme_to_ecef
 
     # Bypass Spacebook inside bisection search loops to prioritize microsecond latency
     r_itrs_km = teme_to_ecef(positions_teme, times_jd, use_spacebook_eop=False)
 
-    r_obs = _wgs84_observer_itrs(
-        observer.latitude_deg, observer.longitude_deg, observer.elevation_m
-    )
     rho_itrs = r_itrs_km.T - r_obs[:, np.newaxis]
-
-    R_enu = _itrs_to_enu_matrix(observer.latitude_deg, observer.longitude_deg)
     rho_enu = R_enu @ rho_itrs
 
     rho_E, rho_N, rho_U = rho_enu[0], rho_enu[1], rho_enu[2]
@@ -159,6 +147,8 @@ def _find_exact_crossing(
     t_low: float,
     t_high: float,
     ascending: bool,
+    r_obs: np.ndarray,
+    R_enu: np.ndarray,
     iterations: int = 15,
 ) -> float:
     """Binary search bisection to find the exact sub-second crossing."""
@@ -168,7 +158,8 @@ def _find_exact_crossing(
     ts = _dp._skyfield_ts
     assert ts is not None
     # Cache precession-nutation rotation matrix which changes <0.00001 deg over the pass
-    t_mid_initial = ts.tt_jd((t_low + t_high) / 2.0)
+    # [T-01 fix] t_low and t_high are UTC Julian Dates.
+    t_mid_initial = ts._utc_jd((t_low + t_high) / 2.0, 0.0)
     R_teme_to_gcrs_cached = np.transpose(TEME.rotation_at(t_mid_initial))
 
     tl = t_low
@@ -185,9 +176,8 @@ def _find_exact_crossing(
         elev = _visible_from_location_cached(
             np.array([state.position_km]),
             np.array([t_mid]),
-            observer,
-            ts,
-            R_teme_to_gcrs_cached,
+            r_obs,
+            R_enu,
         )[0]
 
         if ascending:
@@ -228,6 +218,12 @@ def passes_over_location(
     elevation_array = visible_from_location(positions_teme, times_jd, observer)
     az_array = get_azimuths(positions_teme, times_jd, observer)
 
+    # Pre-compute static observer geometry once for the sub-second bisection loop (P-04)
+    r_obs = _wgs84_observer_itrs(
+        observer.latitude_deg, observer.longitude_deg, observer.elevation_m
+    )
+    R_enu = _itrs_to_enu_matrix(observer.latitude_deg, observer.longitude_deg)
+
     above_horizon = elevation_array >= observer.min_elevation_deg
     pad_above = np.concatenate(([False], above_horizon, [False]))
     transitions = np.diff(pad_above.astype(int))
@@ -265,6 +261,8 @@ def passes_over_location(
             float(t_aos_approx_low),
             float(t_aos_approx_high),
             ascending=True,
+            r_obs=r_obs,
+            R_enu=R_enu,
         )
         los_jd_exact = _find_exact_crossing(
             satellite,
@@ -272,6 +270,8 @@ def passes_over_location(
             float(t_los_approx_low),
             float(t_los_approx_high),
             ascending=False,
+            r_obs=r_obs,
+            R_enu=R_enu,
         )
 
         tca_jd = float(times_jd[tca_idx])

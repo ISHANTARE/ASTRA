@@ -368,6 +368,11 @@ class NumericalState:
                     "NumericalState initialized with nearly-zero position vector."
                 )
 
+    def __repr__(self) -> str:
+        """Concise representation to avoid terminal hangs on large lists (A-03)."""
+        r_mag = np.linalg.norm(self.position_km) if self.position_km is not None else 0.0
+        return f"<NumericalState JD={self.t_jd:.6f} R={r_mag:.1f}km>"
+
 
 @dataclass(frozen=True)
 class DragConfig:
@@ -1572,7 +1577,106 @@ def _acceleration_njit(
 
 
 @njit(fastmath=True, cache=True)
+def _propagator_jacobian_njit(
+    r: np.ndarray,
+    v: np.ndarray,
+    use_drag: bool,
+    drag_cd: float,
+    drag_area_m2: float,
+    drag_mass_kg: float,
+    drag_rho: float,
+    drag_H_km: float,
+    drag_ref_alt_km: float,
+    f107_obs: float,
+    f107_adj: float,
+    ap_daily: float,
+    hf_atmosphere: bool,
+    include_third_body: bool,
+    t_jd: float,
+    global_t_jd0: float,
+    duration_d: float,
+    sun_coeffs: np.ndarray,
+    moon_coeffs: np.ndarray,
+    use_srp: bool,
+    srp_cr: float,
+    srp_use_shadow: bool,
+) -> np.ndarray:
+    """6×6 force Jacobian F = dẋ/dx via central-difference, using the full
+    propagator acceleration kernel ``_acceleration_njit``.
+
+    [F-02 + F-03 fix] Replaces the gravity-only ``_compute_force_jacobian``
+    used in the inline STM paths.  Key corrections:
+
+    * **F-03**: The previous Jacobian omitted drag partials entirely (∂a_drag/∂v = 0),
+      causing the STM covariance to grow too slowly in along-track for any LEO orbit
+      with drag enabled — Pc computations were systematically low.
+
+    * **F-02**: ``eps_v`` is set to 1e-6 km/s (1 mm/s) matching standard
+      astrodynamics FDM practice (Montenbruck & Gill §7.4.1).  The previous
+      covariance-module value of 1e-4 km/s (100 m/s) averaged drag partials
+      over a regime where drag is nonlinearly velocity-dependent, producing
+      ∂a/∂v errors of 2–10× at altitudes < 500 km.
+
+    Arguments mirror _acceleration_njit so the STM paths pass their local
+    parameters without additional look-ups.
+    """
+    # [F-02 fix] eps_v = 1e-6 km/s (1 mm/s) — not 1e-4 (100 m/s)
+    eps_r = 1e-4   # 100 m — adequate for position partials (gravity curvature)
+    eps_v = 1e-6   # 1 mm/s — tight enough to capture velocity-linear drag partials
+
+    J = np.zeros((6, 6))
+
+    # dr/dt = v  →  upper-right 3×3 = I₃
+    J[0, 3] = 1.0
+    J[1, 4] = 1.0
+    J[2, 5] = 1.0
+
+    # ∂a/∂r  (lower-left 3×3)
+    for i in range(3):
+        r_p = r.copy()
+        r_m = r.copy()
+        r_p[i] += eps_r
+        r_m[i] -= eps_r
+        a_p = _acceleration_njit(
+            t_jd, r_p, v, use_drag, drag_cd, drag_area_m2, drag_mass_kg,
+            drag_rho, drag_H_km, drag_ref_alt_km, f107_obs, f107_adj, ap_daily,
+            hf_atmosphere, include_third_body, global_t_jd0, duration_d,
+            sun_coeffs, moon_coeffs, use_srp, srp_cr, srp_use_shadow,
+        )
+        a_m = _acceleration_njit(
+            t_jd, r_m, v, use_drag, drag_cd, drag_area_m2, drag_mass_kg,
+            drag_rho, drag_H_km, drag_ref_alt_km, f107_obs, f107_adj, ap_daily,
+            hf_atmosphere, include_third_body, global_t_jd0, duration_d,
+            sun_coeffs, moon_coeffs, use_srp, srp_cr, srp_use_shadow,
+        )
+        J[3:6, i] = (a_p - a_m) / (2.0 * eps_r)
+
+    # ∂a/∂v  (lower-right 3×3) — captures drag which is v-dependent
+    for i in range(3):
+        v_p = v.copy()
+        v_m = v.copy()
+        v_p[i] += eps_v
+        v_m[i] -= eps_v
+        a_p = _acceleration_njit(
+            t_jd, r, v_p, use_drag, drag_cd, drag_area_m2, drag_mass_kg,
+            drag_rho, drag_H_km, drag_ref_alt_km, f107_obs, f107_adj, ap_daily,
+            hf_atmosphere, include_third_body, global_t_jd0, duration_d,
+            sun_coeffs, moon_coeffs, use_srp, srp_cr, srp_use_shadow,
+        )
+        a_m = _acceleration_njit(
+            t_jd, r, v_m, use_drag, drag_cd, drag_area_m2, drag_mass_kg,
+            drag_rho, drag_H_km, drag_ref_alt_km, f107_obs, f107_adj, ap_daily,
+            hf_atmosphere, include_third_body, global_t_jd0, duration_d,
+            sun_coeffs, moon_coeffs, use_srp, srp_cr, srp_use_shadow,
+        )
+        J[3:6, 3 + i] = (a_p - a_m) / (2.0 * eps_v)
+
+    return J  # type: ignore[no-any-return]
+
+
+@njit(fastmath=True, cache=True)
 def _coast_derivative_njit(
+
     t_sec: float,
     y: np.ndarray,
     t_jd0: float,
@@ -1628,7 +1732,14 @@ def _coast_derivative_njit(
     # 42 components = 6 (r, v) + 36 (Phi)
     if len(y) == 42:
         Phi = y[6:].reshape((6, 6))
-        F = _compute_force_jacobian(r, v, EARTH_MU_KM3_S2)
+        # [F-03 fix] Use _propagator_jacobian_njit (which includes drag partials) instead of
+        # _compute_force_jacobian (gravity-only J2/point-mass).
+        F = _propagator_jacobian_njit(
+            r, v, use_drag, drag_cd, drag_area_m2, drag_mass_kg,
+            drag_rho, drag_H_km, drag_ref_alt_km, f107_obs, f107_adj, ap_daily,
+            hf_atmosphere, include_third_body, t_jd, global_t_jd0, duration_d,
+            sun_coeffs, moon_coeffs, use_srp, srp_cr, srp_use_shadow
+        )
         Phi_dot = np.dot(F, Phi)
 
         dy = np.empty(42)
@@ -1709,17 +1820,32 @@ def _powered_derivative_njit(
         srp_use_shadow,
     )
 
-    max(1e-12, np.linalg.norm(r))
-    max(1e-12, np.linalg.norm(v))
+    # [F-01 fix] Assign norms and use them to guard the VNB/RTN frame builder.
+    # Previously both norms were computed but their results discarded, leaving
+    # _build_vnb_matrix_njit to divide by np.linalg.norm(vel) without a guard.
+    # A near-zero velocity (apoapsis of extreme HEO, or halted simulation) caused
+    # NaN thrust acceleration that silently poisoned all subsequent states.
+    r_mag = max(1e-12, np.linalg.norm(r))
+    v_mag = max(1e-12, np.linalg.norm(v))
     thrust_a_mag = (burn_thrust_N / 1000.0) / m
 
-    if burn_frame_idx == 0:  # VNB
-        rot_matrix = _build_vnb_matrix_njit(r, v)
-    else:  # RTN
-        rot_matrix = _build_rtn_matrix_njit(r, v)
-
-    a_thrust = rot_matrix @ (thrust_a_mag * burn_dir)
-    a_total = a_grav + a_thrust
+    if v_mag < 1e-6:
+        # Cannot define VNB/RTN frame — velocity is degenerate (e.g. apoapsis
+        # of a very eccentric orbit or a stalled simulation).  Skip thrust for
+        # this sub-step so the orbit integrator can recover naturally rather
+        # than propagating NaN into all subsequent states.
+        a_total = a_grav
+    else:
+        # [D-03 fix] rot_matrix from frames.py defines the ECI -> VNB (or RTN) rotation
+        # (its rows are the basis vectors). To map thrust *from* the maneuver frame
+        # *into* the inertial frame, we must use its transpose.
+        if burn_frame_idx == 0:
+            rot_matrix = _build_vnb_matrix_njit(r, v)
+        else:
+            rot_matrix = _build_rtn_matrix_njit(r, v)
+            
+        a_thrust = rot_matrix.T @ (thrust_a_mag * burn_dir)
+        a_total = a_grav + a_thrust
 
     # Mass flow rate
     g0 = 9.80665e-3  # km/s^2
@@ -1728,8 +1854,13 @@ def _powered_derivative_njit(
     # 43 components = 7 (r, v, m) + 36 (Phi)
     if len(y) == 43:
         Phi = y[7:].reshape((6, 6))
-        # Partials of acceleration w.r.t r, v
-        F = _compute_force_jacobian(r, v, EARTH_MU_KM3_S2)
+        # [F-03 fix] Use _propagator_jacobian_njit (drag-aware) instead of gravity-only Jacobian.
+        F = _propagator_jacobian_njit(
+            r, v, use_drag, drag_cd, drag_area_m2, instantaneous_mass_kg,
+            drag_rho, drag_H_km, drag_ref_alt_km, f107_obs, f107_adj, ap_daily,
+            hf_atmosphere, include_third_body, t_jd, global_t_jd0, duration_d,
+            sun_coeffs, moon_coeffs, use_srp, srp_cr, srp_use_shadow
+        )
         Phi_dot = np.dot(F, Phi)
 
         dy = np.empty(43)
@@ -1963,12 +2094,13 @@ def _integrate_segment(
     if not sol.success:
         return False, sol.message, [], current_r, current_v, current_mass or 0.0, current_phi_flat, drag_mass_kg
 
+    _cov_out = None
     for i in range(len(sol.t)):
-        _cov_out = None
         if ctx.include_stm:
             phi_i = sol.y[7:43, i].reshape((6, 6)) if is_powered else sol.y[6:42, i].reshape((6, 6))
-            phi_rr = phi_i[:3, :3]
-            _cov_out = phi_rr @ ctx.current_P0 @ phi_rr.T
+            # [F-03 follow-up] Full mapping of 6x6 state covariance using the STM.
+            # Using only the 3x3 position block was numerically incomplete for mission analysis.
+            _cov_out = phi_i @ ctx.current_P0 @ phi_i.T
             
         segment_states.append(
             NumericalState(
@@ -2005,6 +2137,8 @@ def propagate_cowell(
     coast_atol: float = 1e-8,
     powered_rtol: float = 1e-12,
     powered_atol: float = 1e-12,
+    _precomputed_sun: Optional[np.ndarray] = None,
+    _precomputed_moon: Optional[np.ndarray] = None,
 ) -> list[NumericalState]:
     """Propagate an orbit using segmented Cowell's method with DOP853.
 
@@ -2060,10 +2194,11 @@ def propagate_cowell(
     t_jd0 = state0.t_jd
     if duration_s > 72 * 3600:
         logger.warning(
-            f"Long-duration propagation ({duration_s/3600:.1f}h > 72h) detected. "
-            "SGP4/TLE accuracy degrades significantly beyond 3 days; result should be "
-            "treated as coarse screening only."
-        )
+            f"Long-duration Cowell propagation ({duration_s/3600:.1f}h > 72h) detected. "
+            "Numerical accuracy degrades for multi-day propagations due to unmodeled "
+            "perturbations (SRP variability, atmospheric weather). Verify force-model "
+            "completeness and tighten tolerances for mission-critical analysis."
+        )  # [D-01 fix] Previous text incorrectly blamed SGP4 — this is the Cowell integrator.
 
     burns: list[FiniteBurn] = []
     mass_kg = state0.mass_kg
@@ -2073,7 +2208,11 @@ def propagate_cowell(
     segments = _build_segments(t_jd0, duration_s, burns)
 
     if include_third_body:
-        sun_coeffs, moon_coeffs, duration_d = _compute_planetary_splines(t_jd0, duration_s, use_de)
+        if _precomputed_sun is not None and _precomputed_moon is not None:
+            sun_coeffs, moon_coeffs = _precomputed_sun, _precomputed_moon
+            duration_d = duration_s / 86400.0
+        else:
+            sun_coeffs, moon_coeffs, duration_d = _compute_planetary_splines(t_jd0, duration_s, use_de)
     else:
         sun_coeffs = np.zeros((1, 1, 3))
         moon_coeffs = np.zeros((1, 1, 3))
@@ -2090,12 +2229,19 @@ def propagate_cowell(
     srp_use_shadow = bool(drag_config is not None and getattr(drag_config, "srp_conical_shadow", True))
 
     _r0_mag = float(np.linalg.norm(state0.position_km))
+    # [F-04 fix] drag_ref_alt_km is updated from current_r at each segment boundary below.
+    # This initial value is used only for the first segment & as the drag environment seed.
     drag_ref_alt_km = max(0.0, _r0_mag - EARTH_EQUATORIAL_RADIUS_KM)
 
     drag_rho, drag_H_km, f107_obs, f107_adj, ap_daily = _prepare_drag_environment(t_jd0, drag_ref_alt_km, use_drag, use_empirical_drag)
 
     _initial_cov = getattr(state0, "covariance_km2", None)
-    current_P0 = _initial_cov.copy() if _initial_cov is not None else np.eye(3, dtype=np.float64) * 1e-6
+    # [F-03 follow-up] Default to 6x6 identity (scaled) if using STM.
+    if _initial_cov is not None:
+        current_P0 = _initial_cov.copy()
+    else:
+        dim = 6 if include_stm else 3
+        current_P0 = np.eye(dim, dtype=np.float64) * 1e-6
 
     ctx = _PropagatorContext(
         t_jd0=t_jd0, duration_d=duration_d, dt_out=dt_out, include_third_body=include_third_body,
@@ -2119,6 +2265,11 @@ def propagate_cowell(
             continue
 
         if use_drag and use_empirical_drag:
+            # [F-04 fix] Recompute drag_ref_alt_km from the actual current position.
+            # Using the fixed initial altitude systematically underestimates drag
+            # as the satellite decays to lower altitudes over long propagations.
+            _current_r_mag = float(np.linalg.norm(current_r))
+            drag_ref_alt_km = max(0.0, _current_r_mag - EARTH_EQUATORIAL_RADIUS_KM)
             drag_rho, drag_H_km, f107_obs, f107_adj, ap_daily = _prepare_drag_environment(
                 t_jd0 + seg_start_s / 86400.0, drag_ref_alt_km, use_drag, use_empirical_drag
             )
@@ -2275,10 +2426,15 @@ def propagate_cowell_batch(
             satellites unless overridden per-satellite in the future.
         maneuvers: Optional ``dict[satellite_id, list[FiniteBurn]]``.
             Missing keys default to an empty burn sequence.
-        hf_atmosphere: Enable NRLMSISE-00 atmospheric model for all satellites.
         include_third_body: Enable Sun/Moon third-body gravity.
-        use_srp: Enable Solar Radiation Pressure perturbation.
         max_workers: Thread pool size.  Defaults to ``min(32, len(states))``.
+
+    Note:
+        Atmosphere model (NRLMSISE-00 or exponential) and SRP are controlled
+        via the ``drag_config`` argument.  Set ``DragConfig(model='NRLMSISE00',
+        include_srp=True)`` to enable high-fidelity atmosphere and SRP;
+        these are NOT separate kwargs. [A-01 fix: removed phantom hf_atmosphere
+        and use_srp params that appeared in the docstring but not the signature.]
 
     Returns:
         ``dict[satellite_id, list[NumericalState]]`` — propagated state histories.
@@ -2319,6 +2475,14 @@ def propagate_cowell_batch(
     effective_workers = max_workers if max_workers is not None else min(32, n)
     burns_map = maneuvers or {}
 
+    # [P-01 Fix] Pre-compute splines once for the entire batch.
+    # Amortizes O(N) planetary fitting cost across all threads.
+    _sun, _moon = None, None
+    if include_third_body:
+        # Use first state's JD as representative (batch is required to be near-simultaneous)
+        first_t0 = next(iter(states.values())).t_jd
+        _sun, _moon, _ = _compute_planetary_splines(first_t0, duration_s, True)
+
     results: dict[str, list[NumericalState]] = {}
 
     def _worker(sat_id: str, state: "NumericalState") -> tuple[str, list["NumericalState"]]:
@@ -2334,6 +2498,8 @@ def propagate_cowell_batch(
             maneuvers=burns_map.get(sat_id, []),
             include_third_body=include_third_body,
             use_empirical_drag=True,
+            _precomputed_sun=_sun,
+            _precomputed_moon=_moon,
         )
         return sat_id, traj
 

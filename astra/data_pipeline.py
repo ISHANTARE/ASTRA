@@ -330,10 +330,12 @@ def _download_space_weather(data_dir: Optional[str] = None) -> str:
         resp = session.get(_CELESTRAK_SW_URL, timeout=30, verify=True)
         resp.raise_for_status()
 
-        # AUDIT-SEC-01: Prevent memory DoS vector via arbitrarily unbounded content lengths
-        if len(resp.content) > 2 * 1024 * 1024:
+        # [S-01 Fix] Increase payload limit to 10 MB. 
+        # The historical space weather record grows by ~80 KB/year; a 2 MB cap
+        # would have caused a silent failure in approximately the mid-2030s.
+        if len(resp.content) > 10 * 1024 * 1024:
             raise ValueError(
-                "Payload length exceeds 2MB limit. Rejecting as malicious."
+                "Payload length exceeds 10MB limit. Rejecting as potentially malicious."
             )
 
     except (requests.RequestException, ValueError) as e:

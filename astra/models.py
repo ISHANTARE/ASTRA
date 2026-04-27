@@ -380,6 +380,11 @@ class DebrisObject:
             "Use `.source` to access the underlying SatelliteOMM."
         )
 
+    def __repr__(self) -> str:
+        """Concise representation to avoid terminal hangs on large lists (A-06)."""
+        sid = getattr(self.source, "norad_id", "UNK")
+        return f"<DebrisObject NORAD={sid} Alt={self.altitude_km:.1f}km>"
+
 
 # ---------------------------------------------------------------------------
 # ConjunctionEvent
@@ -444,6 +449,9 @@ class Observer:
     longitude_deg: float
     elevation_m: float
     min_elevation_deg: float = 10.0
+
+    def __repr__(self) -> str:
+        return f"<Observer '{self.name}' Lat={self.latitude_deg:.2f} Lon={self.longitude_deg:.2f}>"
 
 
 # ---------------------------------------------------------------------------

@@ -43,25 +43,41 @@ def rotation_vnb_to_inertial(
     r_eci: np.ndarray,
     v_eci: np.ndarray,
 ) -> np.ndarray:
-    """Build the 3×3 rotation matrix from VNB to inertial (ECI/TEME).
+    """Build the 3×3 rotation matrix whose rows are the VNB unit vectors in ECI.
 
-    Columns of the returned matrix are the VNB unit vectors expressed
-    in the inertial frame:
+    **Convention (important):**
+    ``_build_vnb_matrix_njit`` stores the VNB basis vectors as *rows*:
 
-        T = [V̂ | N̂ | B̂]
+        T[0, :] = V̂  (velocity unit vector)
+        T[1, :] = N̂  (orbit-normal unit vector)
+        T[2, :] = B̂  (binormal unit vector)
 
-    so that  a_inertial = T @ a_vnb.
+    This makes T an **ECI→VNB** rotation matrix, so:
+
+        a_vnb       = T   @ a_eci      # ECI direction → VNB components
+        a_inertial  = T.T @ a_vnb      # VNB direction → ECI components  [D-03 Fix]
+
+    The function is named ``rotation_vnb_to_inertial`` for historical reasons,
+    but callers that need to map a VNB-frame vector into ECI **must** use the
+    transpose.  ``thrust_acceleration_inertial`` does this correctly via ``T.T``.
 
     Args:
         r_eci: Shape (3,) inertial position [km].
         v_eci: Shape (3,) inertial velocity [km/s].
 
     Returns:
-        Shape (3, 3) rotation matrix.
+        Shape (3, 3) matrix whose rows are [V̂, N̂, B̂] in ECI (i.e. ECI→VNB).
+        Use ``.T`` to transform from VNB frame into ECI.
 
     Raises:
-        ManeuverError: If position or velocity magnitudes are degenerate
-            (< 1e-12 km or km/s), making the frame undefined.
+        ManeuverError: If velocity magnitude < 1e-12 km/s or if r ∥ v
+            (angular momentum near-zero), making the VNB frame undefined.
+
+    Example::
+
+        T = rotation_vnb_to_inertial(r_eci, v_eci)
+        # Prograde burn of 10 m/s:
+        dv_eci = T.T @ np.array([0.01, 0.0, 0.0])  # V̂ direction → ECI
     """
     v_mag = np.linalg.norm(v_eci)
     if v_mag < 1e-12:
@@ -205,14 +221,19 @@ def thrust_acceleration_inertial(
             value=mass_kg,
         )
 
-    # Build dynamic rotation matrix from instantaneous state
+    # Build dynamic rotation matrix from instantaneous state.
+    # NOTE: frame_to_inertial / _build_vnb_matrix_njit stores basis vectors as
+    # ROWS, making T an ECI→VNB matrix.  To rotate a direction FROM the burn
+    # frame INTO inertial, we need the transpose (VNB→ECI = T.T).
+    # [D-03 Fix] Previously used `T @ d_frame`, which applied ECI→VNB to a
+    # VNB-frame vector — correct for prograde only, wrong for normal/binormal.
     T = frame_to_inertial(r_eci, v_eci, burn.frame)
 
     # Direction in the body-centric frame (unit vector)
     d_frame = np.asarray(burn.direction, dtype=np.float64)
 
-    # Rotate thrust direction into inertial frame
-    d_inertial = T @ d_frame
+    # Rotate thrust direction into inertial frame: T is ECI→VNB, so T.T is VNB→ECI.
+    d_inertial = T.T @ d_frame
 
     # Thrust acceleration:  a = F·d̂ / m   [N / kg = m/s²]
     # Convert to km/s²:  1 m/s² = 1e-3 km/s²
@@ -495,7 +516,7 @@ def plan_hohmann(
         thrust_N=thrust_N,
         isp_s=isp_s,
         direction=prograde_dir,
-        frame=frame,
+        frame=ManeuverFrame.VNB,  # [A-04 Fix] Always use VNB for prograde logic
     )
     burn2 = FiniteBurn(
         epoch_ignition_jd=t_ign2_jd,
@@ -503,7 +524,7 @@ def plan_hohmann(
         thrust_N=thrust_N,
         isp_s=isp_s,
         direction=prograde_dir,
-        frame=frame,
+        frame=ManeuverFrame.VNB,  # [A-04 Fix] Always use VNB for prograde logic
     )
 
     return [burn1, burn2]

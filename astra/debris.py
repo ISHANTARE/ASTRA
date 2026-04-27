@@ -197,6 +197,12 @@ def filter_region(
             # Half-period longitude drift: Earth rotates 360/day, so the node
             # drifts ~360*(P_min/1440)/2 degrees in half an orbital period.
             lon_half_sweep_deg = 360.0 * (period_min / 1440.0) / 2.0
+            if lon_half_sweep_deg >= 180.0:
+                # [P-05 Fix] If nodal drift covers 180+ degrees, it effectively sweeps
+                # the entire globe in one period. Skip filtering.
+                results.append(obj)
+                continue
+
             lo = (lmin - lon_half_sweep_deg) % 360.0
             hi = (lmax + lon_half_sweep_deg) % 360.0
 

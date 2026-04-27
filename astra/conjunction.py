@@ -494,6 +494,13 @@ def find_conjunctions(
         except Exception:
             pass  # keep coarse scan result
 
+        # [CR-01 fix] Unconditionally compute pos_A and pos_B from the final tca_jd.
+        # Previously, if the Brent minimization failed, the fallback (dense scan) tca_jd
+        # was retained, but pos_A and pos_B were never assigned, causing UnboundLocalError
+        # or inconsistent vector states further down.
+        pos_A = spline_A(tca_jd)
+        pos_B = spline_B(tca_jd)
+
         # Prefer SGP4 velocity spline at TCA; else spline derivative (km/JD → km/s).
         if vel_spline_A is not None:
             vel_A = vel_spline_A(tca_jd)
@@ -559,20 +566,26 @@ def find_conjunctions(
         rad_B_km = _dynamic_radius_km(obj_B, rel_vel_hat, pos_B, vel_B)
 
         if cov_A is not None and cov_B is not None:
+            # [C-02 fix] Reject mixed-dimension covariance (e.g. 6x6 vs 3x3) instead of
+            # silently truncating the 6x6 down to 3x3. The velocity uncertainty bounds
+            # are fundamentally required for the dynamic-radius expansion to be valid;
+            # mixing a velocity-aware covariance with a positional-only one breaks
+            # the statistical symmetry of the Mahalanobis projection.
             if cov_A.shape != cov_B.shape:
-                if cov_A.shape == (6, 6) and cov_B.shape == (3, 3):
-                    cov_A = cov_A[:3, :3]
-                elif cov_B.shape == (6, 6) and cov_A.shape == (3, 3):
-                    cov_B = cov_B[:3, :3]
-
-            P_c = compute_collision_probability(
-                miss_vector,
-                rel_vel_vec,
-                cov_A,
-                cov_B,
-                radius_a_km=rad_A_km,
-                radius_b_km=rad_B_km,
-            )
+                logger.warning(
+                    f"Pair ({A},{B}): Covariance dimension mismatch "
+                    f"({cov_A.shape} vs {cov_B.shape}). Pc set to None."
+                )
+                P_c = None
+            else:
+                P_c = compute_collision_probability(
+                    miss_vector,
+                    rel_vel_vec,
+                    cov_A,
+                    cov_B,
+                    radius_a_km=rad_A_km,
+                    radius_b_km=rad_B_km,
+                )
         else:
             P_c = None
             logger.warning(

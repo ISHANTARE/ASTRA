@@ -367,6 +367,19 @@ class TestFinding6_CelestrakGroupFailureWarning:
 
         assert len(result) >= 1, "Partial catalog should still contain active-group objects"
 
+    def test_strict_mode_raises_on_group_failure(self):
+        """When strict_mode=True, a failing CelesTrak group must raise an AstraError."""
+        from astra.data import fetch_celestrak_comprehensive
+        
+        def _patched_fetch(group, format="tle"):
+            if group == "active":
+                return []
+            raise AstraError(f"Mock network failure for group '{group}'")
+            
+        with patch("astra.data.fetch_celestrak_group", side_effect=_patched_fetch):
+            with pytest.raises(AstraError, match="Strict mode is enabled"):
+                fetch_celestrak_comprehensive(strict_mode=True)
+
 
 # ---------------------------------------------------------------------------
 # Finding #7 — FM-5: Spacetrack test parses correct orbital elements
