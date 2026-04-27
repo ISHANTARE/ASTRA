@@ -1,7 +1,6 @@
 # astra/_numba_compat.py
 """ASTRA Core — Shared Numba Compatibility Shim.
-
-AUDIT-B-01 Fix: Previously three modules (propagator.py, covariance.py,
+py, covariance.py,
 frames.py) each independently defined their own no-op ``@njit`` decorator
 for environments where Numba is not installed.  That 30-line boilerplate was
 duplicated verbatim, creating a divergence risk: if the shim behaviour ever

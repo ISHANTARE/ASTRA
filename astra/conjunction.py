@@ -1,5 +1,4 @@
 """ASTRA Core conjunction detection module.
-
 Detects close-approach events between pairs of orbital objects. Implements an
 advanced 3-phase optimization algorithm including:
 1. Sweep-and-Prune Radial Bounding Shell filter
@@ -7,15 +6,12 @@ advanced 3-phase optimization algorithm including:
 3. Cubicspline Curvilinear Interpolation for exact sub-second TCA
 4. Realistic Encounter-Plane Covariance Probability
 """
-
 from __future__ import annotations
-
 import concurrent.futures
 import os
 from typing import Optional, Any
 import numpy as np
 import scipy.interpolate
-
 from astra.errors import AstraError, PropagationError
 from astra.models import (
     ConjunctionEvent,
@@ -31,15 +27,10 @@ from astra.covariance import (
 from astra.spacebook import fetch_synthetic_covariance_stk
 from astra.log import get_logger
 from astra.spatial_index import SpatialIndex
-
 logger = get_logger(__name__)
-
-
 def distance_3d(pos_a: np.ndarray, pos_b: np.ndarray) -> np.ndarray:
     """Compute Euclidean distance between two position arrays."""
     return np.linalg.norm(pos_a - pos_b, axis=-1)  # type: ignore[no-any-return]
-
-
 def _classify_risk(P_c: Optional[float]) -> str:
     """Classify risk level based on collision probability."""
     if P_c is None:
@@ -51,17 +42,13 @@ def _classify_risk(P_c: Optional[float]) -> str:
     if P_c > 1e-6:
         return "MEDIUM"  # type: ignore[no-any-return]
     return "LOW"  # type: ignore[no-any-return]
-
-
 def _dynamic_radius_km(
     obj: DebrisObject, rel_vel_hat: np.ndarray, pos_eci: np.ndarray, vel_eci: np.ndarray
 ) -> float:
     """Compute effective collision radius from dynamic attitude or fallback.
-
     Supports both ``SatelliteTLE`` (with dimensions_m / attitude fields) and
     ``SatelliteOMM`` (which carries authoritative ``rcs_m2``). Uses safe
     ``getattr`` fallbacks so neither format raises an ``AttributeError``.
-
     Priority order:
         1. TLE with explicit dimensions + attitude model   → exact projected area
         2. OMM or TLE with ``rcs_m2``                     → sqrt(RCS / π) equivalent sphere
@@ -70,7 +57,6 @@ def _dynamic_radius_km(
     """
     source = obj.source
     import math
-
     # ------------------------------------------------------------------
     # Path 1: detailed geometry from SatelliteTLE dimensions
     # ------------------------------------------------------------------
@@ -78,10 +64,8 @@ def _dynamic_radius_km(
     if dimensions_m is not None:
         length, w, h = dimensions_m
         attitude_mode = getattr(source, "attitude_mode", "TUMBLING")
-
         if attitude_mode == "TUMBLING":
             area_m2 = 2.0 * (length * w + w * h + h * length) / 4.0
-
         elif attitude_mode == "NADIR":
             pos_hat = pos_eci / max(np.linalg.norm(pos_eci), 1e-12)
             vel_hat = vel_eci / max(np.linalg.norm(vel_eci), 1e-12)
@@ -94,7 +78,6 @@ def _dynamic_radius_km(
                 (pos_hat, length * w),
             ]
             area_m2 = sum(abs(float(np.dot(n, rel_vel_hat))) * a for n, a in faces)
-
         elif attitude_mode == "INERTIAL":
             attitude_quaternion = getattr(source, "attitude_quaternion", None)
             if attitude_quaternion is not None:
@@ -107,9 +90,7 @@ def _dynamic_radius_km(
         else:
             diag = math.sqrt(length**2 + w**2 + h**2)
             return (diag / 2.0) / 1000.0  # type: ignore[no-any-return]
-
         return math.sqrt(area_m2 / math.pi) / 1000.0  # type: ignore[no-any-return]
-
     # ------------------------------------------------------------------
     # Path 2: RCS from OMM metadata (or TLE rcs_m2 if populated)
     # ------------------------------------------------------------------
@@ -117,33 +98,25 @@ def _dynamic_radius_km(
     if rcs_m2 and rcs_m2 > 0:
         # Equivalent sphere radius: A = π r²  →  r = sqrt(A / π)
         return math.sqrt(rcs_m2 / math.pi) / 1000.0  # type: ignore[no-any-return]
-
     # ------------------------------------------------------------------
     # Path 3: explicit radius on DebrisObject
     # ------------------------------------------------------------------
     if obj.radius_m:
         return obj.radius_m / 1000.0  # type: ignore[no-any-return]
-
     # ------------------------------------------------------------------
     # Path 4: hard fallback — 5 m sphere
     # ------------------------------------------------------------------
     return 0.005  # type: ignore[no-any-return]
-
-
 def load_spacebook_covariance(norad_id: int) -> np.ndarray | None:
     """Fetch and parse Spacebook Synthetic Covariance for a given satellite.
-
     Extracts the first 6x6 positional/velocity covariance matrix from the
     satellite's SynCoPate STK ephemeris.
-
     DATA-03 Fix: Validates that the covariance units header specifies km/km/s.
     STK files can declare either m/m/s or km/km/s units; accepting the wrong
     unit silently would produce Pc values off by a factor of ~10^6.
     Undeclared units default to km per STK spec §5.3.6.
-
     Args:
         norad_id: NORAD Catalog ID.
-
     Returns:
         (6, 6) covariance matrix in TEME Of Date (km, km/s), or None if
         download fails, parsing fails, unit mismatch is detected, or Spacebook
@@ -152,7 +125,6 @@ def load_spacebook_covariance(norad_id: int) -> np.ndarray | None:
     from astra.config import SPACEBOOK_ENABLED
     if not SPACEBOOK_ENABLED:
         return None  # type: ignore[no-any-return]
-
     try:
         stk_text = fetch_synthetic_covariance_stk(norad_id)
     except AstraError as exc:
@@ -160,17 +132,14 @@ def load_spacebook_covariance(norad_id: int) -> np.ndarray | None:
             f"Failed to fetch Spacebook covariance for NORAD {norad_id}: {exc}"
         )
         return None  # type: ignore[no-any-return]
-
     # DATA-03: Track declared units (km vs m) before accepting any numeric values.
     _unit_str: str | None = None
     in_cov_block = False
-
     for line in stk_text.splitlines():
         line = line.strip()
         if not line:
             continue
         lower = line.lower()
-
         if lower.startswith("covariancetimeposvel"):
             in_cov_block = True
             # Check for inline units on the header keyword line:
@@ -180,7 +149,6 @@ def load_spacebook_covariance(norad_id: int) -> np.ndarray | None:
                 if tok.lower() == "units" and i + 1 < len(tokens):
                     _unit_str = tokens[i + 1].lower()
             continue
-
         if in_cov_block:
             # Separate "Units km" line inside the block
             if lower.startswith("units"):
@@ -188,7 +156,6 @@ def load_spacebook_covariance(norad_id: int) -> np.ndarray | None:
                 if len(tokens) >= 2:
                     _unit_str = tokens[1].lower()
                 continue
-
             fields = line.split()
             if len(fields) == 22:
                 # DATA-03: Validate units before accepting the matrix.
@@ -215,7 +182,6 @@ def load_spacebook_covariance(norad_id: int) -> np.ndarray | None:
                         norad_id,
                         _unit_str,
                     )
-
                 # First valid row — Time + 21 lower-triangular elements
                 cov = np.zeros((6, 6))
                 idx = 1
@@ -232,11 +198,8 @@ def load_spacebook_covariance(norad_id: int) -> np.ndarray | None:
             ):
                 # Reached the end of the data block
                 break
-
     logger.warning(f"No valid CovarianceTimePosVel block found for NORAD {norad_id}")
     return None  # type: ignore[no-any-return]
-
-
 def closest_approach(
     trajectory_a: np.ndarray,
     trajectory_b: np.ndarray,
@@ -245,16 +208,13 @@ def closest_approach(
     spline_B: Optional[Any] = None,
 ) -> tuple[float, float, int]:
     """Find the exact minimum separation using cubic splines.
-
-    AUDIT-D-02 Fix: Accepts pre-computed splines to allow amortised O(1)
+    Accepts pre-computed splines to allow amortised O(1)
     evaluation time in tight loops where re-building O(N log N) is prohibitive.
     """
     coarse_dists = distance_3d(trajectory_a, trajectory_b)
     t_idx = int(np.argmin(coarse_dists))
-
     if len(times_jd) < 3:
         return float(coarse_dists[t_idx]), float(times_jd[t_idx]), t_idx  # type: ignore[no-any-return]
-
     if spline_A is None:
         spline_A = scipy.interpolate.CubicSpline(
             times_jd, trajectory_a, bc_type="natural"
@@ -263,20 +223,16 @@ def closest_approach(
         spline_B = scipy.interpolate.CubicSpline(
             times_jd, trajectory_b, bc_type="natural"
         )
-
     idx_low = max(0, t_idx - 1)
     idx_high = min(len(times_jd) - 1, t_idx + 1)
-
-    # [FM-1 Fix - Finding #2] Brent minimization on the CubicSpline distance.
+    # Brent minimization on the CubicSpline distance.
     # This replaces the fixed 100-point dense scan with a bounded scalar
     # optimization, improving TCA precision from ~0.5 s to sub-millisecond
     # with typically 8-15 function evaluations instead of 100.
     try:
         from scipy.optimize import minimize_scalar
-
         def _dist_fn(t_jd: float) -> float:
             return float(np.linalg.norm(spline_A(t_jd) - spline_B(t_jd)))
-
         _lo = float(times_jd[idx_low])
         _hi = float(times_jd[idx_high])
         _res = minimize_scalar(
@@ -291,17 +247,13 @@ def closest_approach(
             return min_dist_fine, tca_jd_fine, t_idx  # type: ignore[no-any-return]
     except Exception:
         pass  # fall back to coarse scan
-
     # Coarse fallback: dense 100-point bracket scan
     t_dense = np.linspace(times_jd[idx_low], times_jd[idx_high], 100)
     rA_dense = spline_A(t_dense)
     rB_dense = spline_B(t_dense)
     dense_dists = distance_3d(rA_dense, rB_dense)
     t_dense_idx = int(np.argmin(dense_dists))
-
     return float(dense_dists[t_dense_idx]), float(t_dense[t_dense_idx]), t_idx  # type: ignore[no-any-return]
-
-
 def find_conjunctions(
     trajectories: TrajectoryMap,
     times_jd: np.ndarray,
@@ -313,9 +265,7 @@ def find_conjunctions(
     max_workers: Optional[int] = None,
 ) -> list[ConjunctionEvent]:
     """Find highly precise conjunction events using cubic spline interpolation.
-
     Data formats: ✓ SatelliteTLE  ✓ SatelliteOMM
-
     Args:
         trajectories: TrajectoryMap of NORAD-ID → (T, 3) position array (km, TEME).
         times_jd: 1-D array of T Julian Dates matching the trajectory rows.
@@ -327,16 +277,12 @@ def find_conjunctions(
             When supplied the SGP4 velocities are interpolated at TCA, which is
             significantly more accurate than the position-spline derivative for
             eccentric orbits near perigee.
-
     Returns:
         List of ConjunctionEvent objects, sorted by miss_distance_km.
-
     Note:
         TCA refinement uses a CubicSpline + Brent scalar minimization
         (scipy.optimize.minimize_scalar, method='bounded') for sub-millisecond
         TCA precision. Falls back to 100-point dense scan if Brent fails.
-        [FM-1 Fix - Finding #2]
-
         ``max_workers`` caps the thread-pool size.  Defaults to
         ``min(cpu_count, 16)`` to prevent thread storms on large catalogs
         (>10,000 NORAD IDs generate O(N²) candidate pairs).  Set explicitly
@@ -345,15 +291,12 @@ def find_conjunctions(
     norad_ids = list(trajectories.keys())
     if not norad_ids:
         return []  # type: ignore[no-any-return]
-
     T_len = len(times_jd)
     if T_len < 3:
         raise AstraError("At least 3 timesteps required for CubicSpline interpolation.")
-
     logger.info(
         f"Initiating Conjunction Analysis for {len(norad_ids)} objects over {T_len} time steps."
     )
-
     # ---------------------------------------------------------
     # Drop NaN trajectories before spatial screening.
     # ---------------------------------------------------------
@@ -364,10 +307,8 @@ def find_conjunctions(
             nan_ids.append(nid)
         else:
             valid_trajectories[nid] = traj
-
     if nan_ids:
         from astra import config
-
         if config.ASTRA_STRICT_MODE:
             raise PropagationError(
                 f"[ASTRA STRICT] {len(nan_ids)} satellites have invalid trajectories: "
@@ -378,36 +319,29 @@ def find_conjunctions(
         logger.warning(
             f"{len(nan_ids)} satellites excluded (NaN trajectories): {nan_ids[:10]}"
         )
-
     trajectories = valid_trajectories
     norad_ids = list(trajectories.keys())
     if not norad_ids:
         logger.info("All satellites had NaN trajectories. No conjunctions to evaluate.")
         return []  # type: ignore[no-any-return]
-
     # ---------------------------------------------------------
     # Phase 1 & 2: Unified Trajectory-AABB SpatialIndex screening
     # ---------------------------------------------------------
     logger.debug(
         f"Running Phase 1 & 2: Unified Trajectory-AABB SpatialIndex screening over {T_len} timesteps..."
     )
-
     idx = SpatialIndex()
     # Build a single tree for the entire propagation window (SE-C optimization)
     idx.rebuild_for_trajectories(trajectories)
-
     # Query candidate pairs once. Keep as a sequence and process with bounded
     # in-flight tasks to avoid all-at-once future submission memory spikes.
     candidate_pairs_phase2 = list(idx.query_pairs(threshold_km=coarse_threshold_km))
-
     if not candidate_pairs_phase2:
         logger.info("Macro AABB Sweep complete: 0 candidate pairs found.")
         return []  # type: ignore[no-any-return]
-
     logger.info(
         f"Macro AABB Filter Complete: Analyzing precise geometry for {len(candidate_pairs_phase2)} pairs."
     )
-
     # ---------------------------------------------------------
     # Phase 3: Exact Curvilinear TCA Interpolation
     # ---------------------------------------------------------
@@ -415,25 +349,20 @@ def find_conjunctions(
         "Running Phase 3: Root-finding via Spline interpolation & Mahalanobis B-Plane Covariance Projection..."
     )
     events = []
-
     def evaluate_pair(pair: tuple[str, str]) -> ConjunctionEvent | None:
         """Worker function for concurrent execution."""
         A, B = pair
         traj_A = trajectories[A]
         traj_B = trajectories[B]
-
         # 1. Coarse search to find local minimum window
         coarse_dists = distance_3d(traj_A, traj_B)
         t_idx = int(np.argmin(coarse_dists))
         coarse_min = coarse_dists[t_idx]
-
         if coarse_min > coarse_threshold_km:
             return None  # type: ignore[no-any-return]
-
         # 2. Build Cubic Splines for exact curvilinear motion mapping
         spline_A = scipy.interpolate.CubicSpline(times_jd, traj_A, bc_type="natural")
         spline_B = scipy.interpolate.CubicSpline(times_jd, traj_B, bc_type="natural")
-
         # Velocity splines from SGP4 vel_map when available (more accurate than
         # differentiating position splines), especially near perigee on eccentric orbits.
         vel_spline_A = (
@@ -446,37 +375,27 @@ def find_conjunctions(
             if (vel_map and B in vel_map)
             else None
         )
-
         # 3. Dense 1-second resolution evaluation across the local min bracket
         is_edge = t_idx == 0 or t_idx == T_len - 1
         bracket_width = 2 if is_edge else 1
         idx_low = max(0, t_idx - bracket_width)
         idx_high = min(T_len - 1, t_idx + bracket_width)
-
         seconds_in_bracket = int((times_jd[idx_high] - times_jd[idx_low]) * 86400.0)
         if seconds_in_bracket < 2:
             seconds_in_bracket = 2
-
         t_dense = np.linspace(times_jd[idx_low], times_jd[idx_high], seconds_in_bracket)
-
         rA_dense = spline_A(t_dense)
         rB_dense = spline_B(t_dense)
-
         dense_dists = distance_3d(rA_dense, rB_dense)
         tca_dense_idx = int(np.argmin(dense_dists))
-
         min_dist = float(dense_dists[tca_dense_idx])
-
         if min_dist > threshold_km:
             return None  # type: ignore[no-any-return]
-
         tca_jd = float(t_dense[tca_dense_idx])
-
-        # [FM-1 Fix - Finding #2] Brent refinement of TCA within 1-s bracket.
+        # Brent refinement of TCA within 1-s bracket.
         # Improves precision from ~0.5 s to sub-millisecond.
         try:
             from scipy.optimize import minimize_scalar
-
             _spline_dist = lambda t: float(np.linalg.norm(spline_A(t) - spline_B(t)))  # noqa: E731
             _lo_t = float(t_dense[max(0, tca_dense_idx - 1)])
             _hi_t = float(t_dense[min(len(t_dense) - 1, tca_dense_idx + 1)])
@@ -493,34 +412,26 @@ def find_conjunctions(
                 pos_B = spline_B(tca_jd)
         except Exception:
             pass  # keep coarse scan result
-
-        # [CR-01 fix] Unconditionally compute pos_A and pos_B from the final tca_jd.
-        # Previously, if the Brent minimization failed, the fallback (dense scan) tca_jd
+        # Unconditionally compute pos_A and pos_B from the final tca_jd.
         # was retained, but pos_A and pos_B were never assigned, causing UnboundLocalError
         # or inconsistent vector states further down.
         pos_A = spline_A(tca_jd)
         pos_B = spline_B(tca_jd)
-
         # Prefer SGP4 velocity spline at TCA; else spline derivative (km/JD → km/s).
         if vel_spline_A is not None:
             vel_A = vel_spline_A(tca_jd)
         else:
             vel_A = spline_A(tca_jd, nu=1) / 86400.0  # km/JD → km/s
-
         if vel_spline_B is not None:
             vel_B = vel_spline_B(tca_jd)
         else:
             vel_B = spline_B(tca_jd, nu=1) / 86400.0  # km/JD → km/s
-
         rel_vel_vec = vel_A - vel_B
         rel_vel = float(np.linalg.norm(rel_vel_vec))
-
         obj_A = elements_map[A]
         obj_B = elements_map[B]
-
         days_since_epoch_A = tca_jd - obj_A.source.epoch_jd
         days_since_epoch_B = tca_jd - obj_B.source.epoch_jd
-
         _spacebook_cov_a = False
         cov_A: Optional[np.ndarray] = None
         if cov_map and A in cov_map:
@@ -538,7 +449,6 @@ def find_conjunctions(
                     cov_A = rotate_covariance_rtn_to_eci(cov_rtn_A, pos_A, vel_A)
                 except (ValueError, ArithmeticError, AstraError):
                     cov_A = None
-
         _spacebook_cov_b = False
         cov_B: Optional[np.ndarray] = None
         if cov_map and B in cov_map:
@@ -556,17 +466,13 @@ def find_conjunctions(
                     cov_B = rotate_covariance_rtn_to_eci(cov_rtn_B, pos_B, vel_B)
                 except (ValueError, ArithmeticError, AstraError):
                     cov_B = None
-
         miss_vector = pos_A - pos_B
-
         rel_vel_hat = rel_vel_vec / max(rel_vel, 1e-12)
-
         # Attitude-aware dynamic collision radius
         rad_A_km = _dynamic_radius_km(obj_A, rel_vel_hat, pos_A, vel_A)
         rad_B_km = _dynamic_radius_km(obj_B, rel_vel_hat, pos_B, vel_B)
-
         if cov_A is not None and cov_B is not None:
-            # [C-02 fix] Reject mixed-dimension covariance (e.g. 6x6 vs 3x3) instead of
+            # Reject mixed-dimension covariance (e.g. 6x6 vs 3x3) instead of
             # silently truncating the 6x6 down to 3x3. The velocity uncertainty bounds
             # are fundamentally required for the dynamic-radius expansion to be valid;
             # mixing a velocity-aware covariance with a positional-only one breaks
@@ -592,9 +498,7 @@ def find_conjunctions(
                 f"Pair ({A},{B}): No covariance available — Pc set to None. "
                 "Supply cov_map with CDM covariances or use Relaxed mode."
             )
-
         risk = _classify_risk(P_c) if P_c is not None else "UNKNOWN"
-
         # SE-DEF-001 Fix: Removed dead _cov_src() function (was defined here but never called).
         # Determine covariance source per object using sentinel flags set during loading:
         if cov_map and A in cov_map:
@@ -605,7 +509,6 @@ def find_conjunctions(
             src_A = "SYNTHETIC"
         else:
             src_A = "UNAVAILABLE"
-
         if cov_map and B in cov_map:
             src_B = "CDM"
         elif _spacebook_cov_b:
@@ -614,14 +517,12 @@ def find_conjunctions(
             src_B = "SYNTHETIC"
         else:
             src_B = "UNAVAILABLE"
-
         if src_A == src_B:
             covariance_src = src_A
         elif "UNAVAILABLE" in (src_A, src_B):
             covariance_src = "UNAVAILABLE"
         else:
             covariance_src = f"MIXED({src_A}+{src_B})"
-
         return ConjunctionEvent(  # type: ignore[no-any-return]
             object_a_id=A,
             object_b_id=B,
@@ -634,11 +535,9 @@ def find_conjunctions(
             position_b_km=pos_B,
             covariance_source=covariance_src,
         )
-
-    # [MED-06 fix] Throttle max_workers to prevent thread storms on large catalogs.
+    # Throttle max_workers to prevent thread storms on large catalogs.
     # os.cpu_count() can be 96+ on HPC nodes, creating >96 threads per call which
     # degrades performance through context-switch overhead on I/O-bound Pc work.
-    #
     # Resolution priority (highest → lowest):
     #   1. Explicit ``max_workers`` argument passed by the caller.
     #   2. ``ASTRA_MAX_WORKERS`` environment variable (for HPC / container deployments
@@ -661,8 +560,7 @@ def find_conjunctions(
             )
     _workers = max_workers if max_workers is not None else _default_workers
     _max_inflight = max(8, _workers * 4)
-    # [FIX] Initialise counters BEFORE the thread loop so they are always bound.
-    # Previously `skipped` and `strict_error` were only set inside the except branch,
+    # Initialise counters BEFORE the thread loop so they are always bound.
     # causing NameError (skipped) / UnboundLocalError (strict_error) when no pairs failed.
     skipped = 0
     strict_error: AstraError | None = None
@@ -670,7 +568,6 @@ def find_conjunctions(
         futures: dict[
             concurrent.futures.Future[ConjunctionEvent | None], tuple[str, str]
         ] = {}
-
         def _consume_done(
             done_futures: set[concurrent.futures.Future[ConjunctionEvent | None]],
         ) -> bool:
@@ -685,7 +582,6 @@ def find_conjunctions(
                 except (ValueError, TypeError, KeyError, IndexError, RuntimeError, AstraError, ArithmeticError) as e:
                     skipped += 1
                     from astra import config
-
                     if config.ASTRA_STRICT_MODE:
                         strict_error = AstraError(
                             f"[ASTRA STRICT] Conjunction pair {pair} evaluation failed: {e!r}. "
@@ -696,11 +592,9 @@ def find_conjunctions(
                         return True  # type: ignore[no-any-return]
                     logger.warning(f"Conjunction pair {pair} skipped: {e!r}")
             return False  # type: ignore[no-any-return]
-
         for pair in candidate_pairs_phase2:
             future = executor.submit(evaluate_pair, pair)
             futures[future] = pair
-
             if len(futures) >= _max_inflight:
                 done, _ = concurrent.futures.wait(
                     set(futures),
@@ -708,26 +602,20 @@ def find_conjunctions(
                 )
                 if _consume_done(done):
                     break
-
         if strict_error is None and futures:
             for future in concurrent.futures.as_completed(futures):
                 if _consume_done({future}):
                     break
     # __exit__ of the context manager calls shutdown(wait=True) automatically
-
     if strict_error is not None:
         raise strict_error from None
-
     if skipped > 0:
         logger.warning(
             f"{skipped} conjunction pairs skipped due to errors. Results may be incomplete."
         )
-
     events.sort(key=lambda x: x.miss_distance_km)
     logger.info(f"Conjunction Sweep Complete: {len(events)} events detected.")
     return events  # type: ignore[no-any-return]
-
-
 def run_conjunction_sweep(
     catalog: "list[Any]",
     t_start_jd: float,
@@ -739,10 +627,8 @@ def run_conjunction_sweep(
     max_workers: "Optional[int]" = None,
 ) -> "list[ConjunctionEvent]":
     """High-level conjunction sweep pipeline: catalog → ConjunctionEvent list.
-
     **Replaces the 5-step manual orchestration** (fetch → map → propagate →
     index → screen) with a single call.  Internally handles:
-
     1. Converting ``catalog`` entries (SatelliteTLE or SatelliteOMM) to
        :class:`DebrisObject` instances via :func:`make_debris_object`.
     2. Building the Julian-Date time grid between ``t_start_jd`` and
@@ -752,9 +638,6 @@ def run_conjunction_sweep(
        error; typically very decayed TLEs).
     5. Running :func:`find_conjunctions` with the 3-phase KD-tree + spline +
        Pc pipeline on the resulting trajectory map.
-
-    [FM-7 Fix — Finding #8 Audit]
-
     Args:
         catalog: List of ``SatelliteTLE`` or ``SatelliteOMM`` objects.
             Obtain via ``fetch_celestrak_group``, ``fetch_spacetrack_group``,
@@ -769,24 +652,18 @@ def run_conjunction_sweep(
             When omitted, synthetic covariance estimation is used.
         max_workers: Maximum thread-pool size for concurrent pair evaluation.
             Defaults to ``min(cpu_count, 16)``.
-
     Returns:
         List of :class:`ConjunctionEvent` objects sorted by miss distance,
         ready for downstream Pc ranking or CDM generation.
-
     Raises:
         AstraError: If ``t_end_jd <= t_start_jd`` or ``catalog`` is empty.
         PropagationError: Propagation failure for any object in STRICT_MODE.
-
     Example::
-
         import astra
         import math
-
         catalog = astra.fetch_celestrak_group("starlink")
         t0 = astra.datetime_utc_to_jd(datetime(2026, 5, 1, tzinfo=timezone.utc))
         t1 = t0 + 1.0  # 24-hour window
-
         events = astra.run_conjunction_sweep(catalog, t0, t1, threshold_km=5.0)
         for ev in events[:10]:
             print(f"{ev.object_a_id} vs {ev.object_b_id}  "
@@ -803,10 +680,8 @@ def run_conjunction_sweep(
         raise AstraError(
             f"run_conjunction_sweep: step_minutes must be positive, got {step_minutes}."
         )
-
     # ── 1. Convert catalog entries to DebrisObjects ─────────────────────────
     from astra.debris import make_debris_object
-
     elements_map: dict[str, DebrisObject] = {}
     skipped_build = 0
     for sat in catalog:
@@ -819,7 +694,6 @@ def run_conjunction_sweep(
                 "run_conjunction_sweep: skipping NORAD %s during DebrisObject "
                 "construction (%r).", getattr(sat, "norad_id", "?"), _be
             )
-
     if not elements_map:
         raise AstraError(
             "run_conjunction_sweep: no valid DebrisObjects could be constructed "
@@ -830,14 +704,11 @@ def run_conjunction_sweep(
             "run_conjunction_sweep: %d catalog entries skipped during DebrisObject "
             "construction (malformed data or missing fields).", skipped_build
         )
-
     satellites = [obj.source for obj in elements_map.values()]
-
     # ── 2. Build Julian-Date time grid ───────────────────────────────────────
     total_minutes = (t_end_jd - t_start_jd) * 1440.0
     n_steps = max(3, int(total_minutes / step_minutes) + 1)
     times_jd = np.linspace(t_start_jd, t_end_jd, n_steps)
-
     logger.info(
         "run_conjunction_sweep: %d objects, %.2f-hr window, %d time steps "
         "(step=%.1f min), threshold=%.1f km.",
@@ -847,12 +718,9 @@ def run_conjunction_sweep(
         step_minutes,
         threshold_km,
     )
-
     # ── 3. Batch propagate all satellites ────────────────────────────────────
     from astra.orbit import propagate_many
-
     trajectories, vel_map = propagate_many(satellites, times_jd)
-
     # ── 4. Drop NaN trajectories (SGP4 failures) ─────────────────────────────
     valid_traj: "dict[str, np.ndarray]" = {}
     valid_vel: "dict[str, np.ndarray]" = {}
@@ -864,25 +732,21 @@ def run_conjunction_sweep(
             valid_traj[nid] = traj
             if nid in vel_map:
                 valid_vel[nid] = vel_map[nid]
-
     if nan_count:
         logger.warning(
             "run_conjunction_sweep: %d satellites excluded due to SGP4 NaN "
             "trajectories (likely decayed or invalid TLEs).", nan_count
         )
-
     if len(valid_traj) < 2:
         logger.info(
             "run_conjunction_sweep: fewer than 2 valid trajectories remain after "
             "NaN filtering. Returning empty event list."
         )
         return []
-
     # Restrict elements_map to valid trajectories only
     valid_elements: dict[str, DebrisObject] = {
         nid: obj for nid, obj in elements_map.items() if nid in valid_traj
     }
-
     # ── 5. Run the conjunction screening pipeline ────────────────────────────
     return find_conjunctions(
         trajectories=valid_traj,

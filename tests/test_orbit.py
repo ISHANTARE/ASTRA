@@ -1,8 +1,5 @@
 """Tests for orbit propagation functions.
-
-[FM-5 Fix]
-Previously these tests only checked array shapes and types — "phantom tests"
-that pass even when the physics is broken. Every test now asserts at least
+Every test now asserts at least
 one physical invariant:
   - Orbital radius falls within ISS LEO bounds (6,550 – 6,900 km).
   - Velocity magnitude satisfies the circular orbit vis-viva equation to
@@ -42,7 +39,7 @@ def test_propagate_velocity_shape(iss_tle):
 
 
 def test_propagate_position_units(iss_tle):
-    """[FM-5 Fix] Radius must fall within ISS LEO bounds, not just some LEO range."""
+    """Radius must fall within ISS LEO bounds, not just some LEO range."""
     state = propagate_orbit(iss_tle, iss_tle.epoch_jd, 0.0)
     mag = float(np.linalg.norm(state.position_km))
     assert _ISS_R_MIN_KM < mag < _ISS_R_MAX_KM, (
@@ -53,7 +50,7 @@ def test_propagate_position_units(iss_tle):
 
 
 def test_propagate_velocity_units(iss_tle):
-    """[FM-5 Fix] Speed must satisfy vis-viva bounds for the ISS radius regime."""
+    """Speed must satisfy vis-viva bounds for the ISS radius regime."""
     state = propagate_orbit(iss_tle, iss_tle.epoch_jd, 0.0)
     r_mag = float(np.linalg.norm(state.position_km))
     v_mag = float(np.linalg.norm(state.velocity_km_s))
@@ -86,7 +83,7 @@ def test_propagate_many_no_nan_for_valid(iss_tle, time_steps):
 
 
 def test_propagate_many_radius_never_subterranean(iss_tle, time_steps):
-    """[FM-5 Fix] Every propagated position must be above Earth's equatorial radius."""
+    """Every propagated position must be above Earth's equatorial radius."""
     times_jd = iss_tle.epoch_jd + (time_steps / 1440.0)
     trajectories, _ = propagate_many([iss_tle], times_jd)
     traj = trajectories["25544"]
@@ -99,7 +96,7 @@ def test_propagate_many_radius_never_subterranean(iss_tle, time_steps):
 
 
 def test_propagate_many_agrees_with_propagate_orbit(iss_tle, time_steps):
-    """[FM-5 Fix] propagate_many and propagate_orbit must agree to within 1 m (1e-3 km)."""
+    """propagate_many and propagate_orbit must agree to within 1 m (1e-3 km)."""
     times_jd = iss_tle.epoch_jd + (time_steps / 1440.0)
     trajectories, _ = propagate_many([iss_tle], times_jd)
     batch_pos = trajectories["25544"]
@@ -132,7 +129,7 @@ def test_propagate_trajectory_shapes(iss_tle):
 
 
 def test_propagate_trajectory_radius_bounds(iss_tle):
-    """[FM-5 Fix] All positions in a 1-day trajectory must be within ISS LEO bounds."""
+    """All positions in a 1-day trajectory must be within ISS LEO bounds."""
     _, positions, _ = propagate_trajectory(
         iss_tle, iss_tle.epoch_jd, iss_tle.epoch_jd + 1.0, step_minutes=5.0
     )
@@ -178,7 +175,7 @@ def test_ground_track_lon_range(iss_tle):
 
 
 def test_ground_track_altitude_iss_leo(iss_tle):
-    """[FM-5 Fix] Ground-track altitudes must be within ISS LEO bounds."""
+    """Ground-track altitudes must be within ISS LEO bounds."""
     times, positions, _v = propagate_trajectory(
         iss_tle, iss_tle.epoch_jd, iss_tle.epoch_jd + 1.0, step_minutes=5.0
     )

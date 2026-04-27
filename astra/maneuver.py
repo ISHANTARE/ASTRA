@@ -1,80 +1,55 @@
 # astra/maneuver.py
 """ASTRA Core Maneuver Modeling — Frame Transformations & Thrust Application.
-
 Implements the mathematics required to convert spacecraft-centric thrust
 vectors (VNB / RTN) into the inertial frame and to validate maneuver
 definitions before integration.
-
 Frame definitions (all right-handed orthonormal triads)::
-
     VNB (Velocity, Normal, Binormal):
         V̂ = v / |v|
         N̂ = (r × v) / |r × v|
         B̂ = V̂ × N̂
-
     RTN (Radial, Transverse, Normal):
         R̂ = r / |r|
         N̂ = (r × v) / |r × v|
         T̂ = N̂ × R̂
-
 References
-
 - Vallado, D. A. (2013). *Fundamentals of Astrodynamics and Applications*, §4.7.
 - Schaub & Junkins (2018). *Analytical Mechanics of Space Systems*, §14.2.
 """
-
 from __future__ import annotations
-
 import numpy as np
-
 from astra.errors import ManeuverError
 from astra.models import FiniteBurn, ManeuverFrame
 from astra.log import get_logger
-
 logger = get_logger(__name__)
-
-
 # ---------------------------------------------------------------------------
 # Frame Transformation Matrices
 # ---------------------------------------------------------------------------
-
-
 def rotation_vnb_to_inertial(
     r_eci: np.ndarray,
     v_eci: np.ndarray,
 ) -> np.ndarray:
     """Build the 3×3 rotation matrix whose rows are the VNB unit vectors in ECI.
-
     **Convention (important):**
     ``_build_vnb_matrix_njit`` stores the VNB basis vectors as *rows*:
-
         T[0, :] = V̂  (velocity unit vector)
         T[1, :] = N̂  (orbit-normal unit vector)
         T[2, :] = B̂  (binormal unit vector)
-
     This makes T an **ECI→VNB** rotation matrix, so:
-
         a_vnb       = T   @ a_eci      # ECI direction → VNB components
-        a_inertial  = T.T @ a_vnb      # VNB direction → ECI components  [D-03 Fix]
-
-    The function is named ``rotation_vnb_to_inertial`` for historical reasons,
+        a_inertial  = T.T @ a_vnb      # VNB direction → ECI components  The function is named ``rotation_vnb_to_inertial`` for historical reasons,
     but callers that need to map a VNB-frame vector into ECI **must** use the
     transpose.  ``thrust_acceleration_inertial`` does this correctly via ``T.T``.
-
     Args:
         r_eci: Shape (3,) inertial position [km].
         v_eci: Shape (3,) inertial velocity [km/s].
-
     Returns:
         Shape (3, 3) matrix whose rows are [V̂, N̂, B̂] in ECI (i.e. ECI→VNB).
         Use ``.T`` to transform from VNB frame into ECI.
-
     Raises:
         ManeuverError: If velocity magnitude < 1e-12 km/s or if r ∥ v
             (angular momentum near-zero), making the VNB frame undefined.
-
     Example::
-
         T = rotation_vnb_to_inertial(r_eci, v_eci)
         # Prograde burn of 10 m/s:
         dv_eci = T.T @ np.array([0.01, 0.0, 0.0])  # V̂ direction → ECI
@@ -86,7 +61,6 @@ def rotation_vnb_to_inertial(
             parameter="v_eci",
             value=float(v_mag),
         )
-
     h = np.cross(r_eci, v_eci)  # angular momentum vector
     h_mag = np.linalg.norm(h)
     if h_mag < 1e-12:
@@ -97,32 +71,22 @@ def rotation_vnb_to_inertial(
             parameter="h_mag",
             value=float(h_mag),
         )
-
     from astra.frames import _build_vnb_matrix_njit
-
     return _build_vnb_matrix_njit(r_eci, v_eci)  # type: ignore[no-any-return]
-
-
 def rotation_rtn_to_inertial(
     r_eci: np.ndarray,
     v_eci: np.ndarray,
 ) -> np.ndarray:
     """Build the 3×3 rotation matrix from RTN to inertial (ECI/TEME).
-
     Columns of the returned matrix are the RTN unit vectors expressed
     in the inertial frame:
-
         T = [R̂ | T̂ | N̂]
-
     so that  a_inertial = T @ a_rtn.
-
     Args:
         r_eci: Shape (3,) inertial position [km].
         v_eci: Shape (3,) inertial velocity [km/s].
-
     Returns:
         Shape (3, 3) rotation matrix.
-
     Raises:
         ManeuverError: If position magnitude is degenerate (< 1e-12 km),
             making the frame undefined.
@@ -134,7 +98,6 @@ def rotation_rtn_to_inertial(
             parameter="r_eci",
             value=float(r_mag),
         )
-
     h = np.cross(r_eci, v_eci)
     h_mag = np.linalg.norm(h)
     if h_mag < 1e-12:
@@ -145,27 +108,20 @@ def rotation_rtn_to_inertial(
             parameter="h_mag",
             value=float(h_mag),
         )
-
     from astra.frames import _build_rtn_matrix_njit
-
     return _build_rtn_matrix_njit(r_eci, v_eci)  # type: ignore[no-any-return]
-
-
 def frame_to_inertial(
     r_eci: np.ndarray,
     v_eci: np.ndarray,
     frame: ManeuverFrame,
 ) -> np.ndarray:
     """Return the appropriate frame-to-inertial rotation matrix.
-
     Convenience dispatcher that selects VNB or RTN based on the
     ``ManeuverFrame`` enum value.
-
     Args:
         r_eci: Shape (3,) inertial position [km].
         v_eci: Shape (3,) inertial velocity [km/s].
         frame: ManeuverFrame.VNB or ManeuverFrame.RTN.
-
     Returns:
         Shape (3, 3) rotation matrix  T  such that
         ``a_inertial = T @ a_frame``.
@@ -180,13 +136,9 @@ def frame_to_inertial(
             parameter="frame",
             value=str(frame),
         )
-
-
 # ---------------------------------------------------------------------------
 # Thrust Vector Computation (used inside ODE derivative)
 # ---------------------------------------------------------------------------
-
-
 def thrust_acceleration_inertial(
     r_eci: np.ndarray,
     v_eci: np.ndarray,
@@ -194,22 +146,18 @@ def thrust_acceleration_inertial(
     burn: FiniteBurn,
 ) -> np.ndarray:
     """Compute the inertial thrust acceleration vector at a single instant.
-
     This function is called at *every* Runge-Kutta sub-step during a
     powered arc.  It re-computes the frame transformation matrix from
     the instantaneous position and velocity, ensuring that dynamically
     steered burns (e.g. gravity-turn, velocity-aligned orbit-raise)
     perfectly track the commanded attitude.
-
     Args:
         r_eci: Shape (3,) inertial position [km].
         v_eci: Shape (3,) inertial velocity [km/s].
         mass_kg: Instantaneous spacecraft mass [kg] (must be > 0).
         burn: Active ``FiniteBurn`` definition.
-
     Returns:
         Shape (3,) inertial acceleration [km/s²].
-
     Raises:
         ManeuverError: If mass is non-positive (propellant exhausted).
     """
@@ -220,50 +168,36 @@ def thrust_acceleration_inertial(
             parameter="mass_kg",
             value=mass_kg,
         )
-
     # Build dynamic rotation matrix from instantaneous state.
     # NOTE: frame_to_inertial / _build_vnb_matrix_njit stores basis vectors as
     # ROWS, making T an ECI→VNB matrix.  To rotate a direction FROM the burn
     # frame INTO inertial, we need the transpose (VNB→ECI = T.T).
-    # [D-03 Fix] Previously used `T @ d_frame`, which applied ECI→VNB to a
     # VNB-frame vector — correct for prograde only, wrong for normal/binormal.
     T = frame_to_inertial(r_eci, v_eci, burn.frame)
-
     # Direction in the body-centric frame (unit vector)
     d_frame = np.asarray(burn.direction, dtype=np.float64)
-
     # Rotate thrust direction into inertial frame: T is ECI→VNB, so T.T is VNB→ECI.
     d_inertial = T.T @ d_frame
-
     # Thrust acceleration:  a = F·d̂ / m   [N / kg = m/s²]
     # Convert to km/s²:  1 m/s² = 1e-3 km/s²
     a_thrust_km_s2 = (burn.thrust_N / mass_kg) * 1e-3 * d_inertial
-
     return a_thrust_km_s2  # type: ignore[no-any-return]
-
-
 # ---------------------------------------------------------------------------
 # Maneuver Validation
 # ---------------------------------------------------------------------------
-
-
 def validate_burn(burn: FiniteBurn, initial_mass_kg: float) -> None:
     """Pre-flight validation of a FiniteBurn definition.
-
     Checks physical consistency before handing the burn off to the
     integrator.  Raises ``ManeuverError`` on the first detected issue.
-
     Checks performed:
         1. Duration is strictly positive.
         2. Thrust is strictly positive.
         3. Specific impulse is strictly positive.
         4. Direction vector has unit magnitude (within 1e-6 tolerance).
         5. Total propellant consumed does not exceed available mass.
-
     Args:
         burn: The ``FiniteBurn`` to validate.
         initial_mass_kg: Spacecraft wet mass at ignition [kg].
-
     Raises:
         ManeuverError: Descriptive error on validation failure.
     """
@@ -273,21 +207,18 @@ def validate_burn(burn: FiniteBurn, initial_mass_kg: float) -> None:
             parameter="duration_s",
             value=burn.duration_s,
         )
-
     if burn.thrust_N <= 0.0:
         raise ManeuverError(
             "Thrust magnitude must be positive.",
             parameter="thrust_N",
             value=burn.thrust_N,
         )
-
     if burn.isp_s <= 0.0:
         raise ManeuverError(
             "Specific impulse must be positive.",
             parameter="isp_s",
             value=burn.isp_s,
         )
-
     d = np.asarray(burn.direction, dtype=np.float64)
     d_mag = np.linalg.norm(d)
     if abs(d_mag - 1.0) > 1e-6:
@@ -296,7 +227,6 @@ def validate_burn(burn: FiniteBurn, initial_mass_kg: float) -> None:
             parameter="direction",
             value=tuple(burn.direction),
         )
-
     # Tsiolkovsky mass check
     propellant_consumed_kg = burn.mass_flow_rate_kg_s * burn.duration_s
     if propellant_consumed_kg > initial_mass_kg:
@@ -306,24 +236,18 @@ def validate_burn(burn: FiniteBurn, initial_mass_kg: float) -> None:
             parameter="mass_budget",
             value=propellant_consumed_kg,
         )
-
     logger.info(
         f"Burn validated: F={burn.thrust_N:.1f} N, "
         f"Isp={burn.isp_s:.1f} s, duration={burn.duration_s:.1f} s, "
         f"propellant={propellant_consumed_kg:.2f} kg, "
         f"frame={burn.frame.value}"
     )
-
-
 def validate_burn_sequence(burns: list[FiniteBurn]) -> None:
     """Ensure that a list of FiniteBurn objects does not contain temporal overlaps.
-
     This function detects unphysical "dual-thrust" arcs (remediates PHY-F/SE-G).
     It assumes the burns list is already sorted by ignition time.
-
     Args:
         burns: Sorted list of ``FiniteBurn`` objects.
-
     Raises:
         ManeuverError: If an overlap is detected between any two burns.
     """
@@ -338,13 +262,8 @@ def validate_burn_sequence(burns: list[FiniteBurn]) -> None:
                 parameter="maneuvers",
                 value=len(burns),
             )
-
-
 # ---------------------------------------------------------------------------
-# Hohmann Transfer Planner  [FM-4 Fix — Finding #14]
-# ---------------------------------------------------------------------------
-
-
+# Hohmann Transfer Planner  # ---------------------------------------------------------------------------
 def plan_hohmann(
     r_initial_km: float,
     r_target_km: float,
@@ -355,16 +274,13 @@ def plan_hohmann(
     frame: ManeuverFrame = ManeuverFrame.VNB,
 ) -> list[FiniteBurn]:
     """Plan a two-burn Hohmann transfer between two circular orbits.
-
     Computes the two impulsive delta-V maneuvers required for a classical
     Hohmann transfer, then converts each impulsive delta-V to a finite-burn
     arc using the Tsiolkovsky rocket equation and the specified engine
     parameters.
-
     The first burn raises the apogee from ``r_initial_km`` to ``r_target_km``.
     The second burn circularises at the target altitude.  Both burns are
     prograde (direction = (1, 0, 0) in VNB frame).
-
     Assumptions:
         - Both initial and target orbits are **circular**.
         - Earth's gravitational parameter μ = 398600.4418 km³/s².
@@ -372,7 +288,6 @@ def plan_hohmann(
           is computed from thrust and Isp but the impulsive ΔV is exact).
         - Coasting time on the transfer arc (half the ellipse period) is
           computed and used to schedule the second burn epoch.
-
     Args:
         r_initial_km: Geocentric radius of the initial circular orbit (km).
             This is altitude + EARTH_EQUATORIAL_RADIUS_KM.
@@ -382,17 +297,13 @@ def plan_hohmann(
         thrust_N: Engine thrust in Newtons.
         t_ignition_jd: Julian Date of the first burn ignition.
         frame: ManeuverFrame for thrust direction (default VNB, prograde).
-
     Returns:
         List of two :class:`FiniteBurn` objects — [burn_1, burn_2].
-
     Raises:
         ManeuverError: If the orbit radii are non-positive, target equals
             initial (null transfer), thrust or Isp are non-positive, or the
             spacecraft runs out of propellant before completing the transfer.
-
     Example::
-
         import astra, math
         from astra.constants import EARTH_EQUATORIAL_RADIUS_KM as Re
         burns = astra.plan_hohmann(
@@ -407,7 +318,6 @@ def plan_hohmann(
     """
     import math
     from astra.constants import EARTH_MU_KM3_S2, G0_STD
-
     # ── Input Validation ─────────────────────────────────────────────────────
     if r_initial_km <= 0.0:
         raise ManeuverError(
@@ -445,38 +355,29 @@ def plan_hohmann(
             parameter="mass_kg",
             value=mass_kg,
         )
-
     mu = EARTH_MU_KM3_S2
     g0 = G0_STD  # m/s²
-
     # ── Orbital mechanics ────────────────────────────────────────────────────
     # Velocities on initial and target circular orbits (km/s)
     v_initial = math.sqrt(mu / r_initial_km)
     v_target  = math.sqrt(mu / r_target_km)
-
     # Semi-major axis of transfer ellipse
     a_transfer = (r_initial_km + r_target_km) / 2.0
-
     # Velocity at periapsis and apoapsis of transfer ellipse (vis-viva)
     v_transfer_peri = math.sqrt(mu * (2.0 / r_initial_km - 1.0 / a_transfer))
     v_transfer_apo  = math.sqrt(mu * (2.0 / r_target_km  - 1.0 / a_transfer))
-
     # Delta-V magnitudes (km/s → m/s for Tsiolkovsky)
     dv1_km_s = abs(v_transfer_peri - v_initial)   # first burn: raise apogee
     dv2_km_s = abs(v_target - v_transfer_apo)      # second burn: circularise
-
     dv1_m_s = dv1_km_s * 1000.0
     dv2_m_s = dv2_km_s * 1000.0
-
     # ── Tsiolkovsky mass budget ───────────────────────────────────────────────
     # Propellant consumed per burn: dm = m0 * (1 - exp(-dv / (Isp * g0)))
     m_after_burn1 = mass_kg * math.exp(-dv1_m_s / (isp_s * g0))
     prop1_kg      = mass_kg - m_after_burn1
-
     m_after_burn2 = m_after_burn1 * math.exp(-dv2_m_s / (isp_s * g0))
     prop2_kg      = m_after_burn1 - m_after_burn2
     total_prop_kg = prop1_kg + prop2_kg
-
     if total_prop_kg >= mass_kg:
         raise ManeuverError(
             f"Hohmann transfer requires {total_prop_kg:.2f} kg of propellant "
@@ -484,39 +385,32 @@ def plan_hohmann(
             parameter="mass_kg",
             value=mass_kg,
         )
-
     logger.info(
         "Hohmann transfer planned: r_i=%.1f km → r_f=%.1f km | "
         "ΔV1=%.3f m/s | ΔV2=%.3f m/s | prop_total=%.2f kg",
         r_initial_km, r_target_km, dv1_m_s, dv2_m_s, total_prop_kg,
     )
-
     # ── Burn durations ────────────────────────────────────────────────────────
     # dm/dt = F / (Isp * g0)   →   dt = dm / (dm/dt) = dm * Isp * g0 / F
     mdot = thrust_N / (isp_s * g0)         # kg/s (mass flow rate)
     duration1_s = prop1_kg / mdot
     duration2_s = prop2_kg / mdot
-
     # ── Coast arc (transfer half-period) ─────────────────────────────────────
     T_transfer_s = math.pi * math.sqrt(a_transfer**3 / mu)  # half-period (s)
-
     # Burn 1 effective midpoint epoch (approx: start of burn + half duration)
     burn1_mid_s   = duration1_s / 2.0
     coast_start_s = duration1_s  # after burn 1 cutoff
-
     # Burn 2 ignition = burn 1 ignition + burn 1 duration + coast time
     t_ign2_jd = t_ignition_jd + (duration1_s + T_transfer_s) / 86400.0
-
     # ── Thrust direction: prograde (+V in VNB frame) ──────────────────────────
     prograde_dir = (1.0, 0.0, 0.0)  # VNB: V-axis is prograde
-
     burn1 = FiniteBurn(
         epoch_ignition_jd=t_ignition_jd,
         duration_s=duration1_s,
         thrust_N=thrust_N,
         isp_s=isp_s,
         direction=prograde_dir,
-        frame=ManeuverFrame.VNB,  # [A-04 Fix] Always use VNB for prograde logic
+        frame=ManeuverFrame.VNB,  # Always use VNB for prograde logic
     )
     burn2 = FiniteBurn(
         epoch_ignition_jd=t_ign2_jd,
@@ -524,7 +418,6 @@ def plan_hohmann(
         thrust_N=thrust_N,
         isp_s=isp_s,
         direction=prograde_dir,
-        frame=ManeuverFrame.VNB,  # [A-04 Fix] Always use VNB for prograde logic
+        frame=ManeuverFrame.VNB,  # Always use VNB for prograde logic
     )
-
     return [burn1, burn2]

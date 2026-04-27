@@ -209,7 +209,7 @@ def parse_cdm_xml(xml_string: str) -> ConjunctionDataMessage:
 
 
 # ---------------------------------------------------------------------------
-# CDM Exporter  [FM-4 Fix — Finding #13]
+# CDM Exporter
 # ---------------------------------------------------------------------------
 
 
@@ -428,8 +428,6 @@ def export_cdm_kvn(
     interoperable with legacy mission-control systems (ODAS, older STK
     pipelines) that do not support XML CDMs.  Completes the read-write API
     symmetry: ``parse_cdm_kvn(export_cdm_kvn(cdm))`` round-trips losslessly.
-    [FM-4 Fix — Finding #9 Audit]
-
     Args:
         cdm: The :class:`ConjunctionDataMessage` to serialise.
         originator: Originator identifier written into the KVN header.

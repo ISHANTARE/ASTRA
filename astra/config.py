@@ -61,7 +61,7 @@ def set_strict_mode(enabled: bool) -> None:
 
 
 # ---------------------------------------------------------------------------
-# SPACEBOOK_ENABLED  [CF-6 Fix]
+# SPACEBOOK_ENABLED
 # Single authoritative read of ASTRA_SPACEBOOK_ENABLED happens exactly once
 # at import time. All modules must import from here, not call os.environ.get
 # directly, so that tests can override the flag via set_spacebook_enabled().
