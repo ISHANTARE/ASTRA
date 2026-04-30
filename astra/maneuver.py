@@ -35,24 +35,22 @@ def rotation_vnb_to_inertial(
         T[0, :] = V̂  (velocity unit vector)
         T[1, :] = N̂  (orbit-normal unit vector)
         T[2, :] = B̂  (binormal unit vector)
-    This makes T an **ECI→VNB** rotation matrix, so:
-        a_vnb       = T   @ a_eci      # ECI direction → VNB components
-        a_inertial  = T.T @ a_vnb      # VNB direction → ECI components  The function is named ``rotation_vnb_to_inertial`` for historical reasons,
-    but callers that need to map a VNB-frame vector into ECI **must** use the
-    transpose.  ``thrust_acceleration_inertial`` does this correctly via ``T.T``.
+    This makes T an **VNB→ECI** rotation matrix, so:
+        a_inertial  = T @ a_vnb      # VNB direction → ECI components
+
     Args:
         r_eci: Shape (3,) inertial position [km].
         v_eci: Shape (3,) inertial velocity [km/s].
+
     Returns:
-        Shape (3, 3) matrix whose rows are [V̂, N̂, B̂] in ECI (i.e. ECI→VNB).
-        Use ``.T`` to transform from VNB frame into ECI.
+        Shape (3, 3) matrix whose columns are [V̂, N̂, B̂] in ECI (i.e. VNB→ECI).
     Raises:
         ManeuverError: If velocity magnitude < 1e-12 km/s or if r ∥ v
             (angular momentum near-zero), making the VNB frame undefined.
     Example::
         T = rotation_vnb_to_inertial(r_eci, v_eci)
         # Prograde burn of 10 m/s:
-        dv_eci = T.T @ np.array([0.01, 0.0, 0.0])  # V̂ direction → ECI
+        dv_eci = T @ np.array([0.01, 0.0, 0.0])  # V̂ direction → ECI
     """
     v_mag = np.linalg.norm(v_eci)
     if v_mag < 1e-12:
@@ -72,7 +70,7 @@ def rotation_vnb_to_inertial(
             value=float(h_mag),
         )
     from astra.frames import _build_vnb_matrix_njit
-    return _build_vnb_matrix_njit(r_eci, v_eci)  # type: ignore[no-any-return]
+    return _build_vnb_matrix_njit(r_eci, v_eci).T  # type: ignore[no-any-return]
 def rotation_rtn_to_inertial(
     r_eci: np.ndarray,
     v_eci: np.ndarray,
@@ -109,7 +107,7 @@ def rotation_rtn_to_inertial(
             value=float(h_mag),
         )
     from astra.frames import _build_rtn_matrix_njit
-    return _build_rtn_matrix_njit(r_eci, v_eci)  # type: ignore[no-any-return]
+    return _build_rtn_matrix_njit(r_eci, v_eci).T  # type: ignore[no-any-return]
 def frame_to_inertial(
     r_eci: np.ndarray,
     v_eci: np.ndarray,
@@ -169,15 +167,12 @@ def thrust_acceleration_inertial(
             value=mass_kg,
         )
     # Build dynamic rotation matrix from instantaneous state.
-    # NOTE: frame_to_inertial / _build_vnb_matrix_njit stores basis vectors as
-    # ROWS, making T an ECI→VNB matrix.  To rotate a direction FROM the burn
-    # frame INTO inertial, we need the transpose (VNB→ECI = T.T).
-    # VNB-frame vector — correct for prograde only, wrong for normal/binormal.
+    # T is the VNB→ECI (or RTN→ECI) rotation matrix.
     T = frame_to_inertial(r_eci, v_eci, burn.frame)
     # Direction in the body-centric frame (unit vector)
     d_frame = np.asarray(burn.direction, dtype=np.float64)
-    # Rotate thrust direction into inertial frame: T is ECI→VNB, so T.T is VNB→ECI.
-    d_inertial = T.T @ d_frame
+    # Rotate thrust direction into inertial frame
+    d_inertial = T @ d_frame
     # Thrust acceleration:  a = F·d̂ / m   [N / kg = m/s²]
     # Convert to km/s²:  1 m/s² = 1e-3 km/s²
     a_thrust_km_s2 = (burn.thrust_N / mass_kg) * 1e-3 * d_inertial
@@ -395,22 +390,24 @@ def plan_hohmann(
     mdot = thrust_N / (isp_s * g0)         # kg/s (mass flow rate)
     duration1_s = prop1_kg / mdot
     duration2_s = prop2_kg / mdot
-    # ── Coast arc (transfer half-period) ─────────────────────────────────────
+    # ── Coast arc & Phasing (Fixing 1.6 & 1.7) ──────────────────────────────────
     T_transfer_s = math.pi * math.sqrt(a_transfer**3 / mu)  # half-period (s)
-    # Burn 1 effective midpoint epoch (approx: start of burn + half duration)
-    burn1_mid_s   = duration1_s / 2.0
-    coast_start_s = duration1_s  # after burn 1 cutoff
-    # Burn 2 ignition = burn 1 ignition + burn 1 duration + coast time
-    t_ign2_jd = t_ignition_jd + (duration1_s + T_transfer_s) / 86400.0
-    # ── Thrust direction: prograde (+V in VNB frame) ──────────────────────────
-    prograde_dir = (1.0, 0.0, 0.0)  # VNB: V-axis is prograde
+    # Burn 1 should be centered around the target apsis (t_ignition_jd),
+    # meaning ignition starts half a burn duration before the apsis.
+    t_ign1_jd = t_ignition_jd - (duration1_s / 2.0) / 86400.0
+    # Burn 2 should be centered around the opposite apsis (exactly T_transfer_s later),
+    # meaning its ignition starts half a burn duration before that.
+    t_ign2_jd = t_ignition_jd + (T_transfer_s - duration2_s / 2.0) / 86400.0
+    # ── Thrust direction: prograde ────────────────────────────────────────────
+    # Prograde is +V in VNB frame, but +T in RTN frame.
+    prograde_dir = (1.0, 0.0, 0.0) if frame == ManeuverFrame.VNB else (0.0, 1.0, 0.0)
     burn1 = FiniteBurn(
-        epoch_ignition_jd=t_ignition_jd,
+        epoch_ignition_jd=t_ign1_jd,
         duration_s=duration1_s,
         thrust_N=thrust_N,
         isp_s=isp_s,
         direction=prograde_dir,
-        frame=ManeuverFrame.VNB,  # Always use VNB for prograde logic
+        frame=frame,
     )
     burn2 = FiniteBurn(
         epoch_ignition_jd=t_ign2_jd,
@@ -418,6 +415,6 @@ def plan_hohmann(
         thrust_N=thrust_N,
         isp_s=isp_s,
         direction=prograde_dir,
-        frame=ManeuverFrame.VNB,  # Always use VNB for prograde logic
+        frame=frame,
     )
     return [burn1, burn2]

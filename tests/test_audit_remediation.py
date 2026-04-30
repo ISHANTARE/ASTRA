@@ -481,3 +481,108 @@ class TestFinding9_CDMKVNExport:
         assert "<?xml" in xml
         recovered = parse_cdm_xml(xml)
         assert recovered.message_id == cdm.message_id
+
+# ---------------------------------------------------------------------------
+# Missing Audit Coverage Tests
+# ---------------------------------------------------------------------------
+
+def test_propagate_cowell_batch_stm():
+    """Batch propagation with include_stm=True must return valid covariances."""
+    from astra.propagator import propagate_cowell_batch, NumericalState
+    
+    state1 = NumericalState(
+        t_jd=2460000.5,
+        position_km=np.array([7000.0, 0.0, 0.0]),
+        velocity_km_s=np.array([0.0, 7.5, 0.0]),
+        covariance_km2=np.eye(6) * 1e-4
+    )
+    state2 = NumericalState(
+        t_jd=2460000.5,
+        position_km=np.array([0.0, 7000.0, 0.0]),
+        velocity_km_s=np.array([-7.5, 0.0, 0.0]),
+        covariance_km2=np.eye(6) * 1e-4
+    )
+    
+    results = propagate_cowell_batch(
+        {"obj1": state1, "obj2": state2},
+        duration_s=60.0,
+        dt_out=60.0,
+        include_stm=True,
+        include_third_body=False
+    )
+    
+    assert "obj1" in results and "obj2" in results
+    assert len(results["obj1"]) == 2
+    assert results["obj1"][-1].covariance_km2 is not None
+    assert results["obj1"][-1].covariance_km2.shape == (6, 6)
+    
+def test_snc_covariance_growth():
+    """SNCConfig must increase the trace of the covariance over time."""
+    from astra.propagator import propagate_cowell, NumericalState, SNCConfig
+    
+    state0 = NumericalState(
+        t_jd=2460000.5,
+        position_km=np.array([7000.0, 0.0, 0.0]),
+        velocity_km_s=np.array([0.0, 7.5, 0.0]),
+        covariance_km2=np.eye(6) * 1e-6
+    )
+    
+    res_no_snc = propagate_cowell(
+        state0, duration_s=600.0, include_stm=True, include_third_body=False
+    )
+    
+    res_with_snc = propagate_cowell(
+        state0, duration_s=600.0, include_stm=True, include_third_body=False,
+        snc_config=SNCConfig(mode="white_noise", q_psd_m2_s3=1e-3)
+    )
+    
+    trace_no_snc = np.trace(res_no_snc[-1].covariance_km2)
+    trace_with_snc = np.trace(res_with_snc[-1].covariance_km2)
+    assert trace_with_snc > trace_no_snc * 1.1, "SNC did not meaningfully grow covariance"
+
+def test_unknown_drag_config_model_raises():
+    """Propagating with an unknown DragConfig.model should raise ValueError."""
+    from astra.propagator import propagate_cowell, NumericalState, DragConfig
+    
+    state0 = NumericalState(
+        t_jd=2460000.5, position_km=np.array([7000.0, 0.0, 0.0]), velocity_km_s=np.array([0.0, 7.5, 0.0])
+    )
+    with pytest.raises(ValueError, match="Unsupported DragConfig model"):
+        propagate_cowell(
+            state0, duration_s=60.0,
+            drag_config=DragConfig(cd=2.2, area_m2=10.0, mass_kg=1000.0, model="UNKNOWN_MODEL"),
+            use_empirical_drag=True
+        )
+
+def test_passes_over_location():
+    """Visibility passes_over_location must return predictable values for a LEO object."""
+    from astra.models import SatelliteTLE, Observer
+    from astra.visibility import passes_over_location
+    
+    # ISS orbit (approx equatorial to guarantee pass over equator)
+    tle = SatelliteTLE(
+        norad_id="99999", name="EQUAT",
+        line1="1 99999U 21001A   21001.00000000  .00000000  00000-0  00000-0 0  9990",
+        line2="2 99999   0.0000   0.0000 0001000   0.0000   0.0000 15.00000000 00000",
+        epoch_jd=2460000.5, object_type="PAYLOAD"
+    )
+    loc = Observer(name="Equator", latitude_deg=0.0, longitude_deg=0.0, elevation_m=0.0)
+    
+    # 24 hours propagation
+    passes = passes_over_location(tle, loc, t_start_jd=2460000.5, t_end_jd=2460001.5)
+    
+    assert isinstance(passes, list)
+    # LEO completes ~15 orbits/day, should have multiple passes
+    assert len(passes) > 5
+
+def test_nrlmsise00_density_bates_profile():
+    """Test the Bates atmospheric profile calculation internal to NRLMSISE."""
+    from astra.propagator import _nrlmsise00_density_njit
+    # Test valid altitude
+    rho1 = _nrlmsise00_density_njit(400.0, 150.0, 150.0, 15.0)
+    assert 1e-13 < rho1 < 1e-11
+    
+    # Test low altitude cutoff
+    rho2 = _nrlmsise00_density_njit(50.0, 150.0, 150.0, 15.0)
+    assert rho2 == 0.0
+

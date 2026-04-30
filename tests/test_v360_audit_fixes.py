@@ -13,7 +13,7 @@ require network access or Numba JIT compilation.
 
 from __future__ import annotations
 
-import math
+
 import threading
 import pytest
 import numpy as np

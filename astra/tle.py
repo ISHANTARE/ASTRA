@@ -345,7 +345,9 @@ def _compute_checksum(line: str) -> int:
 def load_tle_catalog(tle_lines: list[str]) -> list[SatelliteTLE]:
     """Parse a batch of TLE text lines into SatelliteTLE objects.
 
-    Invalid TLEs are skipped with a logged warning.
+    Invalid TLEs are skipped with a logged warning, unless ``ASTRA_STRICT_MODE``
+    is enabled. In STRICT mode, a single invalid TLE will raise an
+    ``InvalidTLEError`` and abort the entire catalog load to prevent partial ingestion.
 
     Args:
         tle_lines: A flat list of strings, typically expected to be in

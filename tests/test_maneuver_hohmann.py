@@ -93,21 +93,21 @@ class TestPlanHohmann:
         )
 
     def test_coast_time_is_half_transfer_period(self):
-        """Gap between burn1 cutoff and burn2 ignition ≈ half transfer ellipse period."""
+        """Gap between burn centers ≈ half transfer ellipse period."""
         burns = plan_hohmann(
             r_initial_km=self.R1, r_target_km=self.R2,
             isp_s=300.0, mass_kg=1000.0, thrust_N=10.0,
             t_ignition_jd=2460000.5,
         )
         a_t = (self.R1 + self.R2) / 2.0
-        T_half = math.pi * math.sqrt(a_t**3 / mu)  # seconds
-
-        cutoff1_jd = burns[0].epoch_cutoff_jd
-        ignition2_jd = burns[1].epoch_ignition_jd
-        coast_s = (ignition2_jd - cutoff1_jd) * 86400.0
-
-        assert abs(coast_s - T_half) < 2.0, (
-            f"Coast time {coast_s:.1f} s vs expected half-period {T_half:.1f} s"
+        T_half = math.pi * math.sqrt(a_t**3 / EARTH_MU_KM3_S2)  # seconds
+    
+        center1_jd = burns[0].epoch_ignition_jd + (burns[0].duration_s / 2.0) / 86400.0
+        center2_jd = burns[1].epoch_ignition_jd + (burns[1].duration_s / 2.0) / 86400.0
+        dt_centers_s = (center2_jd - center1_jd) * 86400.0
+    
+        assert abs(dt_centers_s - T_half) < 2.0, (
+            f"Burn centers gap {dt_centers_s:.1f} s vs expected half-period {T_half:.1f} s"
         )
 
     def test_positive_burn_durations(self):

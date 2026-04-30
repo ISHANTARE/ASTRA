@@ -157,8 +157,8 @@ def sun_position_teme(t_jd: float, data_dir: Optional[str] = None) -> np.ndarray
     dt = cast(datetime, jd_utc_to_datetime(t_jd))
     t = ts.utc(dt)
     pos_gcrs_km = sun_position_de(t_jd, data_dir)
-    # Rotate GCRS → TEME: R_teme_from_gcrs = TEME.rotation_at(t).T
-    R_teme_from_gcrs = TEME.rotation_at(t).T
+    # Rotate GCRS → TEME: R_teme_from_gcrs = TEME.rotation_at(t)
+    R_teme_from_gcrs = TEME.rotation_at(t)
     return R_teme_from_gcrs @ pos_gcrs_km  # type: ignore[no-any-return]
 def moon_position_de(t_jd: float, data_dir: Optional[str] = None) -> np.ndarray:
     """Geocentric Moon position from JPL DE421 ephemeris.
@@ -204,7 +204,7 @@ def moon_position_teme(t_jd: float, data_dir: Optional[str] = None) -> np.ndarra
     dt = cast(datetime, jd_utc_to_datetime(t_jd))
     t = ts.utc(dt)
     pos_gcrs_km = moon_position_de(t_jd, data_dir)
-    R_teme_from_gcrs = TEME.rotation_at(t).T
+    R_teme_from_gcrs = TEME.rotation_at(t)
     return R_teme_from_gcrs @ pos_gcrs_km  # type: ignore[no-any-return]
 def get_ut1_utc_correction(t_jd_utc: float | np.ndarray) -> float | np.ndarray:
     """Return UT1-UTC offset in seconds for given UTC Julian Date(s).
@@ -339,7 +339,8 @@ def _parse_sw_csv(text: str) -> None:
                     f"Row {date_str} bounded with historically suspect F10.7: {f107_obs}."
                 )
             elif f107_obs <= 0.0:
-                raise ValueError("F10.7 non-physical. Suspected data integrity lapse.")
+                logger.warning(f"Row {date_str} skipped due to non-physical F10.7 <= 0: {f107_obs}")
+                continue
             f107_adj = (
                 float(row[idx_f107adj])
                 if len(row) > idx_f107adj and row[idx_f107adj].strip()
@@ -366,8 +367,8 @@ def _background_sw_fetch(data_dir: Optional[str]) -> None:
         _parse_sw_csv(text)
         with _SW_LOCK:
             _sw_last_success = datetime.now(timezone.utc)
-    except (requests.RequestException, ValueError) as exc:
-        logger.warning(f"Background Space-Weather fetch failed: {exc}")
+    except Exception as exc:
+        logger.error(f"Background Space-Weather fetch failed with unexpected error: {exc}", exc_info=True)
     finally:
         with _SW_LOCK:
             _sw_fetch_thread = None
@@ -471,9 +472,9 @@ def get_space_weather(
             age_h = (
                 datetime.now(timezone.utc) - _sw_last_success
             ).total_seconds() / 3600
-            if age_h > 48.0 and _sw_fetch_thread is None:
+            if age_h > 24.0 and _sw_fetch_thread is None:
                 logger.warning(
-                    "Space-weather cache >48 hours old. Triggering background refresh."
+                    "Space-weather cache >24 hours old. Triggering background refresh."
                 )
                 _sw_fetch_thread = threading.Thread(
                     target=_background_sw_fetch, args=(data_dir,), daemon=True
@@ -526,60 +527,11 @@ def nrlmsise00_density(
     ap_daily: float,
 ) -> float:
     """Compute high-fidelity atmospheric density using NRLMSISE-00 physics.
-    This function implements the core diffusion-equilibrium physics of the
-    MSIS standards, modeling the individual densities of He, O, N2, O2, and Ar.
-    It accounts for both solar flux (F10.7) and geomagnetic (Ap) heating.
-    Args:
-        altitude_km: Altitude above surface [km].
-        f107_obs: Daily observed F10.7 flux [SFU].
-        f107_adj: 81-day average F10.7 flux [SFU].
-        ap_daily: Daily Ap index.
-    Returns:
-        Density in kg/m³.
+    This function delegates to the canonical Numba implementation in propagator.py
+    to guarantee identical physics across the codebase (Fixes 1.5).
     """
-    if altitude_km > 1500.0 or altitude_km < 100.0:
-        return 0.0  # type: ignore[no-any-return]
-    # ── 1. Exospheric temperature (Hedin-1991 / MSIS-90 parameterisation) ────────
-    # T_inf(F10.7, Ap) drives scale height and hence density at all altitudes.
-    T_inf = 379.0 + 3.24 * f107_adj + 1.3 * (f107_obs - f107_adj) + 28.0 * ap_daily**0.4
-    T_inf = max(500.0, min(T_inf, 2500.0))
-    # ── 2. Calibration anchor (NRLMSISE-00 Picone et al. 2002) ───────────────────
-    # ρ_ref(400 km, F10.7=150, Ap=15) = 3.7e-12 kg/m³
-    # T_inf at moderate activity: 379 + 3.24×150 + 28×15^0.4 ≈ 948 K
-    T_inf_ref = 948.0
-    rho_ref_400 = 3.7e-12  # kg/m³
-    # ── 3. Bates exospheric temperature profile T(z) ──────────────────────────────
-    z_lb = 120.0  # lower boundary [km]
-    T_lb = 380.0  # temperature at lower boundary [K]
-    s = 0.02  # Bates slope parameter
-    def _bates_T(z: Any, Tinf: Any) -> float:
-        xi = (z - z_lb) * (_Re_km + z_lb) / (_Re_km + z)
-        return Tinf - (Tinf - T_lb) * math.exp(-s * xi)  # type: ignore[no-any-return]
-    # ── 4. Effective molecular weight (blends from N2/O-dominated at 120 km to He
-    #       at >800 km).  The exponential blend 0.16*exp(-(z-400)/300) drives
-    #       M_eff from ~24 g/mol at 300 km to ~8 g/mol at 900 km, matching the
-    #       NRLMSISE-00 climatology without requiring species-by-species integration.
-    M_eff = 4.0 * 1e-3 + (28.0 - 4.0) * 1e-3 * math.exp(-(altitude_km - 120.0) / 160.0)
-    M_eff = max(M_eff, 4.0e-3)  # clamp to helium lower bound
-    # ── 5. Scale height at the target altitude ───────────────────────────────────
-    T_z = _bates_T(altitude_km, T_inf)
-    g_z = _G0_M_S2 * (_Re_km / (_Re_km + altitude_km)) ** 2  # m/s²
-    H_z = _R_GAS * T_z / (M_eff * g_z) / 1000.0  # effective scale height [km]
-    # ── 6. Density at 400 km for the *current* activity ──────────────────────────
-    # ρ(400, T_inf) / ρ(400, T_inf_ref) ≈ exp(Δ(400)) where Δ accounts for
-    # the change in integrated scale height from z_lb=120 km to 400 km.
-    T_z_ref_400 = _bates_T(400.0, T_inf_ref)
-    T_z_cur_400 = _bates_T(400.0, T_inf)
-    g_400 = _G0_M_S2 * (_Re_km / (_Re_km + 400.0)) ** 2
-    M_400 = 4.0e-3 + (28.0 - 4.0) * 1e-3 * math.exp(-(400.0 - 120.0) / 160.0)
-    H_ref_400 = _R_GAS * T_z_ref_400 / (M_400 * g_400) / 1000.0
-    H_cur_400 = _R_GAS * T_z_cur_400 / (M_400 * g_400) / 1000.0
-    dz_lb = 400.0 - z_lb  # 280 km integration path
-    rho_400 = rho_ref_400 * math.exp(dz_lb * (1.0 / H_ref_400 - 1.0 / H_cur_400))
-    # ── 7. Extrapolate from 400 km to the target altitude ────────────────────────
-    # Use the current T_z temperature ratio for diffusion equilibrium adjustment
-    rho = rho_400 * (T_z_cur_400 / T_z) * math.exp(-(altitude_km - 400.0) / H_z)
-    return max(rho, 1e-20)  # type: ignore[no-any-return]
+    from astra.propagator import _nrlmsise00_density_njit
+    return float(_nrlmsise00_density_njit(altitude_km, f107_obs, f107_adj, ap_daily))
 def atmospheric_density_empirical(
     altitude_km: float,
     f107_obs: float,

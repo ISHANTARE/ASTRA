@@ -199,29 +199,31 @@ def propagate_many_generator(
     from astra.tle import check_tle_staleness
     for sat in satellites:
         check_tle_staleness(sat, times_jd)
+    # 1. Apply UT1-UTC correction consistently across all chunks (Fix 2.2)
+    try:
+        from astra.data_pipeline import get_ut1_utc_correction
+        ut1_utc_s_full = get_ut1_utc_correction(times_jd)
+        times_jd_ut1_full = times_jd + ut1_utc_s_full / 86400.0
+    except Exception as exc:
+        from astra import config
+        if config.ASTRA_STRICT_MODE:
+            from astra.errors import EphemerisError
+            raise EphemerisError(
+                f"Failed to fetch UT1-UTC correction for generator: {exc}"
+            ) from exc
+        logger.warning(
+            "UT1-UTC correction unavailable for chunk propagation (%d objects, %d epochs); "
+            "falling back to UTC propagation in relaxed mode. (%r)",
+            N,
+            T,
+            exc,
+        )
+        times_jd_ut1_full = times_jd
+
     for start_idx in range(0, T, chunk_size):
         end_idx = min(start_idx + chunk_size, T)
         jd_chunk = times_jd[start_idx:end_idx]
-        try:
-            from astra.data_pipeline import get_ut1_utc_correction
-            # Vectorize UT1-UTC directly across the chunk
-            ut1_utc_s = get_ut1_utc_correction(jd_chunk)
-            jd_chunk_ut1 = jd_chunk + ut1_utc_s / 86400.0
-        except Exception as exc:
-            from astra import config
-            if config.ASTRA_STRICT_MODE:
-                from astra.errors import EphemerisError
-                raise EphemerisError(
-                    f"Failed to fetch UT1-UTC correction for chunk: {exc}"
-                ) from exc
-            logger.warning(
-                "UT1-UTC correction unavailable for chunk propagation (%d objects, %d epochs); "
-                "falling back to UTC propagation in relaxed mode. (%r)",
-                N,
-                len(jd_chunk),
-                exc,
-            )
-            jd_chunk_ut1 = jd_chunk
+        jd_chunk_ut1 = times_jd_ut1_full[start_idx:end_idx]
         frac_chunk = np.zeros_like(jd_chunk)
         e, r, v = satrec_array.sgp4(jd_chunk_ut1, frac_chunk)
         r[e > 0] = np.nan

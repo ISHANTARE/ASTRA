@@ -120,8 +120,8 @@ def compute_collision_probability(
     Args:
         miss_vector_km: (3,) relative position vector at exact TCA (km).
         rel_vel_km_s: (3,) relative velocity vector at TCA (km/s).
-        cov_a: (3, 3) positional covariance matrix for Object A (km^2).
-        cov_b: (3, 3) positional covariance matrix for Object B (km^2).
+        cov_a: (3, 3) or (6, 6) positional/state covariance matrix for Object A.
+        cov_b: (3, 3) or (6, 6) positional/state covariance matrix for Object B.
         radius_a_km: Hard-body radius for Object A (km).
         radius_b_km: Hard-body radius for Object B (km).
     Returns:
@@ -164,8 +164,10 @@ def compute_collision_probability(
                 "2D B-plane covariance ill-conditioning (cond=%.2e). Applying Tikhonov regularization.",
                 cond
             )
-            # Add 1e-12 km^2 (1 mm positional variance) to ensure positive-definiteness
-            C_p += np.eye(2) * 1e-12
+            # Add dynamic regularization to ensure positive-definiteness without skewing precision
+            trace = float(np.trace(C_p))
+            reg_val = max(1e-12, 1e-10 * trace) if trace > 0 else 1e-12
+            C_p += np.eye(2) * reg_val
             inv_C_p = np.linalg.inv(C_p)
         else:
             inv_C_p = np.linalg.inv(C_p)
@@ -415,7 +417,9 @@ def compute_collision_probability_mc(
             "Covariance ill-conditioning detected (cond=%.2e). Applying Tikhonov regularization.",
             cond,
         )
-        sym += np.eye(sym.shape[0]) * 1e-12
+        trace = float(np.trace(sym))
+        reg_val = max(1e-12, 1e-10 * trace) if trace > 0 else 1e-12
+        sym += np.eye(sym.shape[0]) * reg_val
     try:
         L = np.linalg.cholesky(sym)
     except np.linalg.LinAlgError:
@@ -753,8 +757,19 @@ def propagate_covariance_stm(
             try:
                 from astra.data_pipeline import get_space_weather
                 f107_stm, f107_adj_stm, ap_stm = get_space_weather(t_jd0)
-            except Exception:
-                pass  # fall back to defaults
+            except Exception as exc:
+                from astra import config
+                if config.ASTRA_STRICT_MODE:
+                    from astra.errors import SpaceWeatherError
+                    raise SpaceWeatherError(
+                        f"[ASTRA STRICT] Space weather fetch failed during STM covariance propagation: {exc}"
+                    ) from exc
+                import logging
+                logging.getLogger(__name__).warning(
+                    "Space weather fetch failed during STM covariance propagation. "
+                    "Falling back to default F10.7=150, Ap=15. Covariance growth rate may be inaccurate. (%r)",
+                    exc
+                )
     sol = solve_ivp(
         _stm_derivatives_njit,
         t_span=(0.0, duration_s),

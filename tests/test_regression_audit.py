@@ -163,7 +163,7 @@ def test_pc_exact_dblquad_vs_chan_near_hit():
 
     # Exact should be ≥ Chan in the near-hit regime
     assert (
-        pc_exact >= pc_chan * 0.5
+        pc_exact >= pc_chan * 0.95
     ), f"Exact Pc ({pc_exact:.4e}) unexpectedly much smaller than Chan ({pc_chan:.4e})"
 
 
@@ -544,5 +544,46 @@ def test_rotate_covariance_rtn_to_eci_finite():
 
     assert cov_eci.shape == (3, 3)
     assert np.all(np.isfinite(cov_eci))
-    # Rotation must preserve trace (eigenvalue sum invariant)
     np.testing.assert_allclose(np.trace(cov_eci), np.trace(cov_rtn), rtol=1e-10)
+
+def test_j6_python_and_numba_paths_agree():
+    """Python ``_acceleration`` must match Numba ``_acceleration_njit`` (J6 term included)."""
+    from astra.propagator import _acceleration, _acceleration_njit
+    
+    r = np.array([7000.0, 0.0, 500.0])
+    v = np.array([0.0, 7.5, 0.0])
+    t_jd = 2451545.0
+    empty_coeffs = np.zeros((1, 2, 3))
+    
+    a_py = _acceleration(
+        t_jd, r, v, False, 2.2, 10.0, 1000.0, 0.0, 50.0, 400.0,
+        150.0, 150.0, 15.0, False, False, t_jd, 1.0, empty_coeffs, empty_coeffs,
+        False, 1.5, True
+    )
+    a_nb = _acceleration_njit(
+        t_jd, r, v, False, 2.2, 10.0, 1000.0, 0.0, 50.0, 400.0,
+        150.0, 150.0, 15.0, False, False, t_jd, 1.0, empty_coeffs, empty_coeffs,
+        False, 1.5, True
+    )
+    np.testing.assert_allclose(
+        a_py, a_nb, rtol=1e-6, atol=1e-12,
+        err_msg="Python and Numba J6 acceleration paths disagree."
+    )
+
+def test_estimate_covariance_computation():
+    """estimate_covariance must return a valid 3x3 covariance matrix."""
+    from astra import estimate_covariance
+    from astra.config import set_strict_mode
+    import astra.config as cfg
+    
+    prev = cfg.ASTRA_STRICT_MODE
+    set_strict_mode(False)
+    try:
+        cov = estimate_covariance(time_since_epoch_days=1.5)
+        assert cov.shape == (3, 3)
+        assert np.all(np.isfinite(cov))
+        assert np.allclose(cov, cov.T)
+        eigvals = np.linalg.eigvalsh(cov)
+        assert np.all(eigvals >= -1e-12)
+    finally:
+        set_strict_mode(prev)

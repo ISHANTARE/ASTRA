@@ -245,7 +245,8 @@ def closest_approach(
             tca_jd_fine = float(_res.x)
             min_dist_fine = float(_res.fun)
             return min_dist_fine, tca_jd_fine, t_idx  # type: ignore[no-any-return]
-    except Exception:
+    except Exception as exc:
+        logger.debug(f"Brent TCA refinement failed ({exc}). Falling back to coarse 100-point scan.")
         pass  # fall back to coarse scan
     # Coarse fallback: dense 100-point bracket scan
     t_dense = np.linspace(times_jd[idx_low], times_jd[idx_high], 100)
@@ -410,7 +411,8 @@ def find_conjunctions(
                 min_dist = float(_brent.fun)
                 pos_A = spline_A(tca_jd)
                 pos_B = spline_B(tca_jd)
-        except Exception:
+        except Exception as exc:
+            logger.debug(f"Brent TCA refinement failed ({exc}). Keeping coarse scan result.")
             pass  # keep coarse scan result
         # Unconditionally compute pos_A and pos_B from the final tca_jd.
         # was retained, but pos_A and pos_B were never assigned, causing UnboundLocalError

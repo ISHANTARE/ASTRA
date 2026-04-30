@@ -202,7 +202,7 @@ def test_use_empirical_drag_flag_changes_behavior(
         velocity_km_s=np.array([0.0, 7.8, 0.0]),
         mass_kg=250.0,
     )
-    drag = DragConfig(cd=2.2, area_m2=5.0, mass_kg=250.0, model="Jacchia")
+    drag = DragConfig(cd=2.2, area_m2=5.0, mass_kg=250.0, model="NRLMSISE00")
 
     states_emp = propagate_cowell(
         state0=state0,

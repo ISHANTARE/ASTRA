@@ -39,7 +39,7 @@ J6: float = 5.40681239e-7
 # ---------------------------------------------------------------------------
 SUN_MU_KM3_S2: float = 1.32712440018e11
 MOON_MU_KM3_S2: float = 4902.800066
-SUN_EARTH_DISTANCE_KM: float = 1.496e8  # ~1 AU
+SUN_EARTH_DISTANCE_KM: float = 149597870.7  # ~1 AU (aligning with AU_KM)
 MOON_EARTH_DISTANCE_KM: float = 384400.0
 SUN_RADIUS_KM: float = 695700.0
 # ---------------------------------------------------------------------------

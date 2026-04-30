@@ -126,7 +126,7 @@ def _find_exact_crossing(
         t_since_min = (t_mid - satellite.epoch_jd) * 1440.0
         state = propagate_orbit(satellite, satellite.epoch_jd, t_since_min)
         if state.error_code != 0:
-            return t_mid  # type: ignore[no-any-return]
+            return th if ascending else tl
         elev = _visible_from_location_cached(
             np.array([state.position_km]),
             np.array([t_mid]),
