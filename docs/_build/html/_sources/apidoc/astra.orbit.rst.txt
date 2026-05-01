@@ -1,7 +1,0 @@
-astra.orbit module
-==================
-
-.. automodule:: astra.orbit
-   :members:
-   :show-inheritance:
-   :undoc-members:

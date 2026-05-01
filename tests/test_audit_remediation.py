@@ -162,11 +162,9 @@ class TestFinding3_ConstantsLeakage:
 # ---------------------------------------------------------------------------
 class TestFinding4_UT1UTCWarningQuality:
     """The UT1-UTC fallback log message must mention the ~400 m error impact."""
-    def test_fallback_warning_mentions_error_magnitude(self, caplog):
-        """UT1-UTC fallback log must state the ~400m error magnitude."""
-        import logging
+    def test_sgp4_propagation_does_not_request_ut1(self):
+        """SGP4 propagation must not request UT1/EOP corrections."""
         from astra.models import SatelliteTLE
-        import astra.config as cfg
         tle = SatelliteTLE(
             norad_id="25544", name="ISS",
             line1="1 25544U 98067A   21001.00000000  .00001480  00000-0  34282-4 0  9990",
@@ -174,27 +172,11 @@ class TestFinding4_UT1UTCWarningQuality:
             epoch_jd=2459215.5,
             object_type="PAYLOAD",
         )
-        old_strict = cfg.ASTRA_STRICT_MODE
-        cfg.ASTRA_STRICT_MODE = False
-        import astra.orbit
-        old_propagate = astra.orbit.logger.propagate
-        astra.orbit.logger.propagate = True
-        try:
-            with patch("astra.data_pipeline.get_ut1_utc_correction",
-                       side_effect=Exception("EOP cache empty")):
-                from astra.orbit import propagate_orbit
-                with caplog.at_level(logging.WARNING, logger="astra.orbit"):
-                    try:
-                        propagate_orbit(tle, 2459215.5, 0.0)
-                    except Exception:
-                        pass
-        finally:
-            cfg.ASTRA_STRICT_MODE = old_strict
-            astra.orbit.logger.propagate = old_propagate
-        all_warnings = " ".join([r.message for r in caplog.records])
-        assert "400" in all_warnings or "UT1" in all_warnings, (
-            f"Warning message does not mention '400' or 'UT1'. Got:\n{all_warnings}"
-        )
+        with patch("astra.data_pipeline.get_ut1_utc_correction",
+                   side_effect=AssertionError("SGP4 must not call UT1")):
+            from astra.orbit import propagate_orbit
+            state = propagate_orbit(tle, 2459215.5, 0.0)
+        assert state.error_code in (0, 1, 2, 3, 4, 5, 6)
 # ---------------------------------------------------------------------------
 # FM-6: export_ocm_xml is implemented and round-trips
 # ---------------------------------------------------------------------------
@@ -387,6 +369,72 @@ class TestFinding8_RunConjunctionSweep:
         # Both satellites should have been processed (not dropped by NaN filter)
         # The list may be empty if they don't pass within threshold — that's fine
         assert events is not None
+    def test_run_conjunction_sweep_filters_nan_and_forwards_contract(self, monkeypatch):
+        """The wrapper must orchestrate grid, propagation, NaN filtering, and screening args."""
+        from types import SimpleNamespace
+        import astra.conjunction as conjunction
+
+        t0 = 2460000.5
+        t1 = t0 + (10.0 / 1440.0)
+        catalog = [
+            SimpleNamespace(norad_id="A", epoch_jd=t0),
+            SimpleNamespace(norad_id="B", epoch_jd=t0),
+            SimpleNamespace(norad_id="DECAYED", epoch_jd=t0),
+        ]
+        cov_map = {"A": np.eye(3), "B": np.eye(3)}
+        calls = {}
+
+        def fake_make_debris_object(sat):
+            return SimpleNamespace(source=sat)
+
+        def fake_propagate_many(satellites, times_jd):
+            calls["propagated_ids"] = [sat.norad_id for sat in satellites]
+            calls["times_jd"] = times_jd.copy()
+            n_times = len(times_jd)
+            trajectories = {
+                "A": np.zeros((n_times, 3), dtype=float),
+                "B": np.ones((n_times, 3), dtype=float),
+                "DECAYED": np.full((n_times, 3), np.nan),
+            }
+            velocities = {
+                "A": np.full((n_times, 3), [0.0, 7.5, 0.0], dtype=float),
+                "B": np.full((n_times, 3), [0.0, 7.4, 0.0], dtype=float),
+                "DECAYED": np.full((n_times, 3), np.nan),
+            }
+            return trajectories, velocities
+
+        def fake_find_conjunctions(**kwargs):
+            calls["find_kwargs"] = kwargs
+            return ["sentinel-event"]
+
+        monkeypatch.setattr("astra.debris.make_debris_object", fake_make_debris_object)
+        monkeypatch.setattr("astra.orbit.propagate_many", fake_propagate_many)
+        monkeypatch.setattr(conjunction, "find_conjunctions", fake_find_conjunctions)
+
+        events = conjunction.run_conjunction_sweep(
+            catalog,
+            t_start_jd=t0,
+            t_end_jd=t1,
+            step_minutes=5.0,
+            threshold_km=2.5,
+            coarse_threshold_km=12.5,
+            cov_map=cov_map,
+            max_workers=3,
+        )
+
+        assert events == ["sentinel-event"]
+        assert calls["propagated_ids"] == ["A", "B", "DECAYED"]
+        assert calls["times_jd"].tolist() == pytest.approx([t0, t0 + 5.0 / 1440.0, t1])
+
+        find_kwargs = calls["find_kwargs"]
+        assert set(find_kwargs["trajectories"]) == {"A", "B"}
+        assert set(find_kwargs["vel_map"]) == {"A", "B"}
+        assert set(find_kwargs["elements_map"]) == {"A", "B"}
+        assert find_kwargs["times_jd"].tolist() == pytest.approx(calls["times_jd"].tolist())
+        assert find_kwargs["threshold_km"] == 2.5
+        assert find_kwargs["coarse_threshold_km"] == 12.5
+        assert find_kwargs["cov_map"] is cov_map
+        assert find_kwargs["max_workers"] == 3
 # ---------------------------------------------------------------------------
 # FM-4: export_cdm_kvn + parse_cdm_kvn symmetry
 # ---------------------------------------------------------------------------

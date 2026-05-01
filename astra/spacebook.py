@@ -832,13 +832,21 @@ def refresh_satcat_cache() -> int:
     """Force a full re-download of the Spacebook satellite catalog.
 
     Use this when ``get_norad_guid()`` raises ``SpacebookLookupError`` for a
-    recently launched satellite that should be in the catalog.
+    recently launched satellite that should be in the catalog. This function
+    is also exported as ``astra.refresh_satcat_cache()`` for user-facing cache
+    recovery workflows.
 
     Returns:
         Number of objects in the refreshed catalog.
 
     Raises:
         SpacebookError: If the download fails.
+
+    Example:
+        >>> import astra
+        >>> count = astra.refresh_satcat_cache()
+        >>> count > 0
+        True
     """
     global _guid_loaded
     with _GUID_LOCK:

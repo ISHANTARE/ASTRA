@@ -22,6 +22,19 @@ from astra.models import (
 )
 from astra.log import get_logger
 logger = get_logger(__name__)
+
+
+def _split_jd(jd: float | np.ndarray) -> tuple[float | np.ndarray, float | np.ndarray]:
+    """Split Julian Date into whole and fractional parts for SGP4 precision.
+
+    SGP4 propagation must use the requested catalog/UTC epoch. UT1 belongs in
+    Earth-rotation transforms such as TEME -> ECEF, not in the propagation
+    epoch supplied to the SGP4 model.
+    """
+    jd_whole = np.floor(jd)
+    return jd_whole, jd - jd_whole
+
+
 # ---------------------------------------------------------------------------
 # Internal Satrec Factory
 # ---------------------------------------------------------------------------
@@ -31,7 +44,8 @@ def _build_satrec(satellite: SatelliteState) -> Satrec:
     All propagation functions route through here so the math core
     never needs to inspect the format of incoming data directly.
     Known Limitations:
-        (None. UT1-UTC is now applied automatically.)
+        SGP4 returns raw TEME states. Apply EOP/UT1 only when converting into
+        Earth-fixed frames.
     Args:
         satellite: Either a ``SatelliteTLE`` or a ``SatelliteOMM`` instance.
     Returns:
@@ -86,29 +100,8 @@ def propagate_orbit(
     # Verify epoch staleness (SE-J)
     from astra.tle import check_tle_staleness
     check_tle_staleness(satellite, t_jd)
-    try:
-        from astra.data_pipeline import get_ut1_utc_correction
-        ut1_utc_s = get_ut1_utc_correction(t_jd)
-        t_jd_ut1 = t_jd + ut1_utc_s / 86400.0
-    except Exception as exc:
-        from astra import config
-        if config.ASTRA_STRICT_MODE:
-            from astra.errors import EphemerisError
-            raise EphemerisError(f"Failed to fetch UT1-UTC correction: {exc}") from exc
-        logger.warning(
-            "UT1-UTC correction unavailable for NORAD %s at JD %.8f — "
-            "falling back to UTC propagation. This silently ignores the UT1-UTC "
-            "offset (current value ≈ ±1 s), introducing up to ~400 m of "
-            "along-track position error at LEO velocities. "
-            "Populate the EOP cache via astra.data_pipeline.load_eop_data() "
-            "or set ASTRA_STRICT_MODE=True to detect this in production. (%r)",
-            satellite.norad_id,
-            t_jd,
-            exc,
-        )
-        t_jd_ut1 = t_jd  # fallback: UTC used as UT1 (sub-second accuracy lost)
-    fraction = 0.0
-    error_code, position, velocity = satrec.sgp4(t_jd_ut1, fraction)
+    jd_whole, fraction = _split_jd(t_jd)
+    error_code, position, velocity = satrec.sgp4(float(jd_whole), float(fraction))
     return OrbitalState(
         norad_id=satellite.norad_id,
         t_jd=t_jd,
@@ -147,31 +140,9 @@ def propagate_many(
     from astra.tle import check_tle_staleness
     for sat in satellites:
         check_tle_staleness(sat, times_jd)
-    # 1. Apply UT1-UTC correction (consistent with propagate_orbit)
-    try:
-        from astra.data_pipeline import get_ut1_utc_correction
-        ut1_utc_s = get_ut1_utc_correction(times_jd)
-        jd_array = times_jd + ut1_utc_s / 86400.0
-    except Exception as exc:
-        from astra import config
-        if config.ASTRA_STRICT_MODE:
-            from astra.errors import EphemerisError
-            raise EphemerisError(
-                f"Failed to fetch UT1-UTC correction for batch: {exc}"
-            ) from exc
-        logger.warning(
-            "UT1-UTC correction unavailable for batch propagation (%d objects, %d epochs) — "
-            "falling back to UTC propagation. This silently ignores the UT1-UTC offset "
-            "(current value ≈ ±1 s), introducing up to ~400 m of along-track position "
-            "error at LEO velocities across all propagated states. "
-            "Populate the EOP cache via astra.data_pipeline.load_eop_data() "
-            "or set ASTRA_STRICT_MODE=True to detect this in production. (%r)",
-            N,
-            T,
-            exc,
-        )
-        jd_array = times_jd  # fallback: UTC used as UT1
-    jd_fraction_array = np.zeros_like(jd_array)
+    # SGP4 uses the requested catalog/UTC epoch. UT1/EOP corrections belong in
+    # Earth-fixed frame conversion, not in the TEME propagation epoch.
+    jd_array, jd_fraction_array = _split_jd(times_jd)
     # 2. Vectorized SGP4 call
     e, r, v = satrec_array.sgp4(jd_array, jd_fraction_array)
     r[e > 0] = np.nan
@@ -199,33 +170,11 @@ def propagate_many_generator(
     from astra.tle import check_tle_staleness
     for sat in satellites:
         check_tle_staleness(sat, times_jd)
-    # 1. Apply UT1-UTC correction consistently across all chunks (Fix 2.2)
-    try:
-        from astra.data_pipeline import get_ut1_utc_correction
-        ut1_utc_s_full = get_ut1_utc_correction(times_jd)
-        times_jd_ut1_full = times_jd + ut1_utc_s_full / 86400.0
-    except Exception as exc:
-        from astra import config
-        if config.ASTRA_STRICT_MODE:
-            from astra.errors import EphemerisError
-            raise EphemerisError(
-                f"Failed to fetch UT1-UTC correction for generator: {exc}"
-            ) from exc
-        logger.warning(
-            "UT1-UTC correction unavailable for chunk propagation (%d objects, %d epochs); "
-            "falling back to UTC propagation in relaxed mode. (%r)",
-            N,
-            T,
-            exc,
-        )
-        times_jd_ut1_full = times_jd
-
     for start_idx in range(0, T, chunk_size):
         end_idx = min(start_idx + chunk_size, T)
         jd_chunk = times_jd[start_idx:end_idx]
-        jd_chunk_ut1 = times_jd_ut1_full[start_idx:end_idx]
-        frac_chunk = np.zeros_like(jd_chunk)
-        e, r, v = satrec_array.sgp4(jd_chunk_ut1, frac_chunk)
+        jd_whole_chunk, frac_chunk = _split_jd(jd_chunk)
+        e, r, v = satrec_array.sgp4(jd_whole_chunk, frac_chunk)
         r[e > 0] = np.nan
         v[e > 0] = np.nan
         chunk_map = {sat.norad_id: r[i] for i, sat in enumerate(satellites)}

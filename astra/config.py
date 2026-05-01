@@ -36,6 +36,7 @@ import threading
 # ---------------------------------------------------------------------------
 _STRICT_MODE_LOCK: threading.RLock = threading.RLock()
 _SPACEBOOK_LOCK: threading.RLock = threading.RLock()
+_MAX_WORKERS_LOCK: threading.RLock = threading.RLock()
 
 # ---------------------------------------------------------------------------
 # ASTRA_STRICT_MODE
@@ -93,3 +94,52 @@ def set_spacebook_enabled(enabled: bool) -> None:
     global SPACEBOOK_ENABLED
     with _SPACEBOOK_LOCK:
         SPACEBOOK_ENABLED = enabled
+
+
+# ---------------------------------------------------------------------------
+# ASTRA_MAX_WORKERS
+# Centralized worker-pool sizing for concurrency-heavy algorithms.
+# ---------------------------------------------------------------------------
+def _read_max_workers(default: int | None = None) -> int | None:
+    raw = os.environ.get("ASTRA_MAX_WORKERS", "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError(f"ASTRA_MAX_WORKERS must be an integer, got {raw!r}.") from exc
+    if value < 1:
+        raise ValueError(f"ASTRA_MAX_WORKERS must be >= 1, got {value}.")
+    return value
+
+
+try:
+    ASTRA_MAX_WORKERS: int | None = _read_max_workers()
+except ValueError:
+    ASTRA_MAX_WORKERS = None
+
+
+def get_max_workers(default: int) -> int:
+    """Return configured worker count or a caller-provided default.
+
+    Args:
+        default: Fallback worker count when ``ASTRA_MAX_WORKERS`` is unset.
+
+    Returns:
+        Positive worker count suitable for thread-pool construction.
+    """
+    with _MAX_WORKERS_LOCK:
+        return ASTRA_MAX_WORKERS if ASTRA_MAX_WORKERS is not None else default
+
+
+def set_max_workers(value: int | None) -> None:
+    """Thread-safe setter for :data:`ASTRA_MAX_WORKERS`.
+
+    Args:
+        value: Positive worker count, or ``None`` to restore caller defaults.
+    """
+    global ASTRA_MAX_WORKERS
+    if value is not None and value < 1:
+        raise ValueError(f"ASTRA_MAX_WORKERS must be >= 1, got {value}.")
+    with _MAX_WORKERS_LOCK:
+        ASTRA_MAX_WORKERS = value

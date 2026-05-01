@@ -33,7 +33,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 import numpy as np
 import astra
-from astra.errors import SpacebookError, SpacebookLookupError
+from astra.errors import AstraError, SpacebookError, SpacebookLookupError
 
 
 # ---------------------------------------------------------------------------
@@ -64,9 +64,10 @@ def _info(msg: str) -> None:
 
 def step1_probe() -> bool:
     _section("1 · Spacebook connectivity probe")
+    from astra import config as astra_config
     from astra import spacebook as sb
 
-    if not sb.SPACEBOOK_ENABLED:
+    if not astra_config.SPACEBOOK_ENABLED:
         _warn("Spacebook is disabled (ASTRA_SPACEBOOK_ENABLED=false).")
         _info("Set ASTRA_SPACEBOOK_ENABLED=true (or unset) to enable.")
         return False
@@ -174,12 +175,18 @@ def step4_eop() -> None:
 # Step 5 — Synthetic Covariance for ISS (NORAD 25544)
 # ---------------------------------------------------------------------------
 
-def step5_synthetic_covariance(norad_id: str = "25544") -> np.ndarray | None:
+def step5_synthetic_covariance(norad_id: int = 25544) -> np.ndarray | None:
     _section(f"5 · Synthetic Covariance for NORAD {norad_id} (ISS)")
     _info(f"Resolving COMSPOC GUID for NORAD {norad_id} …")
     try:
         stk_text = astra.fetch_synthetic_covariance_stk(norad_id)
-        cov = astra.parse_stk_ephemeris(stk_text)
+        try:
+            states = astra.parse_stk_ephemeris(stk_text)
+            _info(f"Parsed {len(states)} STK state vectors from EphemerisTimePosVel.")
+        except AstraError as exc:
+            _warn(f"State-vector parse skipped: {exc}")
+
+        cov = astra.load_spacebook_covariance(norad_id)
 
         if cov is None:
             _warn("No CovarianceTimePosVel block found in STK ephemeris.")
@@ -206,7 +213,7 @@ def step5_synthetic_covariance(norad_id: str = "25544") -> np.ndarray | None:
 
     except SpacebookLookupError as exc:
         _warn(f"NORAD {norad_id} not found in Spacebook SATCAT: {exc}")
-        _info("Try astra.fetch_xp_tle_catalog() first to update the SATCAT cache.")
+        _info("Try astra.refresh_satcat_cache() to force a fresh SATCAT download.")
     except SpacebookError as exc:
         _warn(f"Synthetic covariance unavailable: {exc}")
     return None
@@ -281,7 +288,7 @@ def main() -> None:
     catalog = step2_xp_tle()
     step3_space_weather()
     step4_eop()
-    step5_synthetic_covariance("25544")   # ISS
+    step5_synthetic_covariance(25544)   # ISS
     step6_xp_tle_conjunction(catalog)
 
     print()

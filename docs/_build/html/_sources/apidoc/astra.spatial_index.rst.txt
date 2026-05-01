@@ -1,7 +1,0 @@
-astra.spatial\_index module
-===========================
-
-.. automodule:: astra.spatial_index
-   :members:
-   :show-inheritance:
-   :undoc-members:

@@ -85,12 +85,17 @@ valid for production use):
 
 .. code-block:: python
 
-    import numpy as np
     from datetime import datetime, timezone
 
     from astra import Observer, passes_over_location, convert_time
 
-    observer = Observer(lat_deg=34.0522, lon_deg=-118.2437, alt_km=0.071)
+    observer = Observer(
+        name="Los Angeles",
+        latitude_deg=34.0522,
+        longitude_deg=-118.2437,
+        elevation_m=71.0,
+        min_elevation_deg=10.0,
+    )
 
     now = datetime.now(timezone.utc)
     t0_jd = float(convert_time(now, "jd"))
@@ -104,7 +109,8 @@ valid for production use):
     )
 
     for p in passes:
-        print(f"Max elevation (deg): {np.degrees(p.max_elevation_rad):.1f}")
+        print(f"Max elevation (deg): {p.max_elevation_deg:.1f}")
+        print(f"Duration (s): {p.duration_seconds:.0f}")
 
 6. High-fidelity Cowell propagation
 --------------------------------------
@@ -144,8 +150,10 @@ Next steps
 ----------
 
 * OMM workflows: ``fetch_celestrak_active_omm``, ``parse_omm_json``,
-  ``load_omm_file``, ``xptle_to_satellite_omm``
+  ``load_omm_file``, ``xptle_to_satellite_omm`` for converting a
+  ``list[SatelliteTLE]`` XP-TLE catalog to ``list[SatelliteOMM]``
 * Spacebook: ``fetch_xp_tle_catalog``, ``fetch_synthetic_covariance_stk``,
+  ``load_spacebook_covariance``, ``refresh_satcat_cache``,
   ``get_space_weather_sb``, ``get_eop_sb``
 * High-fidelity propagation: ``propagate_cowell`` with
   :class:`astra.propagator.DragConfig` and :class:`astra.models.FiniteBurn`

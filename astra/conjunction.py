@@ -8,7 +8,6 @@ advanced 3-phase optimization algorithm including:
 """
 from __future__ import annotations
 import concurrent.futures
-import os
 from typing import Optional, Any
 import numpy as np
 import scipy.interpolate
@@ -355,51 +354,43 @@ def find_conjunctions(
         A, B = pair
         traj_A = trajectories[A]
         traj_B = trajectories[B]
-        # 1. Coarse search to find local minimum window
+        # 1. Coarse search to find a spline bracket. Do not reject solely on
+        # sampled-point distance; fast crossings can occur between samples.
         coarse_dists = distance_3d(traj_A, traj_B)
         t_idx = int(np.argmin(coarse_dists))
-        coarse_min = coarse_dists[t_idx]
-        if coarse_min > coarse_threshold_km:
-            return None  # type: ignore[no-any-return]
-        # 2. Build Cubic Splines for exact curvilinear motion mapping
-        spline_A = scipy.interpolate.CubicSpline(times_jd, traj_A, bc_type="natural")
-        spline_B = scipy.interpolate.CubicSpline(times_jd, traj_B, bc_type="natural")
+        # 2. Build Cubic Splines for exact curvilinear motion mapping. Use a
+        # local seconds scale rather than absolute Julian Dates to avoid
+        # conditioning loss over short windows near JD ~2.46e6.
+        times_s = (times_jd - times_jd[0]) * 86400.0
+        spline_A = scipy.interpolate.CubicSpline(times_s, traj_A, bc_type="natural")
+        spline_B = scipy.interpolate.CubicSpline(times_s, traj_B, bc_type="natural")
         # Velocity splines from SGP4 vel_map when available (more accurate than
         # differentiating position splines), especially near perigee on eccentric orbits.
         vel_spline_A = (
-            scipy.interpolate.CubicSpline(times_jd, vel_map[A], bc_type="natural")
+            scipy.interpolate.CubicSpline(times_s, vel_map[A], bc_type="natural")
             if (vel_map and A in vel_map)
             else None
         )
         vel_spline_B = (
-            scipy.interpolate.CubicSpline(times_jd, vel_map[B], bc_type="natural")
+            scipy.interpolate.CubicSpline(times_s, vel_map[B], bc_type="natural")
             if (vel_map and B in vel_map)
             else None
         )
-        # 3. Dense 1-second resolution evaluation across the local min bracket
+        # 3. Refine TCA over the full local sample bracket before thresholding.
+        # A dense 1-second pre-scan can miss sub-second brackets, so use Brent
+        # directly on the spline distance and reserve the dense scan as fallback.
         is_edge = t_idx == 0 or t_idx == T_len - 1
         bracket_width = 2 if is_edge else 1
         idx_low = max(0, t_idx - bracket_width)
         idx_high = min(T_len - 1, t_idx + bracket_width)
-        seconds_in_bracket = int((times_jd[idx_high] - times_jd[idx_low]) * 86400.0)
-        if seconds_in_bracket < 2:
-            seconds_in_bracket = 2
-        t_dense = np.linspace(times_jd[idx_low], times_jd[idx_high], seconds_in_bracket)
-        rA_dense = spline_A(t_dense)
-        rB_dense = spline_B(t_dense)
-        dense_dists = distance_3d(rA_dense, rB_dense)
-        tca_dense_idx = int(np.argmin(dense_dists))
-        min_dist = float(dense_dists[tca_dense_idx])
-        if min_dist > threshold_km:
-            return None  # type: ignore[no-any-return]
-        tca_jd = float(t_dense[tca_dense_idx])
-        # Brent refinement of TCA within 1-s bracket.
-        # Improves precision from ~0.5 s to sub-millisecond.
+        _lo_t = float(times_s[idx_low])
+        _hi_t = float(times_s[idx_high])
+        min_dist = float(coarse_dists[t_idx])
+        tca_s = float(times_s[t_idx])
+        tca_jd = float(times_jd[0] + tca_s / 86400.0)
         try:
             from scipy.optimize import minimize_scalar
             _spline_dist = lambda t: float(np.linalg.norm(spline_A(t) - spline_B(t)))  # noqa: E731
-            _lo_t = float(t_dense[max(0, tca_dense_idx - 1)])
-            _hi_t = float(t_dense[min(len(t_dense) - 1, tca_dense_idx + 1)])
             _brent = minimize_scalar(
                 _spline_dist,
                 bounds=(_lo_t, _hi_t),
@@ -407,27 +398,40 @@ def find_conjunctions(
                 options={"xatol": 1.16e-8},  # ~1 ms in JD units
             )
             if _brent.success and _lo_t <= _brent.x <= _hi_t:
-                tca_jd = float(_brent.x)
+                tca_s = float(_brent.x)
+                tca_jd = float(times_jd[0] + tca_s / 86400.0)
                 min_dist = float(_brent.fun)
-                pos_A = spline_A(tca_jd)
-                pos_B = spline_B(tca_jd)
+                pos_A = spline_A(tca_s)
+                pos_B = spline_B(tca_s)
         except Exception as exc:
-            logger.debug(f"Brent TCA refinement failed ({exc}). Keeping coarse scan result.")
-            pass  # keep coarse scan result
+            logger.debug(f"Brent TCA refinement failed ({exc}). Falling back to dense scan.")
+            seconds_in_bracket = int((_hi_t - _lo_t) * 86400.0)
+            if seconds_in_bracket < 100:
+                seconds_in_bracket = 100
+            t_dense = np.linspace(_lo_t, _hi_t, seconds_in_bracket)
+            rA_dense = spline_A(t_dense)
+            rB_dense = spline_B(t_dense)
+            dense_dists = distance_3d(rA_dense, rB_dense)
+            tca_dense_idx = int(np.argmin(dense_dists))
+            min_dist = float(dense_dists[tca_dense_idx])
+            tca_s = float(t_dense[tca_dense_idx])
+            tca_jd = float(times_jd[0] + tca_s / 86400.0)
+        if min_dist > threshold_km:
+            return None  # type: ignore[no-any-return]
         # Unconditionally compute pos_A and pos_B from the final tca_jd.
         # was retained, but pos_A and pos_B were never assigned, causing UnboundLocalError
         # or inconsistent vector states further down.
-        pos_A = spline_A(tca_jd)
-        pos_B = spline_B(tca_jd)
+        pos_A = spline_A(tca_s)
+        pos_B = spline_B(tca_s)
         # Prefer SGP4 velocity spline at TCA; else spline derivative (km/JD → km/s).
         if vel_spline_A is not None:
-            vel_A = vel_spline_A(tca_jd)
+            vel_A = vel_spline_A(tca_s)
         else:
-            vel_A = spline_A(tca_jd, nu=1) / 86400.0  # km/JD → km/s
+            vel_A = spline_A(tca_s, nu=1)
         if vel_spline_B is not None:
-            vel_B = vel_spline_B(tca_jd)
+            vel_B = vel_spline_B(tca_s)
         else:
-            vel_B = spline_B(tca_jd, nu=1) / 86400.0  # km/JD → km/s
+            vel_B = spline_B(tca_s, nu=1)
         rel_vel_vec = vel_A - vel_B
         rel_vel = float(np.linalg.norm(rel_vel_vec))
         obj_A = elements_map[A]
@@ -538,28 +542,15 @@ def find_conjunctions(
             covariance_source=covariance_src,
         )
     # Throttle max_workers to prevent thread storms on large catalogs.
-    # os.cpu_count() can be 96+ on HPC nodes, creating >96 threads per call which
-    # degrades performance through context-switch overhead on I/O-bound Pc work.
+    # Avoid defaulting to host CPU count on HPC nodes, where very high core
+    # counts can degrade performance through thread scheduling overhead.
     # Resolution priority (highest → lowest):
     #   1. Explicit ``max_workers`` argument passed by the caller.
     #   2. ``ASTRA_MAX_WORKERS`` environment variable (for HPC / container deployments
     #      where the operator needs fleet-wide scaling control without code changes).
-    #   3. ``min(cpu_count, 16)`` — safe conservative default.
-    _default_workers = min((os.cpu_count() or 4), 16)
-    _env_workers_str = os.environ.get("ASTRA_MAX_WORKERS", "").strip()
-    if _env_workers_str:
-        try:
-            _env_workers = int(_env_workers_str)
-            if _env_workers < 1:
-                raise ValueError("ASTRA_MAX_WORKERS must be >= 1")
-            _default_workers = _env_workers
-        except ValueError as exc:
-            logger.warning(
-                "Invalid ASTRA_MAX_WORKERS=%r — using default %d. (%s)",
-                _env_workers_str,
-                _default_workers,
-                exc,
-            )
+    #   3. ``16`` safe conservative default.
+    from astra.config import get_max_workers
+    _default_workers = get_max_workers(16)
     _workers = max_workers if max_workers is not None else _default_workers
     _max_inflight = max(8, _workers * 4)
     # Initialise counters BEFORE the thread loop so they are always bound.

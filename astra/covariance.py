@@ -336,15 +336,28 @@ def _hcw_min_distance(
         n_steps: Number of time samples in the window.
     Returns:
         Minimum relative distance in km.
+
+    Raises:
+        ValueError: If ``n_rad_s`` is not finite and strictly positive.
     """
     import numpy as _np
+    try:
+        n_val = float(n_rad_s)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "HCW propagation requires a positive finite mean motion `n_rad_s`."
+        ) from exc
+    if not math.isfinite(n_val) or n_val <= 0.0:
+        raise ValueError(
+            "HCW propagation requires a positive finite mean motion `n_rad_s`."
+        )
     times = _np.linspace(-t_window_s, t_window_s, n_steps)
     x0, y0, z0 = r0_rtm[0], r0_rtm[1], r0_rtm[2]
     dx0, dy0, dz0 = v0_rtm[0], v0_rtm[1], v0_rtm[2]
-    nt_arr = n_rad_s * times
+    nt_arr = n_val * times
     c_arr = _np.cos(nt_arr)
     s_arr = _np.sin(nt_arr)
-    inv_n = 1.0 / n_rad_s
+    inv_n = 1.0 / n_val
     x_arr = (
         (4.0 - 3.0 * c_arr) * x0
         + s_arr * dx0 * inv_n
@@ -392,8 +405,9 @@ def compute_collision_probability_mc(
         n_samples: Number of Monte Carlo samples (default 100,000).
         seed: Optional RNG seed for reproducibility.
         mean_motion_rad_s: Mean orbital motion (rad/s) for HCW propagation.
-            If None, defaults to LEO 90-min orbit (2*pi/5400 ~ 1.164e-3 rad/s).
-            Pass the actual mean motion of the primary object for accuracy.
+            Required for low-relative-speed HCW encounters in strict mode. In
+            relaxed mode, a warning is emitted and a 90-minute LEO default is
+            used only as a screening fallback.
     Returns:
         Probability of collision (float) bounded [0.0, 1.0].
     """
@@ -446,11 +460,24 @@ def compute_collision_probability_mc(
             rel_speed,
             _HCW_THRESHOLD_KM_S,
         )
-        n_rad = (
-            mean_motion_rad_s
-            if mean_motion_rad_s is not None
-            else (2.0 * math.pi / 5400.0)
-        )
+        if mean_motion_rad_s is None:
+            from astra import config
+            msg = (
+                "HCW Monte Carlo collision probability requires mean_motion_rad_s "
+                "for co-orbital encounters. Falling back to a 90-minute LEO mean "
+                "motion in relaxed mode; pass the primary object's actual mean motion "
+                "for mission-quality Pc."
+            )
+            if config.ASTRA_STRICT_MODE:
+                raise ValueError(f"[ASTRA STRICT] {msg}")
+            _hcw_log.getLogger(__name__).warning(msg)
+            n_rad = 2.0 * math.pi / 5400.0
+        else:
+            n_rad = float(mean_motion_rad_s)
+        if not math.isfinite(n_rad) or n_rad <= 0.0:
+            raise ValueError(
+                f"mean_motion_rad_s must be positive and finite for HCW propagation, got {mean_motion_rad_s!r}."
+            )
         # Build approximate RTN basis from miss vector and velocity directions.
         r_mag = float(np.linalg.norm(miss_vector_km))
         v_hat = (
@@ -683,7 +710,10 @@ def propagate_covariance_stm(
     drag_config: Optional[Any] = None,
 ) -> np.ndarray:
     """Propagate a full 6x6 covariance matrix using the State Transition Matrix.
-    Uses linearized J2/J3/J4 + exponential drag dynamics to compute the 6x6 STM
+    Scope: standalone Earth-gravity-plus-drag STM. For third-body gravity, SRP,
+    maneuvers, or J5/J6 parity with the propagated trajectory, use
+    ``propagate_cowell(include_stm=True)``.
+    Uses linearized J2/J3/J4 + drag dynamics to compute the 6x6 STM
     via numerical integration, mapping the full 6x6 state uncertainty:
         C(t) = Φ(t, t₀) · C₀ · Φ(t, t₀)ᵀ
     The state-transition matrix Φ is computed by integrating the variational
@@ -692,6 +722,13 @@ def propagate_covariance_stm(
     - Zonal harmonics (J2, J3, J4)
     - **Atmospheric Drag** partials (∂a/∂v) for LEO satellites.
     """
+    if drag_config is not None and getattr(drag_config, "include_srp", False):
+        import logging as _cov_log
+        _cov_log.getLogger(__name__).warning(
+            "propagate_covariance_stm uses a narrowed Earth-gravity-plus-drag STM "
+            "and ignores DragConfig.include_srp. Use propagate_cowell(include_stm=True) "
+            "for SRP/third-body force-model parity."
+        )
     y0 = np.zeros(42)
     y0[:3] = r0_km
     y0[3:6] = v0_km_s

@@ -58,6 +58,9 @@ Data ingestion
    * - ``fetch_satcat_details(norad_id)``
      - ``dict``
      - Per-object Spacebook metadata
+   * - ``refresh_satcat_cache()``
+     - ``int``
+     - Force-refresh Spacebook NORAD-to-GUID cache
    * - ``get_space_weather_sb(t_jd)``
      - ``(f107, f107adj, ap)``
      - COMSPOC live space weather
@@ -96,12 +99,12 @@ Parsing
    * - ``validate_omm(dict)``
      - ``bool``
      - Required-field check
-   * - ``xptle_to_satellite_omm(record)``
-     - ``SatelliteOMM``
-     - Spacebook XP-TLE → OMM
+   * - ``xptle_to_satellite_omm(tle_objects)``
+     - ``list[SatelliteOMM]``
+     - Convert ``list[SatelliteTLE]`` XP-TLEs to OMM-like records
    * - ``parse_stk_ephemeris(text)``
-     - ``ndarray(6,6) | None``
-     - STK covariance block
+     - ``list[NumericalState]``
+     - STK ``EphemerisTimePosVel`` state-vector block
    * - ``parse_cdm_xml(text)``
      - ``ConjunctionDataMessage``
      - CCSDS CDM XML (defusedxml)
@@ -212,7 +215,7 @@ Conjunction analysis
      - RTN → ECI rotation
    * - ``load_spacebook_covariance(norad_id)``
      - ``ndarray(6,6) | None``
-     - Fetch + parse Spacebook synthetic cov
+     - Fetch + parse Spacebook ``CovarianceTimePosVel`` matrix
 
 Maneuvers
 ~~~~~~~~~
@@ -367,9 +370,11 @@ Key data types
    * - ``ConjunctionDataMessage``
      - Parsed CCSDS CDM XML
    * - ``Observer``
-     - Ground station defined by lat, lon, alt
+     - Ground station: ``name``, ``latitude_deg``, ``longitude_deg``,
+       ``elevation_m``, optional ``min_elevation_deg``
    * - ``PassEvent``
-     - Ground pass result: AOS, max-elevation, LOS, duration
+     - Ground pass: ``aos_jd``, ``tca_jd``, ``los_jd``,
+       ``max_elevation_deg``, AOS/LOS azimuths, duration
    * - ``OrbitalState``
      - SGP4 output: position, velocity, altitude, frame
    * - ``TrajectoryMap``

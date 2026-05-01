@@ -85,6 +85,61 @@ def test_find_conjunctions_detects_close_pass(conjunction_elements):
     assert abs(events[0].miss_distance_km - 2.5) < 1e-3
 
 
+def test_find_conjunctions_deterministic_event_contract(conjunction_elements):
+    """The threaded event pipeline must produce stable, fully populated events."""
+    traj_a, traj_b = crossing_trajectories()
+    t0 = 2_460_000.5
+    times = np.linspace(t0, t0 + (120.0 / 86400.0), len(traj_a))
+    trajs = {
+        "25544": traj_a,
+        "99999": traj_b,
+    }
+    vel_map = {
+        "25544": np.repeat([[1.0, 0.0, 0.0]], len(traj_a), axis=0),
+        "99999": np.repeat([[-1.0, 0.0, 0.0]], len(traj_b), axis=0),
+    }
+    cov_map = {
+        "25544": np.eye(3) * 1e-4,
+        "99999": np.eye(3) * 1e-4,
+    }
+
+    summaries = []
+    for workers in (1, 2, 4):
+        events = find_conjunctions(
+            trajs,
+            times,
+            conjunction_elements,
+            threshold_km=5.0,
+            coarse_threshold_km=25.0,
+            cov_map=cov_map,
+            vel_map=vel_map,
+            max_workers=workers,
+        )
+        assert len(events) == 1
+        event = events[0]
+        assert (event.object_a_id, event.object_b_id) == ("25544", "99999")
+        assert event.miss_distance_km == pytest.approx(2.5, abs=1e-3)
+        assert event.tca_jd == pytest.approx(times[len(times) // 2], abs=1e-4)
+        assert event.relative_velocity_km_s == pytest.approx(2.0, abs=1e-12)
+        assert event.collision_probability is not None
+        assert event.covariance_source == "CDM"
+        assert np.linalg.norm(event.position_a_km - event.position_b_km) == pytest.approx(
+            event.miss_distance_km, abs=1e-9
+        )
+        summaries.append(
+            (
+                event.object_a_id,
+                event.object_b_id,
+                round(event.tca_jd, 10),
+                round(event.miss_distance_km, 9),
+                round(event.relative_velocity_km_s, 12),
+                event.covariance_source,
+            )
+        )
+
+    assert summaries[0] == summaries[1] == summaries[2]
+
+
 def test_find_conjunctions_pair_ordering(conjunction_elements):
     traj_a, traj_b = crossing_trajectories()
     times = np.linspace(0.0, 0.2, 288)

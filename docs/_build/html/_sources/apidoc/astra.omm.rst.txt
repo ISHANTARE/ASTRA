@@ -1,7 +1,0 @@
-astra.omm module
-================
-
-.. automodule:: astra.omm
-   :members:
-   :show-inheritance:
-   :undoc-members:

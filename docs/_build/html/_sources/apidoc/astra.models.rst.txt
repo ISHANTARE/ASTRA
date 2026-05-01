@@ -1,7 +1,0 @@
-astra.models module
-===================
-
-.. automodule:: astra.models
-   :members:
-   :show-inheritance:
-   :undoc-members:

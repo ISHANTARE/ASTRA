@@ -92,6 +92,7 @@ from astra.spacebook import (
     fetch_tle_catalog,
     fetch_synthetic_covariance_stk,
     fetch_satcat_details,
+    refresh_satcat_cache,
     get_space_weather_sb,
     get_eop_sb,
 )
@@ -152,7 +153,7 @@ from astra.omm import (
     parse_omm_json,  # Parse OMM JSON string → list[SatelliteOMM]
     parse_omm_record,  # Parse single OMM dict → SatelliteOMM
     validate_omm,  # Validate OMM dict sanity before parsing
-    xptle_to_satellite_omm,  # Convert XP-TLE format into high-fidelity OMM
+    xptle_to_satellite_omm,  # Convert list[SatelliteTLE] XP-TLEs into OMMs
 )
 
 # ---------------------------------------------------------------------------
@@ -296,6 +297,7 @@ __all__ = [
     "fetch_tle_catalog",  # → list[SatelliteTLE]
     "fetch_synthetic_covariance_stk",  # → str
     "fetch_satcat_details",  # → dict
+    "refresh_satcat_cache",  # → int
     "get_space_weather_sb",
     "get_eop_sb",
     # --- Orbit Propagation (✓ TLE | ✓ OMM) ---

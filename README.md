@@ -53,8 +53,11 @@ Spacebook provides synthetic covariance and standard/XP-TLEs along with highly p
 ```python
 import astra
 
-# Load XP-TLE catalog formatted transparently as SatelliteOMM with precision tags
+# Load XP-TLE catalog as SatelliteTLE objects with Spacebook provenance tags
 xp_catalog = astra.fetch_xp_tle_catalog()
+
+# Convert to SatelliteOMM-like records when an OMM workflow needs them
+xp_omms = astra.xptle_to_satellite_omm(xp_catalog)
 ```
 
 ### CelesTrak (no account)
@@ -276,11 +279,12 @@ Functions are available from the `astra` namespace.
 
 | Function | Returns |
 |----------|---------|
-| `fetch_xp_tle_catalog()` | Spacebook XP-TLE active subset |
-| `fetch_tle_catalog()` | Standard Spacebook TLE catalog |
-| `fetch_historical_tle(date)` | Historical TLEs |
-| `fetch_synthetic_covariance_stk(norad_id)` | STK 6×6 observational covariance (raw text) |
+| `fetch_xp_tle_catalog()` | `list[SatelliteTLE]` Spacebook XP-TLE active subset |
+| `fetch_tle_catalog()` | `list[SatelliteTLE]` Standard Spacebook TLE catalog |
+| `fetch_historical_tle(date)` | `list[SatelliteTLE]` Historical TLEs |
+| `fetch_synthetic_covariance_stk(norad_id)` | Raw STK ephemeris text with state and covariance blocks |
 | `fetch_satcat_details(norad_id)` | Per-object SATCAT metadata |
+| `refresh_satcat_cache()` | Force-refresh Spacebook NORAD-to-GUID cache |
 | `get_space_weather_sb(jd)` | COMSPOC live SW parameters |
 | `get_eop_sb(jd)` | COMSPOC live Earth Orientation Parameters |
 
@@ -290,7 +294,7 @@ Functions are available from the `astra` namespace.
 * `parse_omm_record(dict)` → `SatelliteOMM`
 * `load_omm_file(path)` → `list[SatelliteOMM]`
 * `validate_omm(dict)` → `bool`
-* `xptle_to_satellite_omm(record)` → `SatelliteOMM`  *(converts Spacebook XP-TLE dicts)*
+* `xptle_to_satellite_omm(tle_objects)` → `list[SatelliteOMM]`  *(converts Spacebook XP-TLE `SatelliteTLE` objects)*
 
 ### TLE
 
@@ -300,7 +304,8 @@ Functions are available from the `astra` namespace.
 
 ### STK Ephemeris (Spacebook Synthetic Covariance)
 
-* `parse_stk_ephemeris(text)` → `np.ndarray | None`  *(parses CovarianceTimePosVel block → 6×6 matrix)*
+* `parse_stk_ephemeris(text)` → `list[NumericalState]`  *(parses EphemerisTimePosVel state vectors)*
+* `load_spacebook_covariance(norad_id)` → `np.ndarray | None`  *(fetches and parses the CovarianceTimePosVel 6×6 matrix)*
 
 ### OCM (Orbit Comprehensive Message)
 
@@ -365,8 +370,8 @@ Functions are available from the `astra` namespace.
 | `FiniteBurn` | Finite burn definition (thrust, Isp, direction, timing) |
 | `ConjunctionEvent` | Screening result with TCA, miss distance, P_c, risk level |
 | `ConjunctionDataMessage` | Parsed CDM XML |
-| `Observer` | Ground station (lat, lon, alt) |
-| `PassEvent` | Ground pass (AOS, TCA, LOS, max elevation) |
+| `Observer` | Ground station (`name`, `latitude_deg`, `longitude_deg`, `elevation_m`, `min_elevation_deg`) |
+| `PassEvent` | Ground pass (`aos_jd`, `tca_jd`, `los_jd`, `max_elevation_deg`, AOS/LOS azimuths, duration) |
 
 ---
 

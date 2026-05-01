@@ -119,7 +119,7 @@ def test_covariance_nonpositive_det_raises_strict() -> None:
         config.ASTRA_STRICT_MODE = prev
 
 
-def test_orbit_ut1_fallback_logs_warning(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_orbit_sgp4_does_not_request_ut1(monkeypatch: pytest.MonkeyPatch) -> None:
     import astra.data_pipeline as data_pipeline
     import astra.orbit as orbit_module
 
@@ -135,13 +135,6 @@ def test_orbit_ut1_fallback_logs_warning(monkeypatch: pytest.MonkeyPatch) -> Non
         lambda _t: (_ for _ in ()).throw(RuntimeError("ut1 unavailable")),
     )
 
-    warning_calls: list[str] = []
-    monkeypatch.setattr(
-        orbit_module.logger,
-        "warning",
-        lambda msg, *args, **kwargs: warning_calls.append(str(msg)),
-    )
-
     prev = config.ASTRA_STRICT_MODE
     config.ASTRA_STRICT_MODE = False
     try:
@@ -150,8 +143,6 @@ def test_orbit_ut1_fallback_logs_warning(monkeypatch: pytest.MonkeyPatch) -> Non
         config.ASTRA_STRICT_MODE = prev
 
     assert state.error_code in (0, 1, 2, 3, 4, 5, 6)
-    assert warning_calls
-    assert any("falling back to UTC propagation" in msg for msg in warning_calls)
 
 
 def test_spatial_index_uses_symmetric_per_object_radius() -> None:

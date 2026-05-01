@@ -1,7 +1,0 @@
-astra.time module
-=================
-
-.. automodule:: astra.time
-   :members:
-   :show-inheritance:
-   :undoc-members:

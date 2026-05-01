@@ -7,9 +7,8 @@ from astra.spatial_index import SpatialIndex
 def test_spatial_batch_performance_p2_6():
     """Verify that rebuild() is faster than repeated insert()."""
     n_objects = 1000
-    positions = {
-        f"SAT_{i}": np.random.uniform(-7000, 7000, 3) for i in range(n_objects)
-    }
+    rng = np.random.default_rng(20260502)
+    positions = {f"SAT_{i}": rng.uniform(-7000, 7000, 3) for i in range(n_objects)}
 
     # 1. Repeated insert
     idx_insert = SpatialIndex()
@@ -42,26 +41,39 @@ def test_spatial_thread_safety_p2_6():
     n_iterations = 20
     idx = SpatialIndex()
     n_objects = 500
+    errors = []
+    completed = []
+    lock = threading.Lock()
 
-    def worker():
-        for _ in range(n_iterations):
-            # Generate random positions
-            positions = {
-                f"SAT_{i}": np.random.uniform(-7000, 7000, 3) for i in range(n_objects)
-            }
-            # Concurrent rebuild
-            idx.rebuild(positions)
-            # Concurrent query
-            idx.query_pairs(100.0)
+    def worker(seed):
+        rng = np.random.default_rng(seed)
+        try:
+            for iteration in range(n_iterations):
+                positions = {
+                    f"SAT_{i}": rng.uniform(-7000, 7000, 3) for i in range(n_objects)
+                }
+                idx.rebuild(positions)
+                pairs = idx.query_pairs(100.0)
+                assert idx.size == n_objects
+                assert all(a < b for a, b in pairs)
+                with lock:
+                    completed.append((seed, iteration))
+        except BaseException as exc:
+            with lock:
+                errors.append(exc)
 
-    threads = [threading.Thread(target=worker) for _ in range(n_threads)]
+    threads = [
+        threading.Thread(target=worker, args=(20260502 + i,))
+        for i in range(n_threads)
+    ]
 
     for t in threads:
         t.start()
     for t in threads:
         t.join()
 
-    print(f"Concurrent thread-safety test with {n_threads} threads PASSED.")
+    assert not errors, f"SpatialIndex worker thread errors: {errors!r}"
+    assert len(completed) == n_threads * n_iterations
 
 
 if __name__ == "__main__":

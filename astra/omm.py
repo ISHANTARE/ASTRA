@@ -290,10 +290,16 @@ def parse_omm_json(json_text: str) -> list[SatelliteOMM]:
     results: list[SatelliteOMM] = []
     errors = 0
     for i, record in enumerate(data):
+        if not isinstance(record, dict):
+            logger.warning(
+                f"Skipping OMM record #{i}: expected object, got {type(record).__name__}."
+            )
+            errors += 1
+            continue
         try:
             omm = parse_omm_record(record)
             results.append(omm)
-        except (AstraError, InvalidTLEError, KeyError) as exc:
+        except (AstraError, InvalidTLEError, KeyError, TypeError, AttributeError) as exc:
             logger.warning(
                 f"Skipping OMM record #{i} (NORAD: {record.get('NORAD_CAT_ID', '?')}): {exc}"
             )

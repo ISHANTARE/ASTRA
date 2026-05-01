@@ -1,7 +1,0 @@
-astra.config module
-===================
-
-.. automodule:: astra.config
-   :members:
-   :show-inheritance:
-   :undoc-members:

@@ -308,6 +308,11 @@ class DragConfig:
     """Atmospheric drag and optional solar radiation pressure inputs.
     This dataclass is frozen (immutable) to prevent accidental mutation
     after construction. Create a new instance to modify parameters.
+
+    ``area_m2`` is the aerodynamic drag area. ``srp_area_m2`` is the optical
+    cross-section for solar radiation pressure and defaults to ``area_m2`` when
+    omitted, allowing spacecraft with different drag and SRP projected areas to
+    be modeled without changing ``cr``.
     """
     cd: float = 2.2
     area_m2: float = 10.0
@@ -669,6 +674,7 @@ def _acceleration_v1_njit(
     use_srp: float,
     srp_cr: float,
     srp_use_shadow: bool,
+    srp_area_m2: float = -1.0,
 ) -> np.ndarray:
     """Compute total gravitational + drag acceleration in ECI (km/s²).
     Forces:
@@ -764,13 +770,14 @@ def _acceleration_v1_njit(
                 d_moon / (d_mag_moon**3) - moon_pos / (r_mag_moon**3)
             )
         # --- Solar radiation pressure (cannonball; scale flux from 1 AU)
-        if use_srp and drag_area_m2 > 0.0 and drag_mass_kg > 0.0:
+        srp_area = srp_area_m2 if srp_area_m2 >= 0.0 else drag_area_m2
+        if use_srp and srp_area > 0.0 and drag_mass_kg > 0.0:
             d_ss = r - sun_pos
             d_mag_ss = float(np.linalg.norm(d_ss))
             if d_mag_ss > 1.0:
                 # Use named constants (SE-09: eliminate magic numbers in Python path)
                 scale = (_AU_KM_CONST / d_mag_ss) ** 2
-                amag = _SRP_P0 * scale * srp_cr * (drag_area_m2 / drag_mass_kg) / 1000.0
+                amag = _SRP_P0 * scale * srp_cr * (srp_area / drag_mass_kg) / 1000.0
                 nu = 1.0
                 if srp_use_shadow:
                     # Upgrade from cylindrical to conical shadow (PHY-D)
@@ -809,8 +816,9 @@ def _acceleration(
     use_srp: bool,
     srp_cr: float,
     srp_use_shadow: bool,
+    srp_area_m2: float = -1.0,
 ) -> np.ndarray:
-    """Pure-Python acceleration mirror for _acceleration_njit (22-arg signature).
+    """Pure-Python acceleration mirror for _acceleration_njit.
     Signature expanded from 18 to 22 args to include
     f107_obs, f107_adj, ap_daily, hf_atmosphere, keeping parity with the Numba
     kernel.  Tests import both names and assert outputs agree within 1e-6 rtol.
@@ -929,7 +937,8 @@ def _acceleration(
         r_mag_moon = float(np.linalg.norm(moon_pos))
         if d_mag_moon > 1.0 and r_mag_moon > 1.0:
             a_total += MOON_MU * (d_moon / d_mag_moon**3 - moon_pos / r_mag_moon**3)
-        if use_srp and drag_area_m2 > 0.0 and drag_mass_kg > 0.0:
+        srp_area = srp_area_m2 if srp_area_m2 >= 0.0 else drag_area_m2
+        if use_srp and srp_area > 0.0 and drag_mass_kg > 0.0:
             d_ss = r - sun_pos
             d_mag_ss = float(np.linalg.norm(d_ss))
             if d_mag_ss > 1.0:
@@ -939,7 +948,7 @@ def _acceleration(
                 P0 = 4.56e-6
                 AU = 149597870.7
                 scale = (AU / d_mag_ss) ** 2
-                amag = P0 * scale * srp_cr * (drag_area_m2 / drag_mass_kg) / 1000.0
+                amag = P0 * scale * srp_cr * (srp_area / drag_mass_kg) / 1000.0
                 a_total += (nu * amag) * (d_ss / d_mag_ss)
     return a_total
 # Standard gravitational acceleration for mass flow (references constants.G0_STD)
@@ -970,6 +979,7 @@ def _coast_derivative(
     use_srp: bool,
     srp_cr: float,
     srp_use_shadow: bool,
+    srp_area_m2: float = -1.0,
 ) -> np.ndarray:
     """State derivative for unpowered (coast) arcs — pure-Python fallback.
 These are now
@@ -1003,6 +1013,7 @@ These are now
         use_srp,
         srp_cr,
         srp_use_shadow,
+        srp_area_m2,
     )
     return np.concatenate([v, a])
 # ---------------------------------------------------------------------------
@@ -1035,6 +1046,7 @@ def _powered_derivative(
     burn_isp_s: float,
     burn_dir: np.ndarray,
     burn_frame_idx: int,
+    srp_area_m2: float = -1.0,
 ) -> np.ndarray:
     """State derivative for powered (thrusting) arcs — pure-Python fallback.
     State vector y = [x, y, z, vx, vy, vz, mass_kg]  (7 components).
@@ -1083,6 +1095,7 @@ def _powered_derivative(
         use_srp,
         srp_cr,
         srp_use_shadow,
+        srp_area_m2,
     )
     # Thrust acceleration (km/s²)
     # We use a manual reconstruction for parity with NJIT kernel
@@ -1093,7 +1106,7 @@ def _powered_derivative(
     else:  # RTN
         from astra.frames import _build_rtn_matrix_njit
         rot_matrix = _build_rtn_matrix_njit(r, v)
-    a_thrust = np.dot(rot_matrix, burn_dir) * thrust_a_mag
+    a_thrust = rot_matrix.T @ (thrust_a_mag * burn_dir)
     a_total = a_grav + a_thrust
     # Mass flow rate — use G0_STD from constants (not hardcoded literal)
     dm_dt = -burn_thrust_N / (burn_isp_s * G0_STD)
@@ -1152,8 +1165,9 @@ def _acceleration_njit(
     use_srp: bool,
     srp_cr: float,
     srp_use_shadow: bool,
+    srp_area_m2: float = -1.0,
 ) -> np.ndarray:
-    """Numba-compiled acceleration kernel (22 args): two-body + J2/J3/J4 + drag + 3rd-body + SRP.
+    """Numba-compiled acceleration kernel: two-body + zonals + drag + third-body + SRP.
     Now accepts f107_obs, f107_adj, ap_daily, hf_atmosphere so the
     NRLMSISE-00 model is actually used when DragConfig(model='NRLMSISE00') is set.
 """
@@ -1285,7 +1299,8 @@ def _acceleration_njit(
                 d_moon / (d_mag_moon * d_mag_moon * d_mag_moon)
                 - moon_pos / (r_mag_moon * r_mag_moon * r_mag_moon)
             )
-        if use_srp and drag_area_m2 > 0.0 and drag_mass_kg > 0.0:
+        srp_area = srp_area_m2 if srp_area_m2 >= 0.0 else drag_area_m2
+        if use_srp and srp_area > 0.0 and drag_mass_kg > 0.0:
             d_ss = r - sun_pos
             d_mag_ss = np.linalg.norm(d_ss)
             if d_mag_ss > 1.0:
@@ -1297,7 +1312,7 @@ def _acceleration_njit(
                 P0 = 4.56e-6
                 AU = 149597870.7
                 scale = (AU / d_mag_ss) * (AU / d_mag_ss)
-                amag = P0 * scale * srp_cr * (drag_area_m2 / drag_mass_kg) / 1000.0
+                amag = P0 * scale * srp_cr * (srp_area / drag_mass_kg) / 1000.0
                 a_total += (nu * amag) * (d_ss / d_mag_ss)
     return a_total  # type: ignore[no-any-return]
 @njit(fastmath=True, cache=True)
@@ -1324,6 +1339,7 @@ def _propagator_jacobian_njit(
     use_srp: bool,
     srp_cr: float,
     srp_use_shadow: bool,
+    srp_area_m2: float = -1.0,
 ) -> np.ndarray:
     """6×6 force Jacobian F = dẋ/dx via central-difference, using the full
     propagator acceleration kernel ``_acceleration_njit``.
@@ -1358,13 +1374,13 @@ def _propagator_jacobian_njit(
             t_jd, r_p, v, use_drag, drag_cd, drag_area_m2, drag_mass_kg,
             drag_rho, drag_H_km, drag_ref_alt_km, f107_obs, f107_adj, ap_daily,
             hf_atmosphere, include_third_body, global_t_jd0, duration_d,
-            sun_coeffs, moon_coeffs, use_srp, srp_cr, srp_use_shadow,
+            sun_coeffs, moon_coeffs, use_srp, srp_cr, srp_use_shadow, srp_area_m2,
         )
         a_m = _acceleration_njit(
             t_jd, r_m, v, use_drag, drag_cd, drag_area_m2, drag_mass_kg,
             drag_rho, drag_H_km, drag_ref_alt_km, f107_obs, f107_adj, ap_daily,
             hf_atmosphere, include_third_body, global_t_jd0, duration_d,
-            sun_coeffs, moon_coeffs, use_srp, srp_cr, srp_use_shadow,
+            sun_coeffs, moon_coeffs, use_srp, srp_cr, srp_use_shadow, srp_area_m2,
         )
         J[3:6, i] = (a_p - a_m) / (2.0 * eps_r)
     # ∂a/∂v  (lower-right 3×3) — captures drag which is v-dependent
@@ -1377,13 +1393,13 @@ def _propagator_jacobian_njit(
             t_jd, r, v_p, use_drag, drag_cd, drag_area_m2, drag_mass_kg,
             drag_rho, drag_H_km, drag_ref_alt_km, f107_obs, f107_adj, ap_daily,
             hf_atmosphere, include_third_body, global_t_jd0, duration_d,
-            sun_coeffs, moon_coeffs, use_srp, srp_cr, srp_use_shadow,
+            sun_coeffs, moon_coeffs, use_srp, srp_cr, srp_use_shadow, srp_area_m2,
         )
         a_m = _acceleration_njit(
             t_jd, r, v_m, use_drag, drag_cd, drag_area_m2, drag_mass_kg,
             drag_rho, drag_H_km, drag_ref_alt_km, f107_obs, f107_adj, ap_daily,
             hf_atmosphere, include_third_body, global_t_jd0, duration_d,
-            sun_coeffs, moon_coeffs, use_srp, srp_cr, srp_use_shadow,
+            sun_coeffs, moon_coeffs, use_srp, srp_cr, srp_use_shadow, srp_area_m2,
         )
         J[3:6, 3 + i] = (a_p - a_m) / (2.0 * eps_v)
     return J  # type: ignore[no-any-return]
@@ -1411,6 +1427,7 @@ def _coast_derivative_njit(
     use_srp: bool,
     srp_cr: float,
     srp_use_shadow: bool,
+    srp_area_m2: float = -1.0,
 ) -> np.ndarray:
     """State derivative for unpowered (coast) arcs using Numba."""
     r = y[:3]
@@ -1439,6 +1456,7 @@ def _coast_derivative_njit(
         use_srp,
         srp_cr,
         srp_use_shadow,
+        srp_area_m2,
     )
     # 42 components = 6 (r, v) + 36 (Phi)
     if len(y) == 42:
@@ -1449,7 +1467,7 @@ def _coast_derivative_njit(
             r, v, use_drag, drag_cd, drag_area_m2, drag_mass_kg,
             drag_rho, drag_H_km, drag_ref_alt_km, f107_obs, f107_adj, ap_daily,
             hf_atmosphere, include_third_body, t_jd, global_t_jd0, duration_d,
-            sun_coeffs, moon_coeffs, use_srp, srp_cr, srp_use_shadow
+            sun_coeffs, moon_coeffs, use_srp, srp_cr, srp_use_shadow, srp_area_m2
         )
         Phi_dot = np.dot(F, Phi)
         dy = np.empty(42)
@@ -1489,6 +1507,7 @@ def _powered_derivative_njit(
     burn_isp_s: float,
     burn_dir: np.ndarray,
     burn_frame_idx: int,
+    srp_area_m2: float = -1.0,
 ) -> np.ndarray:
     """State derivative for powered (thrusting) arcs using Numba."""
     r = y[:3]
@@ -1522,6 +1541,7 @@ def _powered_derivative_njit(
         use_srp,
         srp_cr,
         srp_use_shadow,
+        srp_area_m2,
     )
     # Assign norms and use them to guard the VNB/RTN frame builder.
     # _build_vnb_matrix_njit to divide by np.linalg.norm(vel) without a guard.
@@ -1557,7 +1577,7 @@ def _powered_derivative_njit(
             r, v, use_drag, drag_cd, drag_area_m2, instantaneous_mass_kg,
             drag_rho, drag_H_km, drag_ref_alt_km, f107_obs, f107_adj, ap_daily,
             hf_atmosphere, include_third_body, t_jd, global_t_jd0, duration_d,
-            sun_coeffs, moon_coeffs, use_srp, srp_cr, srp_use_shadow
+            sun_coeffs, moon_coeffs, use_srp, srp_cr, srp_use_shadow, srp_area_m2
         )
         Phi_dot = np.dot(F, Phi)
         dy = np.empty(43)
@@ -1634,6 +1654,7 @@ class _PropagatorContext:
     moon_coeffs: np.ndarray
     drag_cd: float
     drag_area_m2: float
+    srp_area_m2: float
     current_P0: np.ndarray
     snc_config: Optional[SNCConfig] = None
 def _prepare_maneuvers(maneuvers: list[FiniteBurn], mass_kg: Optional[float]) -> tuple[list[FiniteBurn], float]:
@@ -1728,7 +1749,7 @@ def _integrate_segment(
                 drag_rho, drag_H_km, drag_ref_alt_km, f107_obs, f107_adj, ap_daily,
                 ctx.hf_atmosphere, ctx.include_third_body, ctx.t_jd0, ctx.duration_d,
                 ctx.sun_coeffs, ctx.moon_coeffs, ctx.use_srp, ctx.srp_cr, ctx.srp_use_shadow,
-                b_thrust, b_isp, b_dir, b_idx
+                b_thrust, b_isp, b_dir, b_idx, ctx.srp_area_m2
             )
         # Fix 5.5: Use user-provided powered_atol instead of magic numbers. Mass tolerance scales loosely.
         atol_vec = np.array([ctx.powered_atol] * 6 + [max(1e-5, ctx.powered_atol * 1e7)])
@@ -1750,7 +1771,8 @@ def _integrate_segment(
                 ctx.use_drag, ctx.drag_cd, ctx.drag_area_m2, drag_mass_kg,
                 drag_rho, drag_H_km, drag_ref_alt_km, f107_obs, f107_adj, ap_daily,
                 ctx.hf_atmosphere, ctx.include_third_body, ctx.t_jd0, ctx.duration_d,
-                ctx.sun_coeffs, ctx.moon_coeffs, ctx.use_srp, ctx.srp_cr, ctx.srp_use_shadow
+                ctx.sun_coeffs, ctx.moon_coeffs, ctx.use_srp, ctx.srp_cr, ctx.srp_use_shadow,
+                ctx.srp_area_m2
             )
         atol_vec = np.array([ctx.coast_atol] * 6)
         if ctx.include_stm:
@@ -1798,7 +1820,15 @@ def _integrate_segment(
     r_out = sol.y[:3, -1].copy()
     v_out = sol.y[3:6, -1].copy()
     m_out = float(sol.y[6, -1]) if is_powered else (current_mass or 0.0)
-    phi_out = sol.y[7:43, -1].copy() if is_powered and ctx.include_stm else (sol.y[6:42, -1].copy() if ctx.include_stm else current_phi_flat)
+    if ctx.include_stm:
+        # Carry the fully propagated covariance, including SNC process noise,
+        # into the next segment and restart the segment-local STM at identity.
+        # Otherwise process noise added before a maneuver/coast boundary is lost.
+        if _cov_out is not None:
+            ctx.current_P0 = _cov_out.copy()
+        phi_out = np.eye(6, dtype=np.float64).flatten()
+    else:
+        phi_out = current_phi_flat
     dm_out = m_out if is_powered else drag_mass_kg
     return True, "", segment_states, r_out, v_out, m_out, phi_out, dm_out
 def propagate_cowell(
@@ -1915,21 +1945,13 @@ def propagate_cowell(
             raise ValueError(f"Unsupported DragConfig model: {drag_config.model}. Supported models are 'NRLMSISE00' and 'EXPONENTIAL'.")
     use_srp = bool(drag_config is not None and getattr(drag_config, "include_srp", True) and include_third_body)
     srp_cr = float(drag_config.cr) if drag_config is not None else 1.5
-    # Fix SRP Area misuse: compute an effective srp_cr to avoid changing kernel signatures.
-    # The kernel computes: srp_cr * drag_area_m2. So effective_cr = srp_cr * (srp_area / drag_area).
     srp_area_m2 = drag_area_m2
-    if drag_config is not None and getattr(drag_config, "srp_area_m2", None) is not None:
-        srp_area_m2 = drag_config.srp_area_m2
-    
-    if drag_area_m2 > 1e-12:
-        srp_cr_eff = srp_cr * (srp_area_m2 / drag_area_m2)
-    else:
-        # If drag area is 0, we can't use the trick safely if the kernel divides by drag_area.
-        # But the kernel computes `drag_area / mass`, so drag_area=0 makes SRP 0 unless we hack it.
-        # Actually if drag_area is 0, drag is 0, but SRP might not be.
-        # This is a limitation of the trick. But drag_area=0 is unphysical anyway.
-        srp_cr_eff = srp_cr
-    
+    if drag_config is not None and drag_config.srp_area_m2 is not None:
+        srp_area_m2 = float(drag_config.srp_area_m2)
+        if srp_area_m2 < 0.0:
+            raise ValueError(
+                f"DragConfig.srp_area_m2 must be non-negative, got {srp_area_m2}."
+            )
     srp_use_shadow = bool(drag_config is not None and getattr(drag_config, "srp_conical_shadow", True))
     _r0_mag = float(np.linalg.norm(state0.position_km))
     # drag_ref_alt_km is updated from current_r at each segment boundary below.
@@ -1950,11 +1972,11 @@ def propagate_cowell(
     ctx = _PropagatorContext(
         t_jd0=t_jd0, duration_d=duration_d, dt_out=dt_out, include_third_body=include_third_body,
         use_drag=use_drag, use_empirical_drag=use_empirical_drag, hf_atmosphere=hf_atmosphere,
-        use_srp=use_srp, srp_cr=srp_cr_eff, srp_use_shadow=srp_use_shadow, include_stm=include_stm,
+        use_srp=use_srp, srp_cr=srp_cr, srp_use_shadow=srp_use_shadow, include_stm=include_stm,
         rtol=rtol, atol=atol, coast_rtol=coast_rtol, coast_atol=coast_atol,
         powered_rtol=powered_rtol, powered_atol=powered_atol,
         sun_coeffs=sun_coeffs, moon_coeffs=moon_coeffs,
-        drag_cd=drag_cd, drag_area_m2=drag_area_m2, current_P0=current_P0,
+        drag_cd=drag_cd, drag_area_m2=drag_area_m2, srp_area_m2=srp_area_m2, current_P0=current_P0,
         snc_config=snc_config
     )
     all_states: list[NumericalState] = []

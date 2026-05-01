@@ -115,8 +115,42 @@ def test_propagate_many_agrees_with_propagate_orbit(iss_tle, time_steps):
         )
 
 
-def test_propagate_many_nan_for_decayed(time_steps):
-    pytest.skip("SGP4 doesn't always flag decayed orbits with error > 0")
+def test_propagate_many_nan_for_decayed(monkeypatch, iss_tle):
+    """A positive SGP4 error code must turn only the failing rows into NaNs."""
+    import astra.data_pipeline as data_pipeline
+    import astra.orbit as orbit
+
+    class FakeSatrecArray:
+        def __init__(self, satrecs):
+            self.satrecs = satrecs
+
+        def sgp4(self, jd_array, jd_fraction_array):
+            n_sats = len(self.satrecs)
+            n_times = len(jd_array)
+            errors = np.zeros((n_sats, n_times), dtype=int)
+            positions = np.zeros((n_sats, n_times, 3), dtype=float)
+            velocities = np.zeros((n_sats, n_times, 3), dtype=float)
+
+            positions[:, :, 0] = 7000.0
+            velocities[:, :, 1] = 7.5
+            errors[0, 1] = 6
+            return errors, positions, velocities
+
+    monkeypatch.setattr(orbit, "_build_satrec", lambda satellite: object())
+    monkeypatch.setattr(orbit, "SatrecArray", FakeSatrecArray)
+    monkeypatch.setattr(
+        data_pipeline,
+        "get_ut1_utc_correction",
+        lambda times_jd: np.zeros_like(np.asarray(times_jd, dtype=float)),
+    )
+
+    times_jd = iss_tle.epoch_jd + (np.array([0.0, 1.0, 2.0]) / 1440.0)
+    trajectories, velocities = propagate_many([iss_tle], times_jd)
+
+    assert np.all(np.isfinite(trajectories["25544"][[0, 2]]))
+    assert np.all(np.isfinite(velocities["25544"][[0, 2]]))
+    assert np.all(np.isnan(trajectories["25544"][1]))
+    assert np.all(np.isnan(velocities["25544"][1]))
 
 
 def test_propagate_trajectory_shapes(iss_tle):
@@ -185,3 +219,38 @@ def test_ground_track_altitude_iss_leo(iss_tle):
         f"Ground-track altitudes outside ISS LEO range: "
         f"min={min(alts_km):.1f} km, max={max(alts_km):.1f} km"
     )
+
+
+def test_ground_track_reference_points_with_identity_frame(monkeypatch):
+    """Ground-track projection should recover known WGS84 reference points."""
+    import astra.frames as frames
+
+    wgs84_a_km = 6378.137
+    wgs84_f = 1.0 / 298.257223563
+    wgs84_b_km = wgs84_a_km * (1.0 - wgs84_f)
+    altitude_km = 400.0
+    positions_ecef = np.array(
+        [
+            [wgs84_a_km + altitude_km, 0.0, 0.0],
+            [0.0, wgs84_a_km + altitude_km, 0.0],
+            [0.0, 0.0, wgs84_b_km + altitude_km],
+        ]
+    )
+    times_jd = np.array([2460000.5, 2460000.5001, 2460000.5002])
+
+    monkeypatch.setattr(
+        frames,
+        "teme_to_ecef",
+        lambda positions_teme, times_jd, use_spacebook_eop=True: positions_teme.copy(),
+    )
+
+    track = ground_track(positions_ecef, times_jd)
+
+    assert track[0][0] == pytest.approx(0.0, abs=1e-9)
+    assert track[0][1] == pytest.approx(0.0, abs=1e-9)
+    assert track[0][2] == pytest.approx(altitude_km, abs=1e-6)
+    assert track[1][0] == pytest.approx(0.0, abs=1e-9)
+    assert track[1][1] == pytest.approx(90.0, abs=1e-9)
+    assert track[1][2] == pytest.approx(altitude_km, abs=1e-6)
+    assert track[2][0] == pytest.approx(90.0, abs=1e-9)
+    assert track[2][2] == pytest.approx(altitude_km, abs=1e-6)

@@ -1,7 +1,0 @@
-astra.spacebook module
-======================
-
-.. automodule:: astra.spacebook
-   :members:
-   :show-inheritance:
-   :undoc-members:

@@ -1,7 +1,0 @@
-astra.frames module
-===================
-
-.. automodule:: astra.frames
-   :members:
-   :show-inheritance:
-   :undoc-members:

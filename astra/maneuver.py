@@ -273,9 +273,10 @@ def plan_hohmann(
     Hohmann transfer, then converts each impulsive delta-V to a finite-burn
     arc using the Tsiolkovsky rocket equation and the specified engine
     parameters.
-    The first burn raises the apogee from ``r_initial_km`` to ``r_target_km``.
-    The second burn circularises at the target altitude.  Both burns are
-    prograde (direction = (1, 0, 0) in VNB frame).
+    For raising transfers, both burns are prograde. For lowering transfers,
+    both burns are retrograde because the transfer ellipse is slower than the
+    initial circular orbit at apoapsis and faster than the final circular orbit
+    at periapsis.
     Assumptions:
         - Both initial and target orbits are **circular**.
         - Earth's gravitational parameter μ = 398600.4418 km³/s².
@@ -291,7 +292,7 @@ def plan_hohmann(
         mass_kg: Spacecraft mass at the start of the transfer (kg).
         thrust_N: Engine thrust in Newtons.
         t_ignition_jd: Julian Date of the first burn ignition.
-        frame: ManeuverFrame for thrust direction (default VNB, prograde).
+        frame: ManeuverFrame for thrust direction (default VNB).
     Returns:
         List of two :class:`FiniteBurn` objects — [burn_1, burn_2].
     Raises:
@@ -398,15 +399,21 @@ def plan_hohmann(
     # Burn 2 should be centered around the opposite apsis (exactly T_transfer_s later),
     # meaning its ignition starts half a burn duration before that.
     t_ign2_jd = t_ignition_jd + (T_transfer_s - duration2_s / 2.0) / 86400.0
-    # ── Thrust direction: prograde ────────────────────────────────────────────
-    # Prograde is +V in VNB frame, but +T in RTN frame.
-    prograde_dir = (1.0, 0.0, 0.0) if frame == ManeuverFrame.VNB else (0.0, 1.0, 0.0)
+    # ── Thrust direction ─────────────────────────────────────────────────────
+    # Raising transfers accelerate along-track; lowering transfers decelerate.
+    # Prograde is +V in VNB and +T in RTN. Retrograde is the signed inverse.
+    direction_sign = 1.0 if r_target_km > r_initial_km else -1.0
+    burn_dir = (
+        (direction_sign, 0.0, 0.0)
+        if frame == ManeuverFrame.VNB
+        else (0.0, direction_sign, 0.0)
+    )
     burn1 = FiniteBurn(
         epoch_ignition_jd=t_ign1_jd,
         duration_s=duration1_s,
         thrust_N=thrust_N,
         isp_s=isp_s,
-        direction=prograde_dir,
+        direction=burn_dir,
         frame=frame,
     )
     burn2 = FiniteBurn(
@@ -414,7 +421,7 @@ def plan_hohmann(
         duration_s=duration2_s,
         thrust_N=thrust_N,
         isp_s=isp_s,
-        direction=prograde_dir,
+        direction=burn_dir,
         frame=frame,
     )
     return [burn1, burn2]
