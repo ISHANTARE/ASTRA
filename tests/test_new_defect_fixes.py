@@ -94,6 +94,16 @@ def test_eop_batching_length():
     assert len(dut1) == 100
 
 
+def test_eop_disabled_scalar_returns_scalars(monkeypatch):
+    monkeypatch.setattr("astra.config.SPACEBOOK_ENABLED", False)
+
+    xp, yp, dut1 = get_eop_correction(2451545.0)
+
+    assert isinstance(xp, float)
+    assert isinstance(yp, float)
+    assert isinstance(dut1, float)
+
+
 # ---------------------------------------------------------
 # DEF-016: Strict Mode Network Propagation
 # ---------------------------------------------------------
@@ -110,3 +120,23 @@ def test_strict_mode_network_failure(monkeypatch, tmp_path):
         _download_space_weather(str(tmp_path / "fake_dir"))
 
     config.ASTRA_STRICT_MODE = False
+
+
+def test_drag_environment_fallback_returns_reference_altitude(monkeypatch):
+    from astra.constants import DRAG_REF_ALTITUDE_KM
+    from astra.propagator import _prepare_drag_environment
+
+    def _raise_space_weather(_t_jd):
+        raise RuntimeError("space weather unavailable")
+
+    monkeypatch.setattr("astra.data_pipeline.get_space_weather", _raise_space_weather)
+    prev = config.ASTRA_STRICT_MODE
+    config.ASTRA_STRICT_MODE = False
+    try:
+        _rho, _height, ref_alt, *_weather = _prepare_drag_environment(
+            2451545.0, 250.0, True, True
+        )
+    finally:
+        config.ASTRA_STRICT_MODE = prev
+
+    assert ref_alt == pytest.approx(DRAG_REF_ALTITUDE_KM)

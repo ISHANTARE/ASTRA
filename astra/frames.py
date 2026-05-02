@@ -57,11 +57,16 @@ def get_eop_correction(
         (xp_arcsec, yp_arcsec, dut1_s) arrays matching times_jd shape.
         If Spacebook is disabled or offline, returns arrays of zeros.
     """
+    is_scalar_input = np.isscalar(times_jd) or (
+        hasattr(times_jd, "ndim") and np.asarray(times_jd).ndim == 0
+    )
     times_arr = np.atleast_1d(np.asarray(times_jd, dtype=float))
     zeros = np.zeros(len(times_arr))
     from astra.config import SPACEBOOK_ENABLED
     if not SPACEBOOK_ENABLED:
-        return (zeros.copy(), zeros.copy(), zeros.copy()) if times_arr.ndim else (0.0, 0.0, 0.0)  # type: ignore[no-any-return]
+        if is_scalar_input:
+            return 0.0, 0.0, 0.0
+        return zeros.copy(), zeros.copy(), zeros.copy()  # type: ignore[no-any-return]
     try:
         from astra.spacebook import get_eop_sb
         # --- DEF-006: Group by calendar date, fetch once per unique day ---
@@ -78,7 +83,7 @@ def get_eop_correction(
         yps = np.array([eop_cache[int(dk)][1] for dk in day_keys])
         dut1s = np.array([eop_cache[int(dk)][2] for dk in day_keys])
         # Return scalars when a scalar JD was passed in
-        if np.isscalar(times_jd) or (hasattr(times_jd, "ndim") and times_jd.ndim == 0):
+        if is_scalar_input:
             return float(xps[0]), float(yps[0]), float(dut1s[0])  # type: ignore[no-any-return]
         return xps, yps, dut1s  # type: ignore[no-any-return]
     except Exception as e:
@@ -86,6 +91,8 @@ def get_eop_correction(
         logging.getLogger(__name__).warning(
             "EOP fetch failed (%s); defaulting to zero correction.", e
         )
+        if is_scalar_input:
+            return 0.0, 0.0, 0.0
         return (zeros.copy(), zeros.copy(), zeros.copy())  # type: ignore[no-any-return]
 def teme_to_ecef(
     r_teme: np.ndarray, times_jd: np.ndarray, use_spacebook_eop: bool = True

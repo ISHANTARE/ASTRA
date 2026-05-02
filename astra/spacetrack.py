@@ -275,9 +275,18 @@ def _query_spacetrack(
             "Check that the group name is valid."
         )
 
-    # Pagination guard
-    line_count = len(text.splitlines())
-    record_count = line_count if fmt == "json" else line_count // 2
+    # Pagination guard. JSON responses are compact or pretty-printed depending
+    # on provider/proxy settings, so line counts are not records.
+    if fmt == "json":
+        try:
+            decoded = json.loads(text)
+        except json.JSONDecodeError:
+            record_count = 0
+        else:
+            record_count = len(decoded) if isinstance(decoded, list) else 1
+    else:
+        tle_lines = [line for line in text.splitlines() if line.strip()]
+        record_count = len(tle_lines) // 3 if len(tle_lines) % 3 == 0 else len(tle_lines) // 2
     if record_count > _ST_WARNING_THRESHOLD:
         logger.warning(
             f"Space-Track response contains {record_count} records. "

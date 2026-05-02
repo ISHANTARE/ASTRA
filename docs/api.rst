@@ -137,9 +137,9 @@ Filtering & catalog
    * - ``filter_altitude(objects, min_km, max_km)``
      - ``→ list[DebrisObject]``
      - LEO / MEO / GEO band filter
-   * - ``filter_region(objects, lat_band, lon_band)``
+   * - ``filter_region(objects, lat_min_deg, lat_max_deg, lon_min_deg=None, lon_max_deg=None)``
      - ``→ list[DebrisObject]``
-     - Geographic region filter
+     - Geographic region filter; latitude-only bounds are valid
    * - ``filter_time_window(objects, t0, t1)``
      - ``→ list[DebrisObject]``
      - Epoch freshness filter
@@ -164,14 +164,14 @@ Orbit propagation
      - ``list[OrbitalState]``
      - Single satellite, SGP4
    * - ``propagate_many(sats, times_jd)``
-     - ``TrajectoryMap``
-     - Vectorized SGP4, all satellites
+     - ``(TrajectoryMap, VelocityMap)``
+     - Vectorized SGP4 positions and velocities
    * - ``propagate_many_generator(sats, times_jd)``
-     - generator
+     - generator of ``(times, TrajectoryMap, VelocityMap)``
      - Memory-efficient streaming
-   * - ``propagate_trajectory(sat, times_jd)``
-     - ``ndarray``
-     - Raw position array
+   * - ``propagate_trajectory(sat, t_start_jd, t_end_jd, step_minutes=5.0)``
+     - ``(times, positions, velocities)``
+     - Single-satellite trajectory arrays
    * - ``ground_track(sat, times_jd)``
      - ``list[tuple]``
      - lat/lon/alt at each step
@@ -294,12 +294,12 @@ Utilities & configuration
    * - ``vincenty_distance(lat1, lon1, lat2, lon2)``
      - ``float`` km
      - WGS-84 great-circle distance
-   * - ``orbit_period(mean_motion_rad_min)``
+   * - ``orbit_period(mean_motion_rev_per_day)``
      - ``float`` min
      - Keplerian period
-   * - ``orbital_elements(pos, vel)``
+   * - ``orbital_elements(source, v=None)``
      - ``dict``
-     - Classical elements from state vector
+     - Classical elements from TLE line 2, Cartesian vectors, or state object
    * - ``SpatialIndex``
      - class
      - cKDTree wrapper for catalog screening

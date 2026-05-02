@@ -39,6 +39,8 @@ MANIFEST
 
 # pytest
 .pytest_cache/
+tests/.astra-test-cache/
+.codex_tmp/
 
 # mypy cache
 .mypy_cache/

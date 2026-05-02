@@ -277,7 +277,7 @@ def test_set_strict_mode_thread_safe():
     set_strict_mode(original)
 
 
-def test_load_space_weather_concurrent_no_double_parse(monkeypatch):
+def test_load_space_weather_concurrent_no_double_parse(monkeypatch, tmp_path):
     """Concurrent ``load_space_weather`` parses CSV exactly once."""
     import astra.data_pipeline as dp
 
@@ -292,41 +292,38 @@ def test_load_space_weather_concurrent_no_double_parse(monkeypatch):
     monkeypatch.setattr(dp, "_sw_loaded", False)
     monkeypatch.setattr(dp, "_sw_cache", {})
 
-    # Feed a minimal but valid CSV so no HTTP request is made
-    import pathlib
-    import tempfile
-
+    # Feed a minimal but valid CSV so no HTTP request is made.
     minimal_csv = (
         "TYPE,YYYY,MM,DD,BSRN,ND,Kp1,Kp2,Kp3,Kp4,Kp5,Kp6,Kp7,Kp8,Kp_sum,"
         "Ap1,Ap2,Ap3,Ap4,Ap5,Ap6,Ap7,Ap8,Ap_avg,Cp,C9,ISN,F10.7_obs,F10.7_adj,Q,F10.7_81,Ap_avg2\n"
         "OBS,2000,01,01,2245,1,3,3,3,3,3,3,3,3,24,"
         "15,15,15,15,15,15,15,15,15.0,0.5,3,52,150.0,148.0,0,150.0,15.0\n"
     )
-    with tempfile.TemporaryDirectory() as tmpdir:
-        sw_file = pathlib.Path(tmpdir) / "SW-All.csv"
-        sw_file.write_text(minimal_csv, encoding="utf-8")
-        monkeypatch.setattr(dp, "_DEFAULT_DATA_DIR", tmpdir)
+    sw_file = tmp_path / "SW-All.csv"
+    sw_file.write_text(minimal_csv, encoding="utf-8")
+    data_dir = str(tmp_path)
+    monkeypatch.setattr(dp, "_DEFAULT_DATA_DIR", data_dir)
 
-        barrier = threading.Barrier(4)
-        exc_list: list[Exception] = []
+    barrier = threading.Barrier(4)
+    exc_list: list[Exception] = []
 
-        def _call():
-            barrier.wait()  # synchronise all threads to fire at once
-            try:
-                dp.load_space_weather(data_dir=tmpdir)
-            except Exception as e:
-                exc_list.append(e)
+    def _call():
+        barrier.wait()  # synchronise all threads to fire at once
+        try:
+            dp.load_space_weather(data_dir=data_dir)
+        except Exception as e:
+            exc_list.append(e)
 
-        threads = [threading.Thread(target=_call) for _ in range(4)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
+    threads = [threading.Thread(target=_call) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
 
-        assert not exc_list, f"load_space_weather raised: {exc_list}"
-        assert (
-            parse_count[0] == 1
-        ), f"_parse_sw_csv called {parse_count[0]} times; expected exactly 1."
+    assert not exc_list, f"load_space_weather raised: {exc_list}"
+    assert (
+        parse_count[0] == 1
+    ), f"_parse_sw_csv called {parse_count[0]} times; expected exactly 1."
 
 
 def test_collision_probability_nan_when_none():

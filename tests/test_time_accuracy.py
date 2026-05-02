@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 from astra.orbit import propagate_orbit, propagate_many, ground_track
 from astra.models import SatelliteTLE
 from astra.data_pipeline import sun_position_de
@@ -39,26 +40,20 @@ def test_sun_position_scale():
     print(f"Sun distance: {dist:.1f} km")
     assert 147e6 < dist < 153e6
 
-    # If it was 69s off, it would still look like 1 AU,
-    # but the position vector would rotate by (69s/86400s) * 360 deg.
-    # We will basically trust the Skyfield .utc(jd=...) fix.
+    assert np.all(np.isfinite(pos))
+    assert abs(pos[2]) > 1e6
 
 
 def test_ground_track_scale():
     """Verify ground track uses UTC scale (CT-A)."""
-    # At t_jd, an object at (r, 0, 0) in TEME should be at roughly longitude -15 deg
-    # (since midnight UTC at Prime Meridian was 12h ago... wait)
-    # Actually, we just check that it runs and isn't insane.
     times_jd = np.array([2460408.5])
     pos_teme = np.array([[7000.0, 0.0, 0.0]])
 
     track = ground_track(pos_teme, times_jd)
     lat, lon, alt = track[0]
-    print(f"Ground Track for (7000,0,0) at midnight: Lat={lat:.4f}, Lon={lon:.4f}")
-
-    # Midnight UTC at JD 2460408.5.
-    # The Prime Meridian is at noon... wait.
-    # Regardless, this verifies the function doesn't crash after our fix.
+    assert lat == pytest.approx(-0.004686, abs=1e-5)
+    assert -180.0 <= lon <= 180.0
+    assert alt == pytest.approx(621.863, abs=1e-3)
 
 
 if __name__ == "__main__":

@@ -107,6 +107,29 @@ class TestCF6SpacebookCentralized:
         finally:
             set_spacebook_enabled(orig)
 
+    def test_spacebook_space_weather_error_falls_back_to_celestrak(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Spacebook outages must not block relaxed CelesTrak space-weather fallback."""
+        import astra.config as cfg
+        import astra.data_pipeline as dp
+        from astra.errors import SpacebookError
+
+        original = cfg.SPACEBOOK_ENABLED
+        cfg.set_spacebook_enabled(True)
+        try:
+            monkeypatch.setattr(
+                "astra.spacebook.get_space_weather_sb",
+                lambda _jd: (_ for _ in ()).throw(SpacebookError("mock Spacebook outage")),
+            )
+            monkeypatch.setattr(dp, "load_space_weather", lambda _data_dir=None: None)
+            monkeypatch.setattr(dp, "_sw_cache", {"2000-01-01": (121.0, 122.0, 7.0)})
+            monkeypatch.setattr(dp, "_sw_loaded", True)
+
+            assert dp.get_space_weather(2451545.0) == (121.0, 122.0, 7.0)
+        finally:
+            cfg.set_spacebook_enabled(original)
+
 
 # ===========================================================================
 # FM-9A: assert_guards for Numba-inlined literals
@@ -264,7 +287,7 @@ class TestFM3AtmosphereSync:
     """Verify that STM covariance and Cowell propagator use consistent atmosphere model flags."""
 
     def test_stm_accepts_nrlmsise_drag_config(self) -> None:
-        """propagate_covariance_stm must not crash when DragConfig.model='NRLMSISE00'."""
+        """NRLMSISE00 STM propagation returns a finite, symmetric, evolved covariance."""
         from astra.propagator import DragConfig
         import astra.covariance as cov_mod
 
@@ -273,7 +296,6 @@ class TestFM3AtmosphereSync:
         cov0 = np.eye(6) * 1e-3
         dc = DragConfig(cd=2.2, area_m2=10.0, mass_kg=1000.0, model="NRLMSISE00")
 
-        # Should complete without raising (may use exponential fallback if SW unavailable)
         result = cov_mod.propagate_covariance_stm(
             r0_km=r0,
             v0_km_s=v0,
@@ -284,6 +306,8 @@ class TestFM3AtmosphereSync:
         )
         assert result.shape == (6, 6), f"Expected (6,6) covariance, got {result.shape}"
         assert np.all(np.isfinite(result)), "Covariance contains NaN/Inf"
+        np.testing.assert_allclose(result, result.T, atol=1e-12)
+        assert not np.allclose(result, cov0)
 
     def test_stm_covariance_grows_with_drag(self) -> None:
         """With drag enabled, propagated covariance trace must exceed initial for LEO orbits."""
@@ -351,5 +375,3 @@ class TestT02CowellSTMIntegration:
         final_trace = np.trace(states[-1].covariance_km2)
         initial_trace = np.trace(states[0].covariance_km2)
         assert final_trace > initial_trace, f"Covariance failed to grow: {final_trace} <= {initial_trace}"
-
-

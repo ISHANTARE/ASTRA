@@ -283,17 +283,18 @@ def apply_filters(
         filtered = filter_altitude(
             filtered, config.min_altitude_km, config.max_altitude_km
         )
-    # 2. Apply region filter
+    # 2. Apply region filter. Latitude bounds are independently useful; longitude
+    # bounds further refine the same over-inclusive geographic pre-filter.
     has_lat = config.lat_min_deg is not None and config.lat_max_deg is not None
     has_lon = config.lon_min_deg is not None and config.lon_max_deg is not None
-    if has_lat and has_lon:
+    if has_lat:
         # types in mypy expect float, but we verified not None
         filtered = filter_region(
             filtered,
             lat_min_deg=config.lat_min_deg,  # type: ignore[arg-type]
             lat_max_deg=config.lat_max_deg,  # type: ignore[arg-type]
-            lon_min_deg=config.lon_min_deg,  # type: ignore[arg-type]
-            lon_max_deg=config.lon_max_deg,  # type: ignore[arg-type]
+            lon_min_deg=config.lon_min_deg if has_lon else None,
+            lon_max_deg=config.lon_max_deg if has_lon else None,
         )
     # 3. Apply time window filter
     if config.t_start_jd is not None and config.t_end_jd is not None:

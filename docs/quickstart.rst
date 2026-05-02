@@ -43,7 +43,7 @@ valid for production use):
     dt_min = np.arange(0.0, 120.0, 5.0)
     times_jd = iss.epoch_jd + dt_min / 1440.0
 
-    traj = propagate_many([iss], times_jd)
+    traj, velocities = propagate_many([iss], times_jd)
     positions = traj[iss.norad_id]   # (T, 3) km, TEME
 
 3. Screen for conjunctions
@@ -143,8 +143,8 @@ valid for production use):
     with open("conjunction.cdm.xml") as f:
         cdm = parse_cdm_xml(f.read())
 
-    print(f"Miss distance: {cdm.miss_distance_km} km")
-    print(f"P_c: {cdm.probability_of_collision}")
+    print(f"Miss distance: {cdm.miss_distance_m / 1000.0} km")
+    print(f"P_c: {cdm.collision_probability}")
 
 Next steps
 ----------

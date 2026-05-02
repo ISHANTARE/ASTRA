@@ -447,28 +447,65 @@ def warmup() -> None:
     _ = find_conjunctions(traj, times, { "WARM1": obj, "WARM2": obj }, threshold_km=1.0)
 
 
+def _plotly_import_error(name: str, exc: ImportError) -> ImportError:
+    return ImportError(
+        f"{name} requires Plotly. Install with: "
+        "pip install 'astra-core-engine[viz]' or pip install plotly>=5.18"
+    )
+
+
+def plot_trajectories(*args: Any, **kwargs: Any) -> Any:
+    """Create an interactive Plotly 3-D trajectory figure.
+
+    Args:
+        *args: Positional arguments passed to :func:`astra.plot.plot_trajectories`.
+        **kwargs: Keyword arguments passed to :func:`astra.plot.plot_trajectories`.
+
+    Returns:
+        A Plotly ``go.Figure``.
+
+    Raises:
+        ImportError: If Plotly is not installed. Install ``astra-core-engine[viz]``.
+
+    Example::
+
+        import astra
+        fig = astra.plot_trajectories({"25544": positions_km})
+    """
+    try:
+        from astra.plot import plot_trajectories as _plot_traj
+    except ImportError as exc:
+        raise _plotly_import_error("plot_trajectories", exc) from exc
+    return _plot_traj(*args, **kwargs)
+
+
+def plot_ground_track(*args: Any, **kwargs: Any) -> Any:
+    """Create an interactive Plotly ground-track figure.
+
+    Args:
+        *args: Positional arguments passed to :func:`astra.plot.plot_ground_track`.
+        **kwargs: Keyword arguments passed to :func:`astra.plot.plot_ground_track`.
+
+    Returns:
+        A Plotly ``go.Figure``.
+
+    Raises:
+        ImportError: If Plotly is not installed. Install ``astra-core-engine[viz]``.
+
+    Example::
+
+        import astra
+        fig = astra.plot_ground_track(satellite, t_start_jd, t_end_jd)
+    """
+    try:
+        from astra.plot import plot_ground_track as _plot_gt
+    except ImportError as exc:
+        raise _plotly_import_error("plot_ground_track", exc) from exc
+    return _plot_gt(*args, **kwargs)
+
+
 def __getattr__(name: str) -> Any:
-    """Lazy-load optional dependencies (e.g. Plotly for ``plot_trajectories``)."""
-    if name == "plot_trajectories":
-        try:
-            from astra.plot import plot_trajectories as _plot_traj
-        except ImportError as exc:
-            raise ImportError(
-                "plot_trajectories requires Plotly. Install with: "
-                "pip install 'astra-core-engine[viz]' or pip install plotly>=5.18"
-            ) from exc
-        globals()["plot_trajectories"] = _plot_traj
-        return _plot_traj
-    if name == "plot_ground_track":
-        try:
-            from astra.plot import plot_ground_track as _plot_gt
-        except ImportError as exc:
-            raise ImportError(
-                "plot_ground_track requires Plotly. Install with: "
-                "pip install 'astra-core-engine[viz]' or pip install plotly>=5.18"
-            ) from exc
-        globals()["plot_ground_track"] = _plot_gt
-        return _plot_gt
+    """Return lazily provided optional attributes."""
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 

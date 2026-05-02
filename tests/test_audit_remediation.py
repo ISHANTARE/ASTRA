@@ -365,10 +365,9 @@ class TestFinding8_RunConjunctionSweep:
             [tle_a, tle_b], t_start_jd=t0, t_end_jd=t1,
             step_minutes=5.0, threshold_km=10.0,
         )
-        assert isinstance(events, list), f"Expected list, got {type(events)}"
-        # Both satellites should have been processed (not dropped by NaN filter)
-        # The list may be empty if they don't pass within threshold — that's fine
-        assert events is not None
+        assert len(events) == 1
+        assert {events[0].object_a_id, events[0].object_b_id} == {"25544", "99999"}
+        assert events[0].miss_distance_km <= 10.0
     def test_run_conjunction_sweep_filters_nan_and_forwards_contract(self, monkeypatch):
         """The wrapper must orchestrate grid, propagation, NaN filtering, and screening args."""
         from types import SimpleNamespace

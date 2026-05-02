@@ -292,6 +292,16 @@ class TestNamespaceExports:
         assert hasattr(astra, "fetch_celestrak_group_omm")
         assert hasattr(astra, "fetch_celestrak_active_omm")
         assert hasattr(astra, "fetch_celestrak_comprehensive_omm")
+
+    def test_wildcard_import_does_not_require_plotly(self):
+        import sys
+
+        sys.modules.pop("astra.plot", None)
+        namespace: dict[str, object] = {}
+        exec("from astra import *", namespace)
+        assert callable(namespace["plot_trajectories"])
+        assert callable(namespace["plot_ground_track"])
+        assert "astra.plot" not in sys.modules
 # ---------------------------------------------------------------------------
 # 7. Session Cache & Logout
 # ---------------------------------------------------------------------------
@@ -411,6 +421,27 @@ class TestRateLimitAndPagination:
         mock_logger.warning.assert_called()
         assert any(
             "truncated by Space-Track API caps" in call[0][0]
+            for call in mock_logger.warning.call_args_list
+        )
+
+    @patch("astra.spacetrack.requests.Session")
+    @patch("astra.spacetrack.logger")
+    def test_compact_json_pagination_counts_records_not_lines(self, mock_logger, mock_session_cls):
+        mock_session = MagicMock()
+        mock_session_cls.return_value = mock_session
+        mock_session.post.return_value = Mock(status_code=200, ok=True, text="OK")
+        compact_json = "[" + ",".join(["{}" for _ in range(50005)]) + "]"
+        mock_resp = Mock(status_code=200, ok=True, text=compact_json)
+        mock_resp.headers = {}
+        mock_session.get.return_value = mock_resp
+        env = {"SPACETRACK_USER": "u@test.com", "SPACETRACK_PASS": "pw"}
+        with (
+            patch.dict(os.environ, env),
+            patch("astra.omm.parse_omm_json", return_value=[]),
+        ):
+            fetch_spacetrack_group("active", format="json")
+        assert any(
+            "Space-Track response contains 50005 records" in call[0][0]
             for call in mock_logger.warning.call_args_list
         )
 class TestSessionReauthentication:

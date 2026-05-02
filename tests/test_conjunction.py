@@ -187,3 +187,47 @@ def test_find_conjunctions_custom_threshold(conjunction_elements):
     )
     assert len(events) == 1
     assert abs(events[0].miss_distance_km - 2.5) < 1e-3
+
+
+def test_find_conjunctions_dense_fallback_uses_seconds_not_days(
+    conjunction_elements, monkeypatch
+):
+    import scipy.optimize
+
+    def _raise_minimize(*_args, **_kwargs):
+        raise RuntimeError("forced optimizer failure")
+
+    monkeypatch.setattr(scipy.optimize, "minimize_scalar", _raise_minimize)
+
+    traj_a, traj_b = crossing_trajectories()
+    t0 = 2_460_000.5
+    times = np.linspace(t0, t0 + (120.0 / 86400.0), len(traj_a))
+    trajs = {
+        "25544": traj_a,
+        "99999": traj_b,
+    }
+    cov_map = {
+        "25544": np.eye(3) * 1e-4,
+        "99999": np.eye(3) * 1e-4,
+    }
+
+    events = find_conjunctions(
+        trajs,
+        times,
+        conjunction_elements,
+        threshold_km=5.0,
+        coarse_threshold_km=25.0,
+        cov_map=cov_map,
+        max_workers=1,
+    )
+
+    assert len(events) == 1
+    assert events[0].miss_distance_km == pytest.approx(2.5, abs=1e-2)
+
+
+def test_closest_approach_rejects_unsorted_times():
+    traj_a, traj_b = crossing_trajectories()
+    times = np.array([2.0, 1.0, 3.0])
+
+    with pytest.raises(Exception, match="strictly increasing"):
+        closest_approach(traj_a[:3], traj_b[:3], times)

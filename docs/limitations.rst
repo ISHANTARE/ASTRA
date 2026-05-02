@@ -64,7 +64,7 @@ Network and data providers
   catalogs locally for repeated runs.
 * **Spacebook / COMSPOC** endpoints are unauthenticated but subject to their
   own availability and rate policies.
-* The space-weather CSV payload is capped at **2 MB** as a security measure;
+* The space-weather CSV payload is capped at **10 MB** as a security measure;
   abnormally large responses are rejected.
 
 Numba JIT

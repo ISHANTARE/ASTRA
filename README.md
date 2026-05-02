@@ -1,4 +1,4 @@
-# ASTRA-Core v3.5.0 (Autonomous Space Traffic Risk Analyzer) 🛰️
+# ASTRA-Core v3.6.0 (Autonomous Space Traffic Risk Analyzer) 🛰️
 
 ![PyPI - Version](https://img.shields.io/pypi/v/astra-core-engine?color=blue&label=astra-core-engine)
 [![Documentation Status](https://readthedocs.org/projects/astra-core/badge/?version=latest)](https://astra-core.readthedocs.io/en/latest/?badge=latest)
@@ -48,7 +48,7 @@ ASTRA-Core supports **both** the legacy TLE format and the CCSDS **OMM (Orbit Me
 
 ### Spacebook (High-Fidelity)
 
-Spacebook provides synthetic covariance and standard/XP-TLEs along with highly precise Space Weather metrics. Spacebook overrides CelesTrak SW defaults when active.
+Spacebook provides synthetic covariance and standard/XP-TLEs along with highly precise Space Weather metrics. When enabled, ASTRA tries Spacebook first for space weather and falls back to CelesTrak `SW-All.csv` if Spacebook is unavailable.
 
 ```python
 import astra
@@ -101,7 +101,7 @@ If credentials are missing, ASTRA raises a clear error with setup hints.
 * **Spacebook Integration:** Direct streaming of Spacebook XP-TLEs, true observational covariance matrices, and live Space Weather priorities—bypassing heuristic estimation models for flight-grade accuracy.
 * **Dual format (TLE + OMM):** One API surface for parsing, propagation, filtering, and conjunctions.
 * **SGP4 at scale:** Vectorized propagation (`propagate_many`, generators) with UT1-aware handling where ephemeris data are available.
-* **Cowell propagation:** Dormand–Prince DOP853 integration with **J₂–J₄**, empirical **drag** (NRLMSISE-00 + space weather), **Sun/Moon** third-body gravity (**JPL DE421**), high-fidelity **solar radiation pressure** with **conical Earth shadow** (continuous penumbra modeling), and **7-DOF** finite burns with mass depletion.
+* **Cowell propagation:** Dormand–Prince DOP853 integration with **J₂–J₆**, empirical **drag** (NRLMSISE-00 + space weather), **Sun/Moon** third-body gravity (**JPL DE421**), high-fidelity **solar radiation pressure** with **conical Earth shadow** (continuous penumbra modeling), and **7-DOF** finite burns with mass depletion.
 * **STM covariance propagation:** Full **6×6** State Transition Matrix integration with analytical J₂ partial derivatives; co-rotating drag Jacobian correction maintains covariance symmetry.
 * **Conjunction screening:** KD-tree prefilter over time steps (~14.8x speedup), cubic spline TCA refinement, Spacebook EOP coordinate mapping, and dynamic effective radius from object metadata.
 * **Collision probability:** Analytical (Chan/Foster lineage), exact **2D Gaussian Quadrature** (`dblquad`), and **6D Monte Carlo** paths when full covariances are supplied; seamless integration with Spacebook synthetic covariance matrices.
@@ -173,7 +173,7 @@ leo_only = astra.filter_altitude(objects, min_km=200, max_km=2000)
 
 sources = [obj.source for obj in leo_only]
 times_jd = leo_only[0].source.epoch_jd + np.arange(0, 120, 5.0) / 1440.0
-trajectories = astra.propagate_many(sources, times_jd)
+trajectories, velocities = astra.propagate_many(sources, times_jd)
 
 events = astra.find_conjunctions(
     trajectories,
@@ -197,7 +197,7 @@ leo_only = astra.filter_altitude(objects, min_km=200, max_km=2000)
 
 sources = [obj.source for obj in leo_only]
 times_jd = leo_only[0].source.epoch_jd + np.arange(0, 120, 5.0) / 1440.0
-trajectories = astra.propagate_many(sources, times_jd)
+trajectories, velocities = astra.propagate_many(sources, times_jd)
 
 events = astra.find_conjunctions(
     trajectories,
@@ -270,8 +270,8 @@ Functions are available from the `astra` namespace.
 
 | Function | Returns |
 |----------|---------|
-| `fetch_spacetrack_group(group, format=...)` | OMM (default) or TLE |
-| `fetch_spacetrack_active()` | Active catalog |
+| `fetch_spacetrack_group(group, format="json")` | `list[SatelliteOMM]` by default; `list[SatelliteTLE]` with `format="tle"` |
+| `fetch_spacetrack_active(format="json")` | Active catalog; OMM by default, TLE with `format="tle"` |
 | `fetch_spacetrack_satcat()` | SATCAT-style records |
 | `spacetrack_logout()` | End session |
 

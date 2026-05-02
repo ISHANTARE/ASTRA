@@ -9,12 +9,14 @@ Replaces phantom smoke tests (type-only assertions) with:
 import pytest
 import math
 from astra.debris import (
+    apply_filters,
     filter_altitude,
     filter_region,
     filter_time_window,
     catalog_statistics,
     make_debris_object,
 )
+from astra.models import FilterConfig
 @pytest.fixture
 def catalog_objs(small_catalog):
     return [make_debris_object(tle) for tle in small_catalog]
@@ -74,7 +76,7 @@ class TestFilterAltitude:
         alt = iss.altitude_km
         # Re-filter with exact altitude as boundary
         exact = filter_altitude(objs, min_km=alt, max_km=alt)
-        assert len(exact) >= 1, "Object at exact boundary altitude should be included"
+        assert [o.source.norad_id for o in exact] == ["25544"]
 # ---------------------------------------------------------------------------
 # filter_region — latitude
 # ---------------------------------------------------------------------------
@@ -88,7 +90,7 @@ class TestFilterRegionLatitude:
             lat_max_deg=90.0,
         )
         norad_ids = [o.source.norad_id for o in filtered]
-        assert "44383" in norad_ids, "Polar orbit (97.6°) should reach 80-90° latitude"
+        assert norad_ids == ["44383"]
     def test_low_inclination_excluded_from_high_lat(self, catalog_objs):
         # DEBRIS X: inclination 10.6 → max_lat = 10.6 → cannot reach 50-60°
         filtered = filter_region(
@@ -108,7 +110,7 @@ class TestFilterRegionLatitude:
             lat_max_deg=50.0,
         )
         norad_ids = [o.source.norad_id for o in filtered]
-        assert "25544" in norad_ids, "ISS (51.6°) should reach 40-50° latitude"
+        assert norad_ids == ["25544", "44383"]
     def test_equatorial_included_in_equatorial_band(self, catalog_objs):
         # All objects should cover the equatorial band [-5, 5]
         filtered = filter_region(
@@ -117,6 +119,13 @@ class TestFilterRegionLatitude:
             lat_max_deg=5.0,
         )
         assert len(filtered) == 3, "All objects pass through the equatorial band"
+
+    def test_apply_filters_honors_latitude_without_longitude(self, catalog_objs):
+        config = FilterConfig(lat_min_deg=80.0, lat_max_deg=90.0)
+        filtered = apply_filters(catalog_objs, config)
+        norad_ids = {o.source.norad_id for o in filtered}
+        assert "44383" in norad_ids
+        assert "25544" not in norad_ids
 # ---------------------------------------------------------------------------
 # filter_region — longitude (/#5: was unimplemented)
 # ---------------------------------------------------------------------------
@@ -151,12 +160,10 @@ class TestFilterRegionLongitude:
             lon_min_deg=45.0,
             lon_max_deg=50.0,
         )
-        # ISS and TIRUPATI are LEO → pass. DEBRIS X has very long period?
-        leo_ids = {"25544", "44383"}
+        # All sample objects have period < 24 h and therefore sweep all longitudes.
+        expected_ids = {"25544", "44383", "99999"}
         result_ids = {o.source.norad_id for o in filtered}
-        assert leo_ids.issubset(result_ids), (
-            f"LEO satellites should pass any longitude band. Missing: {leo_ids - result_ids}"
-        )
+        assert result_ids == expected_ids
     def test_none_longitude_does_not_filter(self, catalog_objs):
         """Passing lon=None must disable longitude stage entirely."""
         filtered_no_lon = filter_region(
@@ -212,23 +219,24 @@ class TestCatalogStatistics:
     def test_by_regime_contains_leo(self, catalog_objs):
         stats = catalog_statistics(catalog_objs)
         assert "by_regime" in stats, "stats must contain 'by_regime'"
-        assert "LEO" in stats["by_regime"], "LEO regime should be present"
-        assert stats["by_regime"]["LEO"] >= 2, (
-            f"Expected >=2 LEO objects, got {stats['by_regime']['LEO']}"
-        )
+        assert stats["by_regime"] == {"LEO": 2, "MEO": 1, "GEO": 0, "HEO": 0}
     def test_mean_altitude_physical(self, catalog_objs):
         stats = catalog_statistics(catalog_objs)
-        if "mean_altitude_km" in stats:
-            assert 100.0 < stats["mean_altitude_km"] < 50_000.0, (
-                f"mean_altitude_km={stats['mean_altitude_km']} outside physical range"
-            )
+        assert "altitude_mean_km" in stats
+        assert 100.0 < stats["altitude_mean_km"] < 50_000.0, (
+            f"altitude_mean_km={stats['altitude_mean_km']} outside physical range"
+        )
     def test_empty_catalog_returns_zero(self):
         stats = catalog_statistics([])
         assert stats.get("total_count", 0) == 0, (
             "Empty catalog should report total_count=0"
         )
     def test_inclination_distribution_physical(self, catalog_objs):
-        """Mean inclination must be within [0, 180] degrees."""
+        """Inclination buckets must classify the three sample objects exactly."""
         stats = catalog_statistics(catalog_objs)
-        if "mean_inclination_deg" in stats:
-            assert 0.0 <= stats["mean_inclination_deg"] <= 180.0
+        assert stats["inclination_distribution"] == {
+            "equatorial": 0,
+            "inclined": 2,
+            "polar": 0,
+            "retrograde": 1,
+        }

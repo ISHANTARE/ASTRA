@@ -64,6 +64,7 @@ _M_N = 14.0067e-3
 _skyfield_loader: Optional[Loader] = None
 _skyfield_ts = None
 _skyfield_eph = None
+_skyfield_eph_unavailable = False
 # RLock because _ensure_skyfield calls _get_skyfield_loader — must be re-entrant.
 _SKYFIELD_INIT_LOCK = threading.RLock()
 def _require_skyfield_state(*, require_eph: bool) -> tuple[Any, Any]:
@@ -89,9 +90,9 @@ def _get_skyfield_loader(data_dir: Optional[str] = None) -> Loader:
     return _skyfield_loader  # type: ignore[no-any-return]
 def _ensure_skyfield(data_dir: Optional[str] = None) -> None:
     """Ensure the Skyfield timescale + ephemeris objects are initialised (thread-safe)."""
-    global _skyfield_ts, _skyfield_eph
+    global _skyfield_ts, _skyfield_eph, _skyfield_eph_unavailable
     with _SKYFIELD_INIT_LOCK:
-        if _skyfield_ts is None or _skyfield_eph is None:
+        if _skyfield_ts is None:
             load = _get_skyfield_loader(data_dir)
             # Timescale includes IERS finals2000A for UT1-UTC & polar motion.
             _skyfield_ts = load.timescale()
@@ -99,8 +100,89 @@ def _ensure_skyfield(data_dir: Optional[str] = None) -> None:
             # Missions or simulations beyond ~2050 should plan DE440 or another BSP;
             # Skyfield may fail or rely on extrapolation outside the file span.
             # DE440 (> 100 MB) covers 1549–2650 but is usually overkill for LEO ops.
-            _skyfield_eph = load("de421.bsp")
-            logger.info("Skyfield ephemeris (de421.bsp) and IERS timescale loaded.")
+        if _skyfield_eph is None and not _skyfield_eph_unavailable:
+            load = _get_skyfield_loader(data_dir)
+            try:
+                _skyfield_eph = load("de421.bsp")
+                logger.info("Skyfield ephemeris (de421.bsp) and IERS timescale loaded.")
+            except OSError as exc:
+                from astra import config
+                if config.ASTRA_STRICT_MODE:
+                    from astra.errors import EphemerisError
+                    raise EphemerisError(
+                        "[ASTRA STRICT] JPL DE421 ephemeris unavailable. "
+                        "Populate the Skyfield cache or set ASTRA_STRICT_MODE=False "
+                        "to use analytical Sun/Moon fallbacks."
+                    ) from exc
+                _skyfield_eph_unavailable = True
+                logger.warning(
+                    "Skyfield DE421 ephemeris unavailable (%s); continuing with "
+                    "Skyfield timescale and analytical Sun/Moon fallbacks.",
+                    exc,
+                )
+
+
+def _sun_position_approx(t_jd: float) -> np.ndarray:
+    """Approximate geocentric Sun position in GCRS/ECI kilometres."""
+    T = (t_jd - 2451545.0) / 36525.0
+    mean_anomaly_rad = math.radians((357.5291092 + 35999.0502909 * T) % 360.0)
+    center_deg = 1.9146 * math.sin(mean_anomaly_rad) + 0.02 * math.sin(2.0 * mean_anomaly_rad)
+    lon_rad = math.radians((280.46646 + 36000.76983 * T + center_deg) % 360.0)
+    radius_km = (
+        1.00014
+        - 0.01671 * math.cos(mean_anomaly_rad)
+        - 0.00014 * math.cos(2.0 * mean_anomaly_rad)
+    ) * 149597870.7
+    obliquity_rad = math.radians(23.439291 - 0.0130042 * T)
+    return np.array(
+        [
+            radius_km * math.cos(lon_rad),
+            radius_km * math.cos(obliquity_rad) * math.sin(lon_rad),
+            radius_km * math.sin(obliquity_rad) * math.sin(lon_rad),
+        ],
+        dtype=float,
+    )
+
+
+def _moon_position_approx(t_jd: float) -> np.ndarray:
+    """Approximate geocentric Moon position in GCRS/ECI kilometres."""
+    T = (t_jd - 2451545.0) / 36525.0
+    L0 = (218.3165 + 481267.8813 * T) % 360.0
+    M_moon = math.radians((134.9634 + 477198.8676 * T) % 360.0)
+    M_sun = math.radians((357.5291 + 35999.0503 * T) % 360.0)
+    D = math.radians((297.8502 + 445267.1115 * T) % 360.0)
+    F = math.radians((93.2720 + 483202.0175 * T) % 360.0)
+    lon_corr = (
+        6.289 * math.sin(M_moon)
+        - 1.274 * math.sin(2.0 * D - M_moon)
+        + 0.658 * math.sin(2.0 * D)
+        - 0.214 * math.sin(2.0 * M_moon)
+        - 0.186 * math.sin(M_sun)
+    )
+    lat_rad = math.radians(
+        5.128 * math.sin(F)
+        + 0.281 * math.sin(M_moon + F)
+        - 0.278 * math.sin(F - M_moon)
+    )
+    radius_km = (
+        385000.56
+        - 20905.36 * math.cos(M_moon)
+        - 3699.11 * math.cos(2.0 * D - M_moon)
+        - 2955.97 * math.cos(2.0 * D)
+    )
+    lon_rad = math.radians(L0 + lon_corr)
+    obliquity_rad = math.radians(23.439291 - 0.0130042 * T)
+    x_ecl = radius_km * math.cos(lat_rad) * math.cos(lon_rad)
+    y_ecl = radius_km * math.cos(lat_rad) * math.sin(lon_rad)
+    z_ecl = radius_km * math.sin(lat_rad)
+    return np.array(
+        [
+            x_ecl,
+            y_ecl * math.cos(obliquity_rad) - z_ecl * math.sin(obliquity_rad),
+            y_ecl * math.sin(obliquity_rad) + z_ecl * math.cos(obliquity_rad),
+        ],
+        dtype=float,
+    )
 def get_skyfield_timescale(data_dir: Optional[str] = None) -> Any:
     """Return the managed Skyfield ``Timescale`` (IERS finals2000A), after ensuring cache load.
     Use this instead of ad-hoc ``load.timescale(builtin=True)`` so UT1-UTC and
@@ -122,15 +204,18 @@ def sun_position_de(t_jd: float, data_dir: Optional[str] = None) -> np.ndarray:
         Shape (3,) numpy array  [x, y, z]  in km, GCRS frame.
     """
     _ensure_skyfield(data_dir)
-    ts, eph = _require_skyfield_state(require_eph=True)
+    ts, eph = _require_skyfield_state(require_eph=False)
     from astra.jdutil import jd_utc_to_datetime
     dt = cast(datetime, jd_utc_to_datetime(t_jd))
     t = ts.utc(dt)
     if eph is None:
-        from astra.errors import EphemerisError
-        raise EphemerisError(
-            "Skyfield ephemeris unavailable during Sun position query."
-        )
+        from astra import config
+        if config.ASTRA_STRICT_MODE:
+            from astra.errors import EphemerisError
+            raise EphemerisError(
+                "Skyfield ephemeris unavailable during Sun position query."
+            )
+        return _sun_position_approx(t_jd)
     earth = eph["earth"]
     sun = eph["sun"]
     # Geometric / astrometric Sun vector from DE421 (light-time ~8.3 min; sub-km
@@ -173,15 +258,18 @@ def moon_position_de(t_jd: float, data_dir: Optional[str] = None) -> np.ndarray:
         Shape (3,) numpy array  [x, y, z]  in km, GCRS frame.
     """
     _ensure_skyfield(data_dir)
-    ts, eph = _require_skyfield_state(require_eph=True)
+    ts, eph = _require_skyfield_state(require_eph=False)
     from astra.jdutil import jd_utc_to_datetime
     dt = cast(datetime, jd_utc_to_datetime(t_jd))
     t = ts.utc(dt)
     if eph is None:
-        from astra.errors import EphemerisError
-        raise EphemerisError(
-            "Skyfield ephemeris unavailable during Moon position query."
-        )
+        from astra import config
+        if config.ASTRA_STRICT_MODE:
+            from astra.errors import EphemerisError
+            raise EphemerisError(
+                "Skyfield ephemeris unavailable during Moon position query."
+            )
+        return _moon_position_approx(t_jd)
     earth = eph["earth"]
     moon = eph["moon"]
     astrometric = earth.at(t).observe(moon)
@@ -444,11 +532,20 @@ def get_space_weather(
     # ── 1. Spacebook (Primary) ──
     from astra import spacebook
     from astra import config as _astra_cfg
+    from astra.errors import SpacebookError
     if _astra_cfg.SPACEBOOK_ENABLED:
         try:
             # Spacebook handles its own background refreshing
             return spacebook.get_space_weather_sb(t_jd)  # type: ignore[no-any-return]
-        except (ValueError, TypeError, ArithmeticError) as exc:
+        except ImportError:
+            raise
+        except (
+            SpacebookError,
+            ValueError,
+            TypeError,
+            ArithmeticError,
+            requests.RequestException,
+        ) as exc:
             logger.warning(
                 "Spacebook Space Weather lookup failed: %s. Falling back to CelesTrak...",
                 exc,
@@ -539,7 +636,7 @@ def atmospheric_density_empirical(
     ap_daily: float,
 ) -> float:
     """Compute atmospheric density using an empirical model.
-    In v3.5.0, this function defaults to the High-Fidelity NRLMSISE-00
+    In v3.6.0, this function defaults to the High-Fidelity NRLMSISE-00
     implementation for improved accuracy across all solar regimes.
     """
     return nrlmsise00_density(altitude_km, f107_obs, f107_adj, ap_daily)  # type: ignore[no-any-return]

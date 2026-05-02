@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 from astra import data_pipeline
 
 
@@ -12,6 +13,8 @@ def test_sun_position_shift_cta():
 
     # 2. Replicate old broken implementation (TT-direct)
     data_pipeline._ensure_skyfield()
+    if data_pipeline._skyfield_eph is None:
+        pytest.skip("DE421 ephemeris file is not cached; skipping DE421-specific accuracy regression.")
     t_old = data_pipeline._skyfield_ts.tt_jd(t_jd_utc)
     earth = data_pipeline._skyfield_eph["earth"]
     sun = data_pipeline._skyfield_eph["sun"]

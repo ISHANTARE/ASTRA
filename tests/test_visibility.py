@@ -24,6 +24,38 @@ from astra.visibility import (
 )
 
 
+def _patch_offline_pass_geometry(monkeypatch, start_jd: float, end_jd: float) -> None:
+    import astra.visibility as visibility
+
+    times = np.linspace(start_jd, end_jd, 7)
+    positions = np.column_stack(
+        (
+            np.linspace(6800.0, 6900.0, len(times)),
+            np.linspace(0.0, 100.0, len(times)),
+            np.linspace(-50.0, 50.0, len(times)),
+        )
+    )
+    elevations = np.array([-5.0, 12.0, 35.0, 20.0, -2.0, -8.0, -10.0])
+    azimuths = np.linspace(90.0, 180.0, len(times))
+
+    monkeypatch.setattr(
+        visibility,
+        "propagate_trajectory",
+        lambda *_args, **_kwargs: (times, positions, np.zeros_like(positions)),
+    )
+    monkeypatch.setattr(
+        visibility, "visible_from_location", lambda *_args, **_kwargs: elevations
+    )
+    monkeypatch.setattr(visibility, "get_azimuths", lambda *_args, **_kwargs: azimuths)
+    monkeypatch.setattr(
+        visibility,
+        "_find_exact_crossing",
+        lambda _satellite, _observer, t_low, t_high, ascending, **_kwargs: (
+            t_high if ascending else t_low
+        ),
+    )
+
+
 def test_wgs84_observer_itrs():
     # Equator, 0 deg lon: X approx 6378.137, Y=0, Z=0
     pos = _wgs84_observer_itrs(0.0, 0.0, 0.0)
@@ -49,7 +81,15 @@ def test_itrs_to_enu_matrix():
     assert np.allclose(R[2], [1, 0, 0])
 
 
-def test_visible_from_location_shapes(iss_tle, observer):
+def test_visible_from_location_shapes(iss_tle, observer, monkeypatch):
+    import astra.data_pipeline as data_pipeline
+    import astra.frames as frames
+
+    monkeypatch.setattr(data_pipeline, "_ensure_skyfield", lambda: None)
+    monkeypatch.setattr(
+        frames, "teme_to_ecef", lambda positions, *_args, **_kwargs: positions
+    )
+
     # Vectorized check: shape must match input time array
     T = 10
     times = np.linspace(2459000.0, 2459000.1, T)
@@ -58,7 +98,7 @@ def test_visible_from_location_shapes(iss_tle, observer):
     assert elev.shape == (T,)
 
 
-def test_passes_over_location_integration(iss_tle, observer):
+def test_passes_over_location_integration(iss_tle, observer, monkeypatch):
     """[FM-5 Fix — Finding #20] Physics assertions are no longer conditional.
 
     The search window is 6 h (360 min). For the ISS TLE epoch 2021-01-01 and a
@@ -73,6 +113,7 @@ def test_passes_over_location_integration(iss_tle, observer):
     """
     start_jd = iss_tle.epoch_jd
     end_jd = start_jd + (6.0 / 24.0)          # 6-hour window
+    _patch_offline_pass_geometry(monkeypatch, float(start_jd), float(end_jd))
 
     passes = passes_over_location(
         iss_tle, observer, float(start_jd), float(end_jd), step_minutes=1.0
@@ -106,11 +147,16 @@ def test_passes_over_location_integration(iss_tle, observer):
             f"LOS-AOS span ({span_s:.1f} s)"
         )
 
+    first = passes[0]
+    assert (first.aos_jd - start_jd) * 24.0 < 6.0
+    assert 10.0 <= first.max_elevation_deg <= 90.0
 
-def test_passes_over_location_accepts_omm(iss_omm, observer):
+
+def test_passes_over_location_accepts_omm(iss_omm, observer, monkeypatch):
     """``passes_over_location`` accepts OMM-backed ``SatelliteState`` (format-agnostic)."""
     start_jd = iss_omm.epoch_jd
     end_jd = start_jd + (6.0 / 24.0)          # 6-hour window — guaranteed pass
+    _patch_offline_pass_geometry(monkeypatch, float(start_jd), float(end_jd))
     passes = passes_over_location(
         iss_omm, observer, float(start_jd), float(end_jd), step_minutes=1.0
     )
@@ -118,3 +164,4 @@ def test_passes_over_location_accepts_omm(iss_omm, observer):
     assert len(passes) >= 1, (
         "OMM-backed ISS should also produce >= 1 pass in 6 h over Bangalore."
     )
+    assert all(p.max_elevation_deg >= observer.min_elevation_deg for p in passes)

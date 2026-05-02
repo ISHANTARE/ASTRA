@@ -56,7 +56,7 @@ def _two_omm_payload():
 
 
 def test_pipeline_two_omm_conjunction_screening_smoke(_two_omm_payload):
-    """Two OMM objects → propagated trajectories → find_conjunctions (no close event required)."""
+    """Two co-orbital OMM objects produce one deterministic conjunction event."""
     import numpy as np
 
     from astra.omm import parse_omm_json
@@ -71,4 +71,6 @@ def test_pipeline_two_omm_conjunction_screening_smoke(_two_omm_payload):
     elements = {sat.norad_id: make_debris_object(sat) for sat in sats}
 
     events = find_conjunctions(trajs, times, elements, threshold_km=5.0)
-    assert isinstance(events, list)
+    assert len(events) == 1
+    assert {events[0].object_a_id, events[0].object_b_id} == {"25544", "99998"}
+    assert events[0].miss_distance_km == pytest.approx(0.0, abs=1e-9)

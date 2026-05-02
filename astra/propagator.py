@@ -781,9 +781,8 @@ def _acceleration_v1_njit(
                 nu = 1.0
                 if srp_use_shadow:
                     # Upgrade from cylindrical to conical shadow (PHY-D)
-                    from astra.constants import SUN_RADIUS_KM
                     nu = _srp_illumination_factor_njit(
-                        r, sun_pos, EARTH_EQUATORIAL_RADIUS_KM, SUN_RADIUS_KM
+                        r, sun_pos, EARTH_EQUATORIAL_RADIUS_KM, 695700.0
                     )
                 a_total += (nu * amag) * (d_ss / d_mag_ss)
     return a_total  # type: ignore[no-any-return]
@@ -1680,7 +1679,7 @@ def _prepare_maneuvers(maneuvers: list[FiniteBurn], mass_kg: Optional[float]) ->
         validate_burn(burn, running_mass)
         running_mass -= burn.mass_flow_rate_kg_s * burn.duration_s
     return burns, mass_kg
-def _prepare_drag_environment(t_jd: float, drag_ref_alt_km: float, use_drag: bool, use_empirical_drag: bool) -> tuple[float, float, float, float, float]:
+def _prepare_drag_environment(t_jd: float, drag_ref_alt_km: float, use_drag: bool, use_empirical_drag: bool) -> tuple[float, float, float, float, float, float]:
     f107_obs, f107_adj, ap_daily = 150.0, 150.0, 15.0
     drag_rho = 0.0
     drag_H_km = 58.515
@@ -1709,7 +1708,7 @@ def _prepare_drag_environment(t_jd: float, drag_ref_alt_km: float, use_drag: boo
             drag_rho = DRAG_REF_DENSITY_KG_M3
             drag_H_km = DRAG_SCALE_HEIGHT_KM
             drag_ref_alt_km = 400.0
-    return drag_rho, drag_H_km, f107_obs, f107_adj, ap_daily
+    return drag_rho, drag_H_km, drag_ref_alt_km, f107_obs, f107_adj, ap_daily
 def _integrate_segment(
     seg_start_s: float, seg_end_s: float, active_burn: Optional[FiniteBurn],
     current_r: np.ndarray, current_v: np.ndarray, current_mass: Optional[float],
@@ -1957,7 +1956,7 @@ def propagate_cowell(
     # drag_ref_alt_km is updated from current_r at each segment boundary below.
     # This initial value is used only for the first segment & as the drag environment seed.
     drag_ref_alt_km = max(0.0, _r0_mag - EARTH_EQUATORIAL_RADIUS_KM)
-    drag_rho, drag_H_km, f107_obs, f107_adj, ap_daily = _prepare_drag_environment(t_jd0, drag_ref_alt_km, use_drag, use_empirical_drag)
+    drag_rho, drag_H_km, drag_ref_alt_km, f107_obs, f107_adj, ap_daily = _prepare_drag_environment(t_jd0, drag_ref_alt_km, use_drag, use_empirical_drag)
     _initial_cov = getattr(state0, "covariance_km2", None)
     # Default to 6x6 identity (scaled) if using STM.
     if _initial_cov is not None:
@@ -1994,7 +1993,7 @@ def propagate_cowell(
             # as the satellite decays to lower altitudes over long propagations.
             _current_r_mag = float(np.linalg.norm(current_r))
             drag_ref_alt_km = max(0.0, _current_r_mag - EARTH_EQUATORIAL_RADIUS_KM)
-            drag_rho, drag_H_km, f107_obs, f107_adj, ap_daily = _prepare_drag_environment(
+            drag_rho, drag_H_km, drag_ref_alt_km, f107_obs, f107_adj, ap_daily = _prepare_drag_environment(
                 t_jd0 + seg_start_s / 86400.0, drag_ref_alt_km, use_drag, use_empirical_drag
             )
         success, msg, seg_states, current_r, current_v, current_mass, current_phi_flat, drag_mass_kg = _integrate_segment(

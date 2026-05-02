@@ -34,7 +34,7 @@ Two Propagation Tiers
 
    Physical forces modelled:
 
-   - **Gravity:** WGS-84 zonal harmonics :math:`J_2`, :math:`J_3`, :math:`J_4`.
+   - **Gravity:** WGS-84 zonal harmonics through :math:`J_6`.
    - **Atmospheric Drag:** NRLMSISE-00 atmospheric density model driven by live
      Space Weather indicators (F10.7, Ap).  Calibration anchor:
      ρ(400 km, F10.7 = 150, Ap = 15) ≈ 3.7 × 10\ :sup:`−12` kg/m³.

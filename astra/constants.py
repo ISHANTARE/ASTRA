@@ -142,6 +142,22 @@ assert abs(J2 - 1.08262668e-3) < 1e-15, (
     f"J2 ({J2!r}) diverged from canonical EGM96/WGS-84 value 1.08262668e-3. "
     "Update constants.py AND propagator.py J2 / J2c inlined literals in sync."
 )
+assert abs(J3 - (-2.53265649e-6)) < 1e-18, (
+    f"J3 ({J3!r}) diverged from canonical EGM96/WGS-84 value -2.53265649e-6. "
+    "Update constants.py AND propagator.py/covariance.py inlined literals in sync."
+)
+assert abs(J4 - (-1.61962159e-6)) < 1e-18, (
+    f"J4 ({J4!r}) diverged from canonical EGM96/WGS-84 value -1.61962159e-6. "
+    "Update constants.py AND propagator.py/covariance.py inlined literals in sync."
+)
+assert abs(J5 - (-2.27626414e-7)) < 1e-19, (
+    f"J5 ({J5!r}) diverged from canonical EGM96 value -2.27626414e-7. "
+    "Update constants.py AND propagator.py inlined literals in sync."
+)
+assert abs(J6 - 5.40681239e-7) < 1e-19, (
+    f"J6 ({J6!r}) diverged from canonical EGM96 value 5.40681239e-7. "
+    "Update constants.py AND propagator.py inlined literals in sync."
+)
 # Earth gravitational parameter guard.
 # propagator._acceleration_njit inlines mu = 398600.4418.
 assert EARTH_MU_KM3_S2 == 398600.4418, (

@@ -8,6 +8,7 @@ advanced 3-phase optimization algorithm including:
 """
 from __future__ import annotations
 import concurrent.futures
+import math
 from typing import Optional, Any
 import numpy as np
 import scipy.interpolate
@@ -210,17 +211,28 @@ def closest_approach(
     Accepts pre-computed splines to allow amortised O(1)
     evaluation time in tight loops where re-building O(N log N) is prohibitive.
     """
+    times_jd = np.asarray(times_jd, dtype=float)
+    if times_jd.ndim != 1:
+        raise AstraError("times_jd must be a one-dimensional array.")
+    if len(times_jd) != len(trajectory_a) or len(times_jd) != len(trajectory_b):
+        raise AstraError(
+            "trajectory_a, trajectory_b, and times_jd must have matching lengths."
+        )
+    if np.any(np.diff(times_jd) <= 0.0):
+        raise AstraError("times_jd must be strictly increasing for spline TCA refinement.")
     coarse_dists = distance_3d(trajectory_a, trajectory_b)
     t_idx = int(np.argmin(coarse_dists))
     if len(times_jd) < 3:
         return float(coarse_dists[t_idx]), float(times_jd[t_idx]), t_idx  # type: ignore[no-any-return]
+    use_local_seconds = spline_A is None and spline_B is None
+    spline_times = (times_jd - times_jd[0]) * 86400.0 if use_local_seconds else times_jd
     if spline_A is None:
         spline_A = scipy.interpolate.CubicSpline(
-            times_jd, trajectory_a, bc_type="natural"
+            spline_times, trajectory_a, bc_type="natural"
         )
     if spline_B is None:
         spline_B = scipy.interpolate.CubicSpline(
-            times_jd, trajectory_b, bc_type="natural"
+            spline_times, trajectory_b, bc_type="natural"
         )
     idx_low = max(0, t_idx - 1)
     idx_high = min(len(times_jd) - 1, t_idx + 1)
@@ -232,28 +244,35 @@ def closest_approach(
         from scipy.optimize import minimize_scalar
         def _dist_fn(t_jd: float) -> float:
             return float(np.linalg.norm(spline_A(t_jd) - spline_B(t_jd)))
-        _lo = float(times_jd[idx_low])
-        _hi = float(times_jd[idx_high])
+        _lo = float(spline_times[idx_low])
+        _hi = float(spline_times[idx_high])
         _res = minimize_scalar(
             _dist_fn,
             bounds=(_lo, _hi),
             method="bounded",
-            options={"xatol": 1.16e-8},  # 1.16e-8 JD ≈ 1 ms
+            options={"xatol": 1e-3 if use_local_seconds else 1.16e-8},
         )
         if _res.success and _lo <= _res.x <= _hi:
-            tca_jd_fine = float(_res.x)
+            if use_local_seconds:
+                tca_jd_fine = float(times_jd[0] + float(_res.x) / 86400.0)
+            else:
+                tca_jd_fine = float(_res.x)
             min_dist_fine = float(_res.fun)
             return min_dist_fine, tca_jd_fine, t_idx  # type: ignore[no-any-return]
     except Exception as exc:
         logger.debug(f"Brent TCA refinement failed ({exc}). Falling back to coarse 100-point scan.")
         pass  # fall back to coarse scan
     # Coarse fallback: dense 100-point bracket scan
-    t_dense = np.linspace(times_jd[idx_low], times_jd[idx_high], 100)
+    t_dense = np.linspace(spline_times[idx_low], spline_times[idx_high], 100)
     rA_dense = spline_A(t_dense)
     rB_dense = spline_B(t_dense)
     dense_dists = distance_3d(rA_dense, rB_dense)
     t_dense_idx = int(np.argmin(dense_dists))
-    return float(dense_dists[t_dense_idx]), float(t_dense[t_dense_idx]), t_idx  # type: ignore[no-any-return]
+    if use_local_seconds:
+        tca_jd_dense = float(times_jd[0] + float(t_dense[t_dense_idx]) / 86400.0)
+    else:
+        tca_jd_dense = float(t_dense[t_dense_idx])
+    return float(dense_dists[t_dense_idx]), tca_jd_dense, t_idx  # type: ignore[no-any-return]
 def find_conjunctions(
     trajectories: TrajectoryMap,
     times_jd: np.ndarray,
@@ -395,7 +414,7 @@ def find_conjunctions(
                 _spline_dist,
                 bounds=(_lo_t, _hi_t),
                 method="bounded",
-                options={"xatol": 1.16e-8},  # ~1 ms in JD units
+                options={"xatol": 1e-3},
             )
             if _brent.success and _lo_t <= _brent.x <= _hi_t:
                 tca_s = float(_brent.x)
@@ -405,10 +424,8 @@ def find_conjunctions(
                 pos_B = spline_B(tca_s)
         except Exception as exc:
             logger.debug(f"Brent TCA refinement failed ({exc}). Falling back to dense scan.")
-            seconds_in_bracket = int((_hi_t - _lo_t) * 86400.0)
-            if seconds_in_bracket < 100:
-                seconds_in_bracket = 100
-            t_dense = np.linspace(_lo_t, _hi_t, seconds_in_bracket)
+            samples_in_bracket = max(100, int(math.ceil(_hi_t - _lo_t)) + 1)
+            t_dense = np.linspace(_lo_t, _hi_t, samples_in_bracket)
             rA_dense = spline_A(t_dense)
             rB_dense = spline_B(t_dense)
             dense_dists = distance_3d(rA_dense, rB_dense)

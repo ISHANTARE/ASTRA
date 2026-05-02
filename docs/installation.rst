@@ -31,9 +31,10 @@ core physics. Install it with the **viz** extra:
 
     pip install "astra-core-engine[viz]"
 
-The top-level name ``plot_trajectories`` is resolved lazily when first accessed;
-without Plotly installed, importing it raises a clear ``ImportError`` pointing to
-the ``viz`` extra.
+The top-level names ``plot_trajectories`` and ``plot_ground_track`` are lightweight
+wrappers, so ``from astra import *`` works in a core install. Calling either
+function without Plotly installed raises a clear ``ImportError`` pointing to the
+``viz`` extra.
 
 Development and tests
 ---------------------
@@ -45,8 +46,15 @@ Development and tests
     pip install -e ".[test]"
 
 The **test** extra includes **pytest >=8.0**, **plotly >=5.18**, and type-stub
-packages (``scipy-stubs``, ``types-requests``, ``types-defusedxml``) so the
-full test suite and mypy checks run in CI.
+packages (``scipy-stubs``, ``types-requests``, ``types-defusedxml``), plus
+``mypy`` so the full test suite and type checks run in CI.
+
+Pytest is configured in ``pyproject.toml`` with strict marker/config validation.
+Test-time data, Numba, pytest cache files, and temporary files default to
+``ASTRA_TEST_CACHE_DIR`` or, if unset, a deterministic directory under the
+test tree (``tests/.astra-test-cache``). Set ``ASTRA_TEST_CACHE_DIR`` in CI or
+local shells when you need an explicitly controlled cache root outside the
+workspace.
 
 Verifying the install
 ---------------------
@@ -98,7 +106,8 @@ Type hints (PEP 561)
 
 The package ships **py.typed** for static analysis tools (mypy, pyright) that
 consume inline annotations. ``mypy`` is pre-configured in ``pyproject.toml``
-with ``strict = true``.
+as a CI baseline; the current configuration is intentionally non-strict while
+the numerical array-heavy APIs are incrementally typed.
 
 Further reading
 ---------------

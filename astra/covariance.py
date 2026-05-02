@@ -23,6 +23,52 @@ from astra.constants import (
 # @njit functions that are in their global namespace at compile time;
 # a deferred or local import is invisible to the type-inference pass.
 from astra.propagator import _nrlmsise00_density_njit  # noqa: E402
+
+
+def _as_covariance_matrix(name: str, value: np.ndarray) -> np.ndarray:
+    """Return a validated 3x3 or 6x6 covariance matrix.
+
+    Args:
+        name: Human-readable argument name used in error messages.
+        value: Candidate covariance matrix.
+
+    Returns:
+        A finite float ndarray with shape ``(3, 3)`` or ``(6, 6)``.
+
+    Example:
+        >>> _as_covariance_matrix("cov", np.eye(3)).shape
+        (3, 3)
+    """
+    arr = np.asarray(value, dtype=float)
+    if arr.shape not in ((3, 3), (6, 6)):
+        raise ValueError(f"{name} must have shape (3, 3) or (6, 6), got {arr.shape}.")
+    if not np.all(np.isfinite(arr)):
+        raise ValueError(f"{name} must contain only finite values.")
+    return arr
+
+
+def _as_vector3(name: str, value: np.ndarray) -> np.ndarray:
+    """Return a validated finite 3-vector.
+
+    Args:
+        name: Human-readable argument name used in error messages.
+        value: Candidate vector.
+
+    Returns:
+        A finite float vector with shape ``(3,)``.
+
+    Example:
+        >>> _as_vector3("r", np.array([1, 2, 3])).shape
+        (3,)
+    """
+    arr = np.asarray(value, dtype=float).reshape(-1)
+    if arr.shape != (3,):
+        raise ValueError(f"{name} must be a 3-vector, got shape {arr.shape}.")
+    if not np.all(np.isfinite(arr)):
+        raise ValueError(f"{name} must contain only finite values.")
+    return arr
+
+
 def rotate_covariance_rtn_to_eci(
     cov_rtn: np.ndarray,
     r_eci_km: np.ndarray,
@@ -33,17 +79,25 @@ def rotate_covariance_rtn_to_eci(
     """
     r = np.asarray(r_eci_km, dtype=float).ravel()
     v = np.asarray(v_eci_km_s, dtype=float).ravel()
+    C = np.asarray(cov_rtn, dtype=float)
+    if C.shape != (3, 3):
+        raise ValueError(f"cov_rtn must have shape (3, 3), got {C.shape}.")
+    if r.shape != (3,) or v.shape != (3,):
+        raise ValueError(
+            f"r_eci_km and v_eci_km_s must be 3-vectors, got {r.shape} and {v.shape}."
+        )
+    if not (np.all(np.isfinite(C)) and np.all(np.isfinite(r)) and np.all(np.isfinite(v))):
+        raise ValueError("Covariance rotation inputs must contain only finite values.")
     r_mag = float(np.linalg.norm(r))
     h = np.cross(r, v)
     h_mag = float(np.linalg.norm(h))
     if r_mag < 1e-9 or h_mag < 1e-12:
-        return np.asarray(cov_rtn, dtype=float).copy()
+        return C.copy()
     r_hat = r / r_mag
     n_hat = h / h_mag
     t_hat = np.cross(n_hat, r_hat)
     t_hat /= max(float(np.linalg.norm(t_hat)), 1e-15)
     B = np.column_stack((r_hat, t_hat, n_hat))
-    C = np.asarray(cov_rtn, dtype=float)
     return B @ C @ B.T  # type: ignore[no-any-return]
 def _exact_pc_2d_integral(
     miss_2d: np.ndarray,
@@ -127,8 +181,21 @@ def compute_collision_probability(
     Returns:
         Probability of collision (float) bounded [0.0, 1.0], or None if covariance is singular.
     """
+    miss_vector_km = _as_vector3("miss_vector_km", miss_vector_km)
+    rel_vel_km_s = _as_vector3("rel_vel_km_s", rel_vel_km_s)
+    cov_a = _as_covariance_matrix("cov_a", cov_a)
+    cov_b = _as_covariance_matrix("cov_b", cov_b)
+    if cov_a.shape != cov_b.shape:
+        raise ValueError(
+            f"cov_a and cov_b must have matching dimensions, got {cov_a.shape} and {cov_b.shape}."
+        )
+    if not (math.isfinite(radius_a_km) and math.isfinite(radius_b_km)):
+        raise ValueError("Collision radii must be finite.")
+    if radius_a_km < 0.0 or radius_b_km < 0.0:
+        raise ValueError("Collision radii must be non-negative.")
+
     combined_radius_km = radius_a_km + radius_b_km
-    C = cov_a + cov_b
+    C = (cov_a + cov_b)[:3, :3]
     if np.all(C == 0):
         # Deterministic collision boolean
         return 1.0 if np.linalg.norm(miss_vector_km) <= combined_radius_km else 0.0
@@ -411,11 +478,26 @@ def compute_collision_probability_mc(
     Returns:
         Probability of collision (float) bounded [0.0, 1.0].
     """
+    miss_vector_km = _as_vector3("miss_vector_km", miss_vector_km)
+    rel_vel_km_s = _as_vector3("rel_vel_km_s", rel_vel_km_s)
+    cov_a = _as_covariance_matrix("cov_a", cov_a)
+    cov_b = _as_covariance_matrix("cov_b", cov_b)
     if cov_a.shape == (3, 3) or cov_b.shape == (3, 3):
         raise ValueError(
             "Monte-Carlo (6DOF) collision probability requires a 6x6 covariance matrix. "
             "Legacy 3x3 matrices are unsupported here; fall back to 2D Foster-Chan."
         )
+    if cov_a.shape != cov_b.shape:
+        raise ValueError(
+            f"cov_a and cov_b must have matching dimensions, got {cov_a.shape} and {cov_b.shape}."
+        )
+    if not (math.isfinite(radius_a_km) and math.isfinite(radius_b_km)):
+        raise ValueError("Collision radii must be finite.")
+    if radius_a_km < 0.0 or radius_b_km < 0.0:
+        raise ValueError("Collision radii must be non-negative.")
+    n_samples = int(n_samples)
+    if n_samples <= 0:
+        raise ValueError(f"n_samples must be positive, got {n_samples}.")
     combined_radius_km = radius_a_km + radius_b_km
     combined_cov = cov_a + cov_b
     if np.all(combined_cov == 0):
@@ -506,7 +588,8 @@ def compute_collision_probability_mc(
         # Refine the time window for the HCW propagator.
         # For fast co-orbital encounters, the 1-period window is too coarse.
         # Ensure the window captures at least several times the encounter duration.
-        t_window_s = min(2.0 * math.pi / n_rad, 10.0 * combined_radius_km / max(rel_speed, 1e-6))
+        encounter_window_s = 10.0 * combined_radius_km / max(rel_speed, 1e-6)
+        t_window_s = min(2.0 * math.pi / n_rad, max(600.0, encounter_window_s))
         nt = n_rad
         times = np.linspace(-t_window_s, t_window_s, 400)
         nt_arr = nt * times
