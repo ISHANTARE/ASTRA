@@ -793,9 +793,14 @@ def propagate_covariance_stm(
     drag_config: Optional[Any] = None,
 ) -> np.ndarray:
     """Propagate a full 6x6 covariance matrix using the State Transition Matrix.
-    Scope: standalone Earth-gravity-plus-drag STM. For third-body gravity, SRP,
-    maneuvers, or J5/J6 parity with the propagated trajectory, use
-    ``propagate_cowell(include_stm=True)``.
+
+    .. warning::
+        The STM Jacobian includes J2+J3+J4 and atmospheric drag only. The trajectory
+        kernel includes J5, J6, Sun/Moon third-body gravity, and SRP. For GEO/HEO
+        objects these omitted terms are significant. Use
+        ``propagate_cowell(include_stm=True)`` for force-model-consistent covariance.
+        This function is appropriate for LEO conjunction screening only.
+
     Uses linearized J2/J3/J4 + drag dynamics to compute the 6x6 STM
     via numerical integration, mapping the full 6x6 state uncertainty:
         C(t) = Φ(t, t₀) · C₀ · Φ(t, t₀)ᵀ
@@ -819,7 +824,10 @@ def propagate_covariance_stm(
     # Capture drag constants for STM Jacobian
     Bc = 0.0
     rho_ref = 0.0
-    H_km = 50.0  # Default scale height (km)
+    # BL-13: Use canonical scale height from constants, not the old hardcoded 50.0 km
+    # which was 15% wrong at 400 km altitude (correct value ~58.5 km).
+    from astra.constants import DRAG_SCALE_HEIGHT_KM as _default_H_km
+    H_km = _default_H_km
     # DEF-001 (Strategy A): compute rho_ref at actual initial orbit altitude, not 400 km
     from astra.constants import (
         EARTH_EQUATORIAL_RADIUS_KM as _Re,
@@ -915,3 +923,117 @@ def propagate_covariance_stm(
         )
     Phi_final = sol.y[6:, -1].reshape(6, 6)
     return Phi_final @ cov0_6x6 @ Phi_final.T  # type: ignore[no-any-return]
+
+
+# ---------------------------------------------------------------------------
+# Collision Probability Time Series (AS-05)
+# ---------------------------------------------------------------------------
+def compute_collision_probability_timeseries(
+    miss_vectors_km: np.ndarray,
+    rel_velocities_km_s: np.ndarray,
+    covariances_a: np.ndarray,
+    covariances_b: np.ndarray,
+    times_jd: np.ndarray,
+    radius_a_km: float = 0.01,
+    radius_b_km: float = 0.01,
+) -> np.ndarray:
+    """Compute collision probability Pc(t) at each time step in a screening window.
+
+    Evaluates the standard Foster-Chan 2D encounter-plane collision probability
+    at each of ``N`` time steps. This produces a Pc time series required for
+    CDM screening compliance, where operators need to monitor how Pc evolves
+    over a 7-day look-ahead window, not just its value at TCA.
+
+    Uses :func:`compute_collision_probability` at each step. If any individual
+    computation fails (singular covariance, zero relative velocity), the Pc
+    for that step is set to ``NaN``.
+
+    Args:
+        miss_vectors_km: (N, 3) array of relative position vectors at each
+            time step (km).
+        rel_velocities_km_s: (N, 3) array of relative velocity vectors at
+            each time step (km/s).
+        covariances_a: (N, 3, 3) or (N, 6, 6) positional/state covariance
+            matrices for Object A at each time step.
+        covariances_b: (N, 3, 3) or (N, 6, 6) positional/state covariance
+            matrices for Object B at each time step.
+        times_jd: (N,) array of Julian Dates for each time step. Used for
+            output indexing; not directly consumed by the Pc formula.
+        radius_a_km: Hard-body radius for Object A (km). Default 0.01 (10 m).
+        radius_b_km: Hard-body radius for Object B (km). Default 0.01 (10 m).
+
+    Returns:
+        (N,) array of collision probabilities. Each element is in [0.0, 1.0]
+        or ``NaN`` if the computation failed for that step.
+
+    Raises:
+        ValueError: If input array shapes are inconsistent (mismatched N
+            dimensions or wrong axis sizes).
+
+    Example::
+
+        import numpy as np
+        import astra
+        N = 100
+        miss = np.random.randn(N, 3) * 0.5      # km
+        vrel = np.tile([7.0, 0.0, 0.0], (N, 1))  # km/s
+        cov_a = np.tile(np.eye(3) * 0.01, (N, 1, 1))  # km²
+        cov_b = np.tile(np.eye(3) * 0.01, (N, 1, 1))
+        times = np.linspace(2460000.5, 2460007.5, N)
+        pc_series = astra.compute_collision_probability_timeseries(
+            miss, vrel, cov_a, cov_b, times
+        )
+        # pc_series is (100,) array of Pc values over 7 days
+    """
+    miss_vectors_km = np.asarray(miss_vectors_km, dtype=float)
+    rel_velocities_km_s = np.asarray(rel_velocities_km_s, dtype=float)
+    covariances_a = np.asarray(covariances_a, dtype=float)
+    covariances_b = np.asarray(covariances_b, dtype=float)
+    times_jd = np.asarray(times_jd, dtype=float)
+
+    # ── Shape validation ─────────────────────────────────────────────────────
+    if miss_vectors_km.ndim != 2 or miss_vectors_km.shape[1] != 3:
+        raise ValueError(
+            f"miss_vectors_km must be (N, 3), got {miss_vectors_km.shape}."
+        )
+    N = miss_vectors_km.shape[0]
+
+    if rel_velocities_km_s.shape != (N, 3):
+        raise ValueError(
+            f"rel_velocities_km_s must be ({N}, 3), got {rel_velocities_km_s.shape}."
+        )
+    if times_jd.shape != (N,):
+        raise ValueError(
+            f"times_jd must be ({N},), got {times_jd.shape}."
+        )
+    if covariances_a.shape[0] != N or covariances_b.shape[0] != N:
+        raise ValueError(
+            f"covariances_a and covariances_b must have first dimension {N}. "
+            f"Got {covariances_a.shape[0]} and {covariances_b.shape[0]}."
+        )
+    if covariances_a.shape[1:] != covariances_b.shape[1:]:
+        raise ValueError(
+            f"Covariance matrix shapes must match: got {covariances_a.shape[1:]} "
+            f"and {covariances_b.shape[1:]}."
+        )
+
+    # ── Compute Pc at each time step ─────────────────────────────────────────
+    pc_series = np.full(N, np.nan, dtype=float)
+
+    for k in range(N):
+        try:
+            pc = compute_collision_probability(
+                miss_vector_km=miss_vectors_km[k],
+                rel_vel_km_s=rel_velocities_km_s[k],
+                cov_a=covariances_a[k],
+                cov_b=covariances_b[k],
+                radius_a_km=radius_a_km,
+                radius_b_km=radius_b_km,
+            )
+            pc_series[k] = pc
+        except (ValueError, ArithmeticError, np.linalg.LinAlgError):
+            # Singular covariance, zero velocity, or other numerical issue.
+            # Leave as NaN — caller can identify failed steps.
+            pass
+
+    return pc_series

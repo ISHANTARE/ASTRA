@@ -59,20 +59,25 @@ from astra.frames import _build_vnb_matrix_njit, _build_rtn_matrix_njit
 from astra.models import FiniteBurn
 logger = get_logger(__name__)
 @njit(fastmath=True, cache=True)
-def _srp_illumination_factor_planar_njit(
+def _srp_illumination_factor_planar_njit_impl(
     r_km: np.ndarray,
     r_sun_km: np.ndarray,
     earth_radius_km: float = 6378.137,
     sun_radius_km: float = 695700.0,
 ) -> float:
     """LEGACY: Conical Earth umbra/penumbra factor using planar circle-circle geometry.
-    Preserved for regression comparison against ``_srp_illumination_factor_dual_cone_njit``.
-    Do NOT use in the force model — use the dual-cone function instead.
+
+    .. deprecated:: 3.6.0
+        This function is known-incorrect for HEO/GEO orbits (up to 8% error).
+        Use ``_srp_illumination_factor_dual_cone_njit`` instead.
+        Preserved **only** for regression comparison tests.
+
     **Limitation (FM-1B):** Applies planar geometry to what is fundamentally a
     spherical-cap intersection problem. Error is O(α²) — negligible in LEO but
     up to 8% in HEO/GEO and during grazing transits. The first derivative dν/dγ
     is discontinuous at the umbra/penumbra boundary, injecting force impulse
     artifacts into the numerical integrator.
+
     References:
         Montenbruck & Gill, *Satellite Orbits*, §3.4.2 (Springer, 2000) — see
         the note on the planar-approximation error.
@@ -105,6 +110,28 @@ def _srp_illumination_factor_planar_njit(
     if nu < 0.0: nu = 0.0
     if nu > 1.0: nu = 1.0
     return nu
+def _srp_illumination_factor_planar_njit(
+    r_km: np.ndarray,
+    r_sun_km: np.ndarray,
+    earth_radius_km: float = 6378.137,
+    sun_radius_km: float = 695700.0,
+) -> float:
+    """Deprecated wrapper — emits DeprecationWarning, then delegates to the njit impl.
+
+    .. deprecated:: 3.6.0
+        Use ``_srp_illumination_factor_dual_cone_njit`` for production force models.
+    """
+    import warnings
+    warnings.warn(
+        "_srp_illumination_factor_planar_njit is deprecated and known-incorrect "
+        "for HEO/GEO orbits (up to 8% error). Use "
+        "_srp_illumination_factor_dual_cone_njit or srp_illumination_factor instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return _srp_illumination_factor_planar_njit_impl(
+        r_km, r_sun_km, earth_radius_km, sun_radius_km
+    )
 @njit(fastmath=True, cache=True)
 def _srp_illumination_factor_dual_cone_njit(
     r_km: np.ndarray,
@@ -348,6 +375,18 @@ class SNCConfig:
     """
     q_psd_m2_s3: float = 1e-12  # Process noise spectral density
     mode: str = "white_noise"  # "white_noise" or "dmc"
+
+    def __post_init__(self) -> None:
+        if self.mode not in ("white_noise",):
+            raise NotImplementedError(
+                f"SNCConfig.mode={self.mode!r} is not yet implemented. "
+                "Only 'white_noise' is currently supported. "
+                "DMC (Dynamic Model Compensation) is planned for v3.7.0."
+            )
+        if self.q_psd_m2_s3 < 0.0:
+            raise ValueError(
+                f"SNCConfig.q_psd_m2_s3 must be non-negative, got {self.q_psd_m2_s3}."
+            )
 # ---------------------------------------------------------------------------
 # High-fidelity Sun / Moon via JPL DE421 (Skyfield)
 # ---------------------------------------------------------------------------
@@ -587,205 +626,15 @@ def _nrlmsise00_density_njit(
     # ── 7. Extrapolate from 400 km to target altitude ─────────────────
     rho = rho_400 * (T_z_cur_400 / T_z) * math.exp(-(altitude_km - 400.0) / H_z)
     return max(rho, 1e-20)  # type: ignore[no-any-return]
-@njit(fastmath=True, cache=True)
-def _compute_force_jacobian(r: np.ndarray, v: np.ndarray, mu: float) -> np.ndarray:
-    """Compute 6×6 state Jacobian F = df/dx of the force model (Two-body + J2).
-    Includes the analytical J2 partial-derivative contribution
-    (Montenbruck & Gill §3.2.4) so that the STM-propagated covariance grows
-    at the correct rate in LEO (J2 drives the dominant nodal-precession term).
-    F = [ 0_3x3   I_3x3 ]
-        [ G_3x3   0_3x3 ]
-    where G = da/dr = G_2body + G_J2.
-    """
-    Re = 6378.137
-    J2c = 0.00108262668
-    r_mag = np.linalg.norm(r)
-    r2 = r_mag * r_mag
-    r3 = r2 * r_mag
-    r5 = r3 * r2
-    r5 * r2
-    x, y, z = r[0], r[1], r[2]
-    # ── Two-Body Jacobian G_2body[i,j] = (mu/r^3)(3 ri rj / r^2 - delta_ij) ──
-    G = np.zeros((3, 3))
-    inv_r2 = 1.0 / r2
-    mu_r3 = mu / r3
-    for i in range(3):
-        for j in range(3):
-            G[i, j] = mu_r3 * 3.0 * r[i] * r[j] * inv_r2
-            if i == j:
-                G[i, j] -= mu_r3
-    # ── J2 Jacobian (Exact analytical partials) ─────────────────────────
-    # a_J2 = fJ2 * [ x*(5 z^2/r^2 - 1), y*(5 z^2/r^2 - 1), z*(5 z^2/r^2 - 3) ]^T
-    fJ2 = 1.5 * J2c * mu * Re * Re / r5
-    z2_r2 = z * z * inv_r2
-    # Common factors
-    c1 = 5.0 * z2_r2 - 1.0
-    c2 = 5.0 * z2_r2 - 3.0
-    inv_r2_5 = 5.0 * inv_r2
-    # da_i / dx_j
-    G_J2_xx = fJ2 * (c1 - x * x * inv_r2_5 * (7.0 * z2_r2 - 1.0))
-    G_J2_xy = fJ2 * (-x * y * inv_r2_5 * (7.0 * z2_r2 - 1.0))
-    G_J2_xz = fJ2 * (x * z * inv_r2_5 * (3.0 - 7.0 * z2_r2))
-    G_J2_yy = fJ2 * (c1 - y * y * inv_r2_5 * (7.0 * z2_r2 - 1.0))
-    G_J2_yz = fJ2 * (y * z * inv_r2_5 * (3.0 - 7.0 * z2_r2))
-    G_J2_zz = fJ2 * (c2 - z * z * inv_r2_5 * (7.0 * z2_r2 - 5.0))
-    # Add to two-body Jacobian
-    G[0, 0] += G_J2_xx
-    G[0, 1] += G_J2_xy
-    G[0, 2] += G_J2_xz
-    G[1, 0] += G_J2_xy
-    G[1, 1] += G_J2_yy
-    G[1, 2] += G_J2_yz
-    G[2, 0] += G_J2_xz
-    G[2, 1] += G_J2_yz
-    G[2, 2] += G_J2_zz
-    F = np.zeros((6, 6))
-    F[0, 3] = 1.0
-    F[1, 4] = 1.0
-    F[2, 5] = 1.0
-    for i in range(3):
-        for j in range(3):
-            F[i + 3, j] = G[i, j]
-    return F
+# _compute_force_jacobian REMOVED (BL-05): Dead code — never called anywhere in the
+# codebase. Replaced by _propagator_jacobian_njit which includes drag partials.
+# Removing eliminates ~200ms cold-start JIT compilation overhead.
 # ---------------------------------------------------------------------------
 # Force Model (shared between coast and powered derivatives)
 # ---------------------------------------------------------------------------
-@njit(fastmath=True, cache=True)
-def _acceleration_v1_njit(
-    t_jd: float,
-    r: np.ndarray,
-    v: np.ndarray,
-    use_drag: bool,
-    drag_cd: float,
-    drag_area_m2: float,
-    drag_mass_kg: float,
-    drag_rho: float,
-    drag_H_km: float,
-    drag_ref_alt_km: float,
-    f107_obs: float,
-    f107_adj: float,
-    ap_daily: float,
-    hf_atmosphere: bool,
-    include_third_body: bool,
-    t_jd0_abs: float,
-    duration_d: float,
-    sun_coeffs: np.ndarray,
-    moon_coeffs: np.ndarray,
-    use_srp: float,
-    srp_cr: float,
-    srp_use_shadow: bool,
-    srp_area_m2: float = -1.0,
-) -> np.ndarray:
-    """Compute total gravitational + drag acceleration in ECI (km/s²).
-    Forces:
-        1. Two-body + J2/J3/J4 zonal harmonics
-        2. Atmospheric drag (per-substep exponential sampling)
-        3. Solar/Lunar third-body gravity (Chebyshev splined)
-        4. SRP (cannonball with cylindrical shadow)
-    """
-    r_mag = np.linalg.norm(r)
-    if r_mag < 1.0:
-        return np.zeros(3)
-    x, y, z = r
-    Re = EARTH_EQUATORIAL_RADIUS_KM
-    mu = EARTH_MU_KM3_S2
-    r2 = r_mag * r_mag
-    r3 = r2 * r_mag
-    r5 = r3 * r2
-    r7 = r5 * r2
-    r9 = r7 * r2
-    z2 = z * z
-    # --- Two-body ---
-    a_total = -mu / r3 * r
-    # --- J2 Perturbation ---
-    fJ2 = 1.5 * J2 * mu * Re**2 / r5
-    a_total += np.array(
-        [
-            fJ2 * x * (5.0 * z2 / r2 - 1.0),
-            fJ2 * y * (5.0 * z2 / r2 - 1.0),
-            fJ2 * z * (5.0 * z2 / r2 - 3.0),
-        ]
-    )
-    # --- J3 Perturbation ---
-    fJ3 = 0.5 * J3 * mu * Re**3 / r7
-    a_total += np.array(
-        [
-            fJ3 * x * (35.0 * z2 * z / r2 - 15.0 * z),
-            fJ3 * y * (35.0 * z2 * z / r2 - 15.0 * z),
-            fJ3 * (35.0 * z2 * z2 / r2 - 30.0 * z2 + 3.0 * r2),
-        ]
-    )
-    # --- J4 Perturbation ---
-    fJ4 = 0.625 * J4 * mu * Re**4 / r9
-    z4 = z2 * z2
-    a_total += np.array(
-        [
-            fJ4 * x * (63.0 * z4 / r2 - 42.0 * z2 + 3.0 * r2),
-            fJ4 * y * (63.0 * z4 / r2 - 42.0 * z2 + 3.0 * r2),
-            fJ4 * z * (63.0 * z4 / r2 - 70.0 * z2 + 15.0 * r2),
-        ]
-    )
-    # --- Atmospheric Drag (PHY-B Standardized) ---
-    alt_km = r_mag - Re
-    if use_drag and alt_km < 1500.0:
-        if hf_atmosphere:
-            # High-Fidelity: call MSIS-00 core directly (njit-safe)
-            rho_instant = _nrlmsise00_density_njit(alt_km, f107_obs, f107_adj, ap_daily)
-        elif drag_rho > 0.0:
-            # Strategy A: Use local exponential correction
-            rho_instant = drag_rho * math.exp(-(alt_km - drag_ref_alt_km) / drag_H_km)
-        else:
-            rho_instant = 0.0
-        # Atmosphere co-rotates with Earth
-        omega_earth = np.array([0.0, 0.0, EARTH_OMEGA_RAD_S])
-        v_rel = v - np.cross(omega_earth, r)
-        v_rel_mag = np.linalg.norm(v_rel)
-        if v_rel_mag > 1e-10:
-            Bc = drag_cd * drag_area_m2 / drag_mass_kg
-            # 1e-6 (m^2 to km^2) * 1e9 (kg/m^3 to kg/km^3) = 1e3
-            a_drag = -0.5 * rho_instant * 1e3 * Bc * v_rel_mag * v_rel
-            a_total += a_drag
-    # --- Third-Body (Sun & Moon) via Chebyshev Splines ---
-    if include_third_body:
-        # CRIT-02 fix: was referencing bare name `t_jd0`; corrected to `t_jd0_abs`.
-        t_norm = 2.0 * (t_jd - t_jd0_abs) / duration_d - 1.0
-        t_norm = max(-1.0, min(1.0, t_norm))
-        # DEF-009: removed self-import — _eval_cheb_3d_njit is defined in this module
-        sun_pos = _eval_cheb_3d_njit(t_norm, sun_coeffs)
-        moon_pos = _eval_cheb_3d_njit(t_norm, moon_coeffs)
-        # Sun Gravity
-        d_sun = sun_pos - r
-        d_mag_sun = np.linalg.norm(d_sun)
-        r_mag_sun = np.linalg.norm(sun_pos)
-        if d_mag_sun > 1.0 and r_mag_sun > 1.0:
-            a_total += SUN_MU_KM3_S2 * (
-                d_sun / (d_mag_sun**3) - sun_pos / (r_mag_sun**3)
-            )
-        # Moon Gravity
-        d_moon = moon_pos - r
-        d_mag_moon = np.linalg.norm(d_moon)
-        r_mag_moon = np.linalg.norm(moon_pos)
-        if d_mag_moon > 1.0 and r_mag_moon > 1.0:
-            a_total += MOON_MU_KM3_S2 * (
-                d_moon / (d_mag_moon**3) - moon_pos / (r_mag_moon**3)
-            )
-        # --- Solar radiation pressure (cannonball; scale flux from 1 AU)
-        srp_area = srp_area_m2 if srp_area_m2 >= 0.0 else drag_area_m2
-        if use_srp and srp_area > 0.0 and drag_mass_kg > 0.0:
-            d_ss = r - sun_pos
-            d_mag_ss = float(np.linalg.norm(d_ss))
-            if d_mag_ss > 1.0:
-                # Use named constants (SE-09: eliminate magic numbers in Python path)
-                scale = (_AU_KM_CONST / d_mag_ss) ** 2
-                amag = _SRP_P0 * scale * srp_cr * (srp_area / drag_mass_kg) / 1000.0
-                nu = 1.0
-                if srp_use_shadow:
-                    # Upgrade from cylindrical to conical shadow (PHY-D)
-                    nu = _srp_illumination_factor_njit(
-                        r, sun_pos, EARTH_EQUATORIAL_RADIUS_KM, 695700.0
-                    )
-                a_total += (nu * amag) * (d_ss / d_mag_ss)
-    return a_total  # type: ignore[no-any-return]
+# _acceleration_v1_njit REMOVED (BL-14): Dead code — superseded by the piecewise
+# 7-day Chebyshev _acceleration_njit kernel. Zero call sites in the codebase.
+# Removing eliminates ~500ms cold-start JIT compilation overhead.
 # ---------------------------------------------------------------------------
 # Pure-Python mirror of the acceleration kernel (no Numba)
 # ---------------------------------------------------------------------------
@@ -887,10 +736,9 @@ def _acceleration(
     )
     a_total[2] += fJ6 * (
         231.0 * z6 * z / r2
-        - 378.0 * z4 * z
-        + 189.0 * z5
-        - 70.0 * z4 * z
-        + 15.0 * z * r2 * r2
+        - 315.0 * z4 * z
+        + 105.0 * z2 * z * r2
+        - 5.0 * z * r2 * r2
     )
     # --- Atmospheric Drag (exponential profile, Strategy A; or NRLMSISE-00) ---
     alt_km = r_mag - Re
@@ -1235,7 +1083,7 @@ def _acceleration_njit(
     fJ6 = -(1.0 / 16.0) * J6 * mu * Re**6 / r13
     a_j6_x = fJ6 * x * (231.0 * z6 / r2 - 315.0 * z4 + 105.0 * z2 * r2 - 5.0 * r2 * r2)
     a_j6_y = fJ6 * y * (231.0 * z6 / r2 - 315.0 * z4 + 105.0 * z2 * r2 - 5.0 * r2 * r2)
-    a_j6_z = fJ6 * (231.0 * z6 * z / r2 - 378.0 * z4 * z + 189.0 * z5 - 70.0 * z4 * z + 15.0 * z * r2 * r2)
+    a_j6_z = fJ6 * (231.0 * z6 * z / r2 - 315.0 * z4 * z + 105.0 * z2 * z * r2 - 5.0 * z * r2 * r2)
     a_total[0] += a_j5_x + a_j6_x
     a_total[1] += a_j5_y + a_j6_y
     a_total[2] += a_j5_z + a_j6_z
@@ -1342,8 +1190,8 @@ def _propagator_jacobian_njit(
 ) -> np.ndarray:
     """6×6 force Jacobian F = dẋ/dx via central-difference, using the full
     propagator acceleration kernel ``_acceleration_njit``.
-    Replaces the gravity-only ``_compute_force_jacobian``
-    used in the inline STM paths.  Key corrections:
+    Replaced the former gravity-only ``_compute_force_jacobian`` (removed in
+    v3.6.0, BL-05) which was used in the inline STM paths.  Key corrections:
     * **F-03**: The previous Jacobian omitted drag partials entirely (∂a_drag/∂v = 0),
       causing the STM covariance to grow too slowly in along-track for any LEO orbit
       with drag enabled — Pc computations were systematically low.
@@ -1460,8 +1308,8 @@ def _coast_derivative_njit(
     # 42 components = 6 (r, v) + 36 (Phi)
     if len(y) == 42:
         Phi = y[6:].reshape((6, 6))
-        # Use _propagator_jacobian_njit (which includes drag partials) instead of
-        # _compute_force_jacobian (gravity-only J2/point-mass).
+        # Use _propagator_jacobian_njit (which includes drag partials).
+        # Replaces the former _compute_force_jacobian (removed in v3.6.0, BL-05).
         F = _propagator_jacobian_njit(
             r, v, use_drag, drag_cd, drag_area_m2, drag_mass_kg,
             drag_rho, drag_H_km, drag_ref_alt_km, f107_obs, f107_adj, ap_daily,
@@ -1868,9 +1716,12 @@ def propagate_cowell(
         - Powered-arc default mass absolute tolerance is 10⁻⁵ kg (0.01 g), which
           is loose for micro-thrusters on small spacecraft; pass ``atol`` for
           tighter mass conservation.
-        - SRP penumbra uses a planar circle-circle intersection formula (angular
-          quantities as proxies for linear radii). Valid to ~few-% accuracy in LEO;
-          see ``_srp_illumination_factor_njit`` docstring for details (MATH-05).
+        - SRP uses a dual-cone Earth umbra/penumbra shadow model
+          (``_srp_illumination_factor_dual_cone_njit``). The penumbra formula
+          is the standard Montenbruck & Gill §3.4.2 planar circle-circle
+          intersection — industry reference for Earth-orbit SRP shadow models.
+          Planar approximation error is O(β²/12) ≈ 1.7×10⁻⁷, below IEEE-754
+          double precision significance.
     Args:
         state0: Initial state (position + velocity + optional mass).
         duration_s: Total propagation duration in seconds.
@@ -1942,7 +1793,15 @@ def propagate_cowell(
             hf_atmosphere = False
         else:
             raise ValueError(f"Unsupported DragConfig model: {drag_config.model}. Supported models are 'NRLMSISE00' and 'EXPONENTIAL'.")
-    use_srp = bool(drag_config is not None and getattr(drag_config, "include_srp", True) and include_third_body)
+    _srp_requested = drag_config is not None and getattr(drag_config, "include_srp", True)
+    use_srp = bool(_srp_requested and include_third_body)
+    if _srp_requested and not include_third_body:
+        logger.warning(
+            "DragConfig.include_srp=True but include_third_body=False: SRP requires "
+            "the Sun position vector computed by the third-body module. SRP is disabled. "
+            "Set include_third_body=True to enable SRP, or set DragConfig.include_srp=False "
+            "to suppress this warning."
+        )
     srp_cr = float(drag_config.cr) if drag_config is not None else 1.5
     srp_area_m2 = drag_area_m2
     if drag_config is not None and drag_config.srp_area_m2 is not None:
@@ -2099,6 +1958,143 @@ def _build_segments(
     if cursor_s < end_s - 1e-9:
         segments.append((cursor_s, end_s, None))
     return segments
+
+
+# ---------------------------------------------------------------------------
+# Propagation at Arbitrary Epochs (AS-01)
+# ---------------------------------------------------------------------------
+def propagate_cowell_at_times(
+    state0: "NumericalState",
+    times_jd: "np.ndarray",
+    *,
+    drag_config: Optional["DragConfig"] = None,
+    include_third_body: bool = True,
+    use_de: bool = True,
+    maneuvers: Optional["list[FiniteBurn]"] = None,
+    include_stm: bool = False,
+    snc_config: Optional["SNCConfig"] = None,
+) -> "list[NumericalState]":
+    """Propagate to specific Julian Date epochs using the Cowell integrator.
+
+    Unlike :func:`propagate_cowell` which returns states at uniform ``dt_out``
+    intervals, this function returns states at **caller-specified** epochs.
+    This is essential for:
+
+    - Orbit determination residual computation at observation times.
+    - Ephemeris generation at irregular cadences.
+    - State interpolation at conjunction screening epochs.
+
+    Internally propagates with a dense output step and interpolates to the
+    requested times using cubic spline interpolation on the propagated
+    trajectory. The underlying force model, maneuver handling, and STM
+    propagation are identical to :func:`propagate_cowell`.
+
+    Args:
+        state0: Initial state (position + velocity + optional mass/covariance).
+        times_jd: 1-D array of Julian Dates at which states are requested.
+            Must all be ≥ ``state0.t_jd``. Need not be sorted (output will
+            match the input order).
+        drag_config: Optional atmospheric drag parameters.
+        include_third_body: Include Sun/Moon gravity (default True).
+        use_de: Use JPL DE421 ephemeris for Sun/Moon (default True).
+        maneuvers: Optional list of FiniteBurn objects.
+        include_stm: Propagate State Transition Matrix for covariance.
+        snc_config: Process noise configuration.
+
+    Returns:
+        List of :class:`NumericalState` objects, one per requested epoch,
+        in the same order as ``times_jd``.
+
+    Raises:
+        ValueError: If ``times_jd`` is empty or contains epochs before
+            ``state0.t_jd``.
+
+    Example::
+
+        import astra
+        import numpy as np
+        state0 = astra.NumericalState(
+            t_jd=2460000.5,
+            position_km=np.array([6778.0, 0.0, 0.0]),
+            velocity_km_s=np.array([0.0, 7.668, 0.0]),
+        )
+        obs_times = np.array([2460000.51, 2460000.52, 2460000.55])
+        states = astra.propagate_cowell_at_times(state0, obs_times)
+        for s in states:
+            print(f"t={s.t_jd:.5f}  r={s.position_km}")
+    """
+    import scipy.interpolate
+
+    times_jd = np.asarray(times_jd, dtype=float)
+    if times_jd.ndim != 1 or len(times_jd) == 0:
+        raise ValueError("times_jd must be a non-empty 1-D array.")
+
+    t0_jd = state0.t_jd
+    min_t = float(np.min(times_jd))
+    max_t = float(np.max(times_jd))
+
+    if min_t < t0_jd - 1e-10:
+        raise ValueError(
+            f"All times_jd must be ≥ state0.t_jd ({t0_jd:.8f}). "
+            f"Got min(times_jd) = {min_t:.8f}."
+        )
+
+    # Total propagation duration
+    duration_s = (max_t - t0_jd) * 86400.0
+    if duration_s < 1e-6:
+        # All requested times are at epoch — return copies of state0
+        return [state0] * len(times_jd)
+
+    # Propagate with dense output (small dt_out for interpolation accuracy)
+    # Use 10s steps for LEO, or 60s steps if > 6 hours
+    dt_out = min(10.0, max(1.0, duration_s / 1000.0))
+
+    dense_states = propagate_cowell(
+        state0=state0,
+        duration_s=duration_s,
+        dt_out=dt_out,
+        drag_config=drag_config,
+        include_third_body=include_third_body,
+        use_de=use_de,
+        maneuvers=maneuvers,
+        include_stm=include_stm,
+        snc_config=snc_config,
+    )
+
+    if len(dense_states) < 2:
+        return [dense_states[0]] * len(times_jd)
+
+    # Build interpolation arrays
+    dense_t_jd = np.array([s.t_jd for s in dense_states])
+    dense_pos = np.array([s.position_km for s in dense_states])
+    dense_vel = np.array([s.velocity_km_s for s in dense_states])
+
+    # Use local seconds for conditioning
+    t_s = (dense_t_jd - t0_jd) * 86400.0
+    req_s = (times_jd - t0_jd) * 86400.0
+
+    # Clamp requested times to propagation range
+    t_min_s, t_max_s = t_s[0], t_s[-1]
+    req_s_clamped = np.clip(req_s, t_min_s, t_max_s)
+
+    spline_pos = scipy.interpolate.CubicSpline(t_s, dense_pos, bc_type="natural")
+    spline_vel = scipy.interpolate.CubicSpline(t_s, dense_vel, bc_type="natural")
+
+    # Evaluate at requested times
+    interp_pos = spline_pos(req_s_clamped)
+    interp_vel = spline_vel(req_s_clamped)
+
+    result = []
+    for k in range(len(times_jd)):
+        result.append(NumericalState(
+            t_jd=float(times_jd[k]),
+            position_km=interp_pos[k],
+            velocity_km_s=interp_vel[k],
+            mass_kg=dense_states[-1].mass_kg,
+        ))
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Batch High-Fidelity Propagation  # ---------------------------------------------------------------------------
 def propagate_cowell_batch(
@@ -2196,6 +2192,16 @@ def propagate_cowell_batch(
             try:
                 sid, traj = fut.result()
                 results[sid] = traj
+            except ValueError as ve:
+                # BL-07: Distinguish caller precondition failures (e.g. missing
+                # covariance_km2 for include_stm=True) from integration failures.
+                _log.error(
+                    "propagate_cowell_batch: PRECONDITION FAILURE for %s — %s. "
+                    "This is a caller error (e.g. missing covariance_km2 when "
+                    "include_stm=True). The satellite was dropped from results.",
+                    sat_id,
+                    ve,
+                )
             except Exception as exc:
                 _log.warning(
                     "propagate_cowell_batch: propagation failed for %s — %s",

@@ -179,7 +179,7 @@ class TestFM9AConstantGuards:
         propagator_j2c = 0.00108262668
         assert abs(J2 - propagator_j2c) < 1e-15, (
             f"constants.J2={J2!r} != propagator J2c={propagator_j2c!r}. "
-            "Update propagator.py _acceleration_njit and _compute_force_jacobian."
+            "Update propagator.py _acceleration_njit inlined J2c literal."
         )
 
 

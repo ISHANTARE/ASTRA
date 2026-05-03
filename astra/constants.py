@@ -60,9 +60,9 @@ MEO_MAX_KM: float = 35786.0
 GEO_ALTITUDE_KM: float = 35786.0
 # HEO is defined by eccentricity, not altitude. Use HEO_ECCENTRICITY_THRESHOLD.
 # HEO_MIN_KM is retained for backward compatibility but is DEPRECATED.
-HEO_MIN_KM: float = (
-    35786.0  # DEPRECATED — conflatess GEO altitude with HEO; use HEO_ECCENTRICITY_THRESHOLD
-)
+# BL-15: Accessing HEO_MIN_KM now emits a DeprecationWarning at runtime
+# via the module-level __getattr__ defined at the bottom of this file.
+_HEO_MIN_KM_VALUE: float = 35786.0
 HEO_ECCENTRICITY_THRESHOLD: float = (
     0.25  # e > 0.25 classifies an orbit as Highly Elliptical (Molniya etc.)
 )
@@ -135,9 +135,7 @@ assert G0_STD == 9.80665, (
     "Update constants.py and all import sites in sync."
 )
 # J2 zonal harmonic guard.
-# propagator._acceleration_njit inlines J2 = 0.00108262668 at line ~636 (J2c).
-# _compute_force_jacobian also inlines J2c = 0.00108262668 at line ~636.
-# Both must match constants.J2 exactly.
+# propagator._acceleration_njit inlines J2 = 0.00108262668.
 assert abs(J2 - 1.08262668e-3) < 1e-15, (
     f"J2 ({J2!r}) diverged from canonical EGM96/WGS-84 value 1.08262668e-3. "
     "Update constants.py AND propagator.py J2 / J2c inlined literals in sync."
@@ -182,3 +180,20 @@ assert SUN_RADIUS_KM == 695700.0, (
     f"SUN_RADIUS_KM ({SUN_RADIUS_KM}) does not match the Numba inlined literal "
     "695700.0 in propagator.py._srp_illumination_factor_dual_cone_njit. Update both in sync."
 )
+
+# ---------------------------------------------------------------------------
+# BL-15: Module-level __getattr__ for deprecated constants
+# ---------------------------------------------------------------------------
+def __getattr__(name: str):
+    """Emit DeprecationWarning for deprecated constants on first access."""
+    if name == "HEO_MIN_KM":
+        import warnings
+        warnings.warn(
+            "constants.HEO_MIN_KM is deprecated — it conflates GEO altitude with HEO. "
+            "Use GEO_ALTITUDE_KM for the geostationary altitude or "
+            "HEO_ECCENTRICITY_THRESHOLD (e > 0.25) to classify highly elliptical orbits.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return _HEO_MIN_KM_VALUE
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

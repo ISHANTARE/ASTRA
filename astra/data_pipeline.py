@@ -402,6 +402,24 @@ def _parse_sw_csv(text: str) -> None:
                     idx_f107adj = i
                 elif cu in _ap_names:
                     idx_ap_avg = i
+            # BL-12: Warn if any required column was not found by header name
+            # and is using the hardcoded fallback position.
+            _resolved = {
+                "F10.7_OBS": (idx_f107obs, 24),
+                "F10.7_ADJ": (idx_f107adj, 25),
+                "Ap_AVG": (idx_ap_avg, 20),
+            }
+            for col_name, (resolved_idx, default_idx) in _resolved.items():
+                if resolved_idx == default_idx:
+                    logger.warning(
+                        "CelesTrak SW CSV: column '%s' was not found by header "
+                        "name — using fallback positional index %d. If CelesTrak "
+                        "has changed their CSV format, this may point to the "
+                        "wrong column. Header: %s",
+                        col_name,
+                        default_idx,
+                        header,
+                    )
             logger.debug(
                 "CelesTrak SW CSV columns resolved: DATE=%d, F10.7_OBS=%d, "
                 "F10.7_ADJ=%d, Ap_AVG=%d",
@@ -623,9 +641,19 @@ def nrlmsise00_density(
     f107_adj: float,
     ap_daily: float,
 ) -> float:
-    """Compute high-fidelity atmospheric density using NRLMSISE-00 physics.
+    """Compute atmospheric density using a simplified NRLMSISE-00-inspired Bates profile.
+
+    .. note::
+        This is **not** a full NRLMSISE-00 implementation (Picone et al. 2002).
+        It uses a single-species Bates exospheric temperature profile calibrated
+        against NRLMSISE-00 output at 400 km. Accuracy is +/-15% for 150-600 km
+        altitude at moderate solar activity (F10.7 100-200). Below 150 km or
+        above 600 km, or during extreme geomagnetic storms (Ap > 100), errors
+        may exceed 30%. For mission-critical drag modelling, consider interfacing
+        with the full NRLMSISE-00 C implementation via ``pynrlmsise00``.
+
     This function delegates to the canonical Numba implementation in propagator.py
-    to guarantee identical physics across the codebase (Fixes 1.5).
+    to guarantee identical physics across the codebase.
     """
     from astra.propagator import _nrlmsise00_density_njit
     return float(_nrlmsise00_density_njit(altitude_km, f107_obs, f107_adj, ap_daily))

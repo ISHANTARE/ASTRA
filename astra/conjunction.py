@@ -768,3 +768,207 @@ def run_conjunction_sweep(
         vel_map=valid_vel,
         max_workers=max_workers,
     )
+
+
+# ---------------------------------------------------------------------------
+# ConjunctionWindow (AS-03)
+# ---------------------------------------------------------------------------
+from dataclasses import dataclass as _cj_dataclass
+
+
+@_cj_dataclass(frozen=True)
+class ConjunctionWindow:
+    """Time interval during which two objects are within a distance threshold.
+
+    Unlike :class:`ConjunctionEvent` (a point-event at TCA), a
+    ``ConjunctionWindow`` defines the **entry** and **exit** epochs of the
+    close-approach interval. This is required for:
+
+    - Communication blackout window analysis.
+    - Maneuver planning (avoidance window computation).
+    - CDM screening compliance (7-day look-ahead windows).
+
+    Attributes:
+        object_a_id: NORAD ID of object A.
+        object_b_id: NORAD ID of object B.
+        entry_jd: Julian Date when distance first drops below threshold.
+        exit_jd: Julian Date when distance first rises above threshold.
+        tca_jd: Julian Date of closest approach within the window.
+        min_distance_km: Minimum separation within the window (km).
+        duration_s: Window duration in seconds.
+    """
+    object_a_id: str
+    object_b_id: str
+    entry_jd: float
+    exit_jd: float
+    tca_jd: float
+    min_distance_km: float
+
+    @property
+    def duration_s(self) -> float:
+        """Duration of the conjunction window in seconds."""
+        return (self.exit_jd - self.entry_jd) * 86400.0
+
+
+def find_conjunction_windows(
+    trajectories: TrajectoryMap,
+    times_jd: np.ndarray,
+    threshold_km: float = 10.0,
+    objects: Optional[dict[str, Any]] = None,
+) -> list[ConjunctionWindow]:
+    """Find time windows during which pairs of objects are within a distance threshold.
+
+    Unlike :func:`find_conjunctions` which returns point-events at TCA, this
+    function returns **intervals** [entry_jd, exit_jd] during which two objects
+    remain within ``threshold_km``. Each window also includes the TCA and
+    minimum distance within that interval.
+
+    Uses cubic spline interpolation for sub-sample-step resolution on both
+    the entry/exit bracket edges and the TCA within each window.
+
+    Args:
+        trajectories: TrajectoryMap of NORAD-ID → (T, 3) position array (km, TEME).
+        times_jd: 1-D array of T Julian Dates matching trajectory rows.
+        threshold_km: Distance threshold in km (default 10.0). Windows are
+            defined as intervals where ``distance < threshold_km``.
+        objects: Optional dict for future extension (currently unused).
+
+    Returns:
+        List of :class:`ConjunctionWindow` objects, sorted by entry_jd.
+
+    Raises:
+        AstraError: If ``times_jd`` has fewer than 3 elements or trajectories
+            are inconsistent.
+
+    Example::
+
+        import astra
+        windows = astra.find_conjunction_windows(
+            trajectories=traj_map,
+            times_jd=times,
+            threshold_km=5.0,
+        )
+        for w in windows:
+            print(f"{w.object_a_id} vs {w.object_b_id}: "
+                  f"window={w.duration_s:.1f}s, min_dist={w.min_distance_km:.3f}km")
+    """
+    times_jd = np.asarray(times_jd, dtype=float)
+    if times_jd.ndim != 1 or len(times_jd) < 3:
+        raise AstraError("times_jd must be a 1-D array with ≥ 3 elements.")
+
+    norad_ids = list(trajectories.keys())
+    if len(norad_ids) < 2:
+        return []
+
+    windows: list[ConjunctionWindow] = []
+    T = len(times_jd)
+    times_s = (times_jd - times_jd[0]) * 86400.0  # local seconds for conditioning
+
+    # Iterate over all unique pairs
+    for i in range(len(norad_ids)):
+        for j in range(i + 1, len(norad_ids)):
+            id_a, id_b = norad_ids[i], norad_ids[j]
+            traj_a = trajectories[id_a]
+            traj_b = trajectories[id_b]
+
+            if len(traj_a) != T or len(traj_b) != T:
+                continue
+
+            # Compute distances at sample points
+            dists = np.linalg.norm(traj_a - traj_b, axis=1)
+
+            # Find entry/exit crossings: where distance crosses threshold
+            below = dists < threshold_km
+
+            # Build splines for sub-sample refinement
+            spline_a = scipy.interpolate.CubicSpline(
+                times_s, traj_a, bc_type="natural"
+            )
+            spline_b = scipy.interpolate.CubicSpline(
+                times_s, traj_b, bc_type="natural"
+            )
+
+            def _dist_at_s(t_s: float) -> float:
+                return float(np.linalg.norm(spline_a(t_s) - spline_b(t_s)))
+
+            # Walk through samples to find contiguous windows
+            k = 0
+            while k < T:
+                if not below[k]:
+                    k += 1
+                    continue
+
+                # Found start of a window — find the end
+                win_start_idx = k
+                while k < T and below[k]:
+                    k += 1
+                win_end_idx = k - 1  # last index that was below threshold
+
+                # ── Refine entry time ────────────────────────────────────
+                if win_start_idx > 0:
+                    # Bisect between (win_start_idx - 1) and win_start_idx
+                    lo_s = float(times_s[win_start_idx - 1])
+                    hi_s = float(times_s[win_start_idx])
+                    for _ in range(30):  # binary search iterations
+                        mid_s = (lo_s + hi_s) / 2.0
+                        if _dist_at_s(mid_s) < threshold_km:
+                            hi_s = mid_s
+                        else:
+                            lo_s = mid_s
+                    entry_s = hi_s
+                else:
+                    entry_s = float(times_s[0])
+
+                # ── Refine exit time ─────────────────────────────────────
+                if win_end_idx < T - 1:
+                    lo_s = float(times_s[win_end_idx])
+                    hi_s = float(times_s[win_end_idx + 1])
+                    for _ in range(30):
+                        mid_s = (lo_s + hi_s) / 2.0
+                        if _dist_at_s(mid_s) < threshold_km:
+                            lo_s = mid_s
+                        else:
+                            hi_s = mid_s
+                    exit_s = lo_s
+                else:
+                    exit_s = float(times_s[-1])
+
+                # ── Find TCA within window ───────────────────────────────
+                try:
+                    from scipy.optimize import minimize_scalar
+                    res = minimize_scalar(
+                        _dist_at_s,
+                        bounds=(entry_s, exit_s),
+                        method="bounded",
+                        options={"xatol": 1e-3},
+                    )
+                    if res.success:
+                        tca_s = float(res.x)
+                        min_dist = float(res.fun)
+                    else:
+                        sub_dists = dists[win_start_idx:win_end_idx + 1]
+                        min_idx = int(np.argmin(sub_dists)) + win_start_idx
+                        tca_s = float(times_s[min_idx])
+                        min_dist = float(dists[min_idx])
+                except Exception:
+                    sub_dists = dists[win_start_idx:win_end_idx + 1]
+                    min_idx = int(np.argmin(sub_dists)) + win_start_idx
+                    tca_s = float(times_s[min_idx])
+                    min_dist = float(dists[min_idx])
+
+                entry_jd = float(times_jd[0] + entry_s / 86400.0)
+                exit_jd = float(times_jd[0] + exit_s / 86400.0)
+                tca_jd = float(times_jd[0] + tca_s / 86400.0)
+
+                windows.append(ConjunctionWindow(
+                    object_a_id=id_a,
+                    object_b_id=id_b,
+                    entry_jd=entry_jd,
+                    exit_jd=exit_jd,
+                    tca_jd=tca_jd,
+                    min_distance_km=min_dist,
+                ))
+
+    windows.sort(key=lambda w: w.entry_jd)
+    logger.info("Conjunction window search complete: %d windows found.", len(windows))
+    return windows

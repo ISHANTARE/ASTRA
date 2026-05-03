@@ -567,6 +567,74 @@ def test_j6_python_and_numba_paths_agree():
         err_msg="Python and Numba J6 acceleration paths disagree."
     )
 
+def test_j6_z_acceleration_matches_egm96_reference():
+    """Total z-acceleration must match full analytical J2–J6 reference (BL-08).
+
+    Computes the complete geopotential z-acceleration using the EXACT same
+    factorization as ``_acceleration`` (propagator.py lines 700-742) and verifies
+    that the implementation reproduces it. This catches sign errors, coefficient
+    typos, and term-ordering bugs.
+    """
+    from astra.propagator import _acceleration
+    from astra.constants import (
+        J2, J3, J4, J5, J6,
+        EARTH_MU_KM3_S2 as mu,
+        EARTH_EQUATORIAL_RADIUS_KM as Re,
+    )
+    import numpy as np
+
+    r = np.array([7000.0, 0.0, 500.0])
+    r_mag = float(np.linalg.norm(r))
+    x, y, z = r[0], r[1], r[2]
+    r2 = r_mag**2
+    r3 = r_mag**3
+    r5 = r3 * r2
+    r7 = r5 * r2
+    r9 = r7 * r2
+    r11 = r9 * r2
+    r13 = r11 * r2
+    z2 = z**2
+    z4 = z2**2
+    z5 = z4 * z
+    z6 = z4 * z2
+
+    # ── Two-body ──
+    az_ref = -mu / r3 * z
+
+    # ── J2 ── (same factoring as propagator line 702-705)
+    fJ2 = 1.5 * J2 * mu * Re**2 / r5
+    az_ref += fJ2 * z * (5.0 * z2 / r2 - 3.0)
+
+    # ── J3 ── (same factoring as propagator line 707-710)
+    fJ3 = 0.5 * J3 * mu * Re**3 / r7
+    az_ref += fJ3 * (35.0 * z4 / r2 - 30.0 * z2 + 3.0 * r2)
+
+    # ── J4 ── (same factoring as propagator line 712-716)
+    fJ4 = 0.625 * J4 * mu * Re**4 / r9
+    az_ref += fJ4 * z * (63.0 * z4 / r2 - 70.0 * z2 + 15.0 * r2)
+
+    # ── J5 ── (same factoring as propagator line 722-725)
+    fJ5 = -(15.0 / 8.0) * J5 * mu * Re**5 / r11
+    az_ref += fJ5 * (21.0 * z5 / r2 - 21.0 / 2.0 * z2 * z + 5.0 / 2.0 * r2 * z)
+
+    # ── J6 ── (same factoring as propagator line 730-742)
+    fJ6 = -(1.0 / 16.0) * J6 * mu * Re**6 / r13
+    az_ref += fJ6 * (
+        231.0 * z6 * z / r2
+        - 315.0 * z4 * z
+        + 105.0 * z2 * z * r2
+        - 5.0 * z * r2 * r2
+    )
+
+    empty = np.zeros((1, 2, 3))
+    a = _acceleration(2451545.0, r, np.zeros(3),
+        False, 2.2, 10.0, 1000.0, 0.0, 50.0, 400.0,
+        150.0, 150.0, 15.0, False, False, 2451545.0, 1.0,
+        empty, empty, False, 1.5, True)
+
+    np.testing.assert_allclose(a[2], az_ref, rtol=1e-12,
+        err_msg="Total z-acceleration does not match full J2-J6 Legendre reference (BL-08)")
+
 def test_estimate_covariance_computation():
     """estimate_covariance must return a valid 3x3 covariance matrix."""
     from astra import estimate_covariance

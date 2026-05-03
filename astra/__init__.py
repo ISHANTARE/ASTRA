@@ -39,6 +39,8 @@ from astra.conjunction import (
     closest_approach,
     distance_3d,
     find_conjunctions,
+    find_conjunction_windows,
+    ConjunctionWindow,
     load_spacebook_covariance,
     run_conjunction_sweep,
 )
@@ -49,6 +51,7 @@ from astra.conjunction import (
 from astra.covariance import (
     compute_collision_probability,
     compute_collision_probability_mc,
+    compute_collision_probability_timeseries,
     estimate_covariance,
     propagate_covariance_stm,
     rotate_covariance_rtn_to_eci,
@@ -210,6 +213,7 @@ from astra.propagator import (
     DragConfig,
     SNCConfig,
     propagate_cowell,
+    propagate_cowell_at_times,
     propagate_cowell_batch,
 )
 
@@ -224,6 +228,10 @@ from astra.maneuver import (
     validate_burn,
     validate_burn_sequence,
     plan_hohmann,
+    plan_bielliptic,
+    plan_inclination_change,
+    compute_delta_v_budget,
+    DeltaVBudget,
 )
 
 # ---------------------------------------------------------------------------
@@ -317,6 +325,8 @@ __all__ = [
     "distance_3d",
     "closest_approach",
     "find_conjunctions",
+    "find_conjunction_windows",
+    "ConjunctionWindow",
     "run_conjunction_sweep",
     "load_spacebook_covariance",
     "compute_collision_probability",
@@ -349,9 +359,11 @@ __all__ = [
     "orbit_period",
     # --- High-Fidelity Numerical Engine ---
     "compute_collision_probability_mc",
+    "compute_collision_probability_timeseries",
     "propagate_covariance_stm",
     "rotate_covariance_rtn_to_eci",
     "propagate_cowell",
+    "propagate_cowell_at_times",
     "propagate_cowell_batch",
     "SpatialIndex",
     # --- Maneuver & High-Fidelity Physics ---
@@ -363,6 +375,10 @@ __all__ = [
     "thrust_acceleration_inertial",
     "validate_burn",
     "plan_hohmann",
+    "plan_bielliptic",
+    "plan_inclination_change",
+    "compute_delta_v_budget",
+    "DeltaVBudget",
     # --- Space Weather ---
     "sun_position_de",
     "moon_position_de",
@@ -442,7 +458,16 @@ def warmup() -> None:
         object_class="PAYLOAD",
         radius_m=5.0
     )
-    traj = { "WARM1": np.array([p0, p0, p0]), "WARM2": np.array([p0, p0, p0]) }
+    # BL-06: Use two nearby but non-identical trajectories with a real close approach
+    # (<threshold_km) to exercise the full conjunction pipeline including Brent
+    # minimizer and Pc computation. The old code used identical positions (distance=0)
+    # which tripped the `min_dist > threshold_km` gate and never warmed the hot paths.
+    _r0 = np.array([7000.0, 0.0, 0.0])
+    _r1 = np.array([7000.3, 0.0, 0.0])   # 300 m separation — inside threshold
+    traj = {
+        "WARM1": np.array([_r0, _r0 + np.array([0.1, 0.0, 0.0]), _r0 + np.array([0.2, 0.0, 0.0])]),
+        "WARM2": np.array([_r1, _r1 + np.array([0.1, 0.0, 0.0]), _r1 + np.array([0.2, 0.0, 0.0])]),
+    }
     times = np.array([2460000.5, 2460000.5 + 1.0/86400.0, 2460000.5 + 2.0/86400.0])
     _ = find_conjunctions(traj, times, { "WARM1": obj, "WARM2": obj }, threshold_km=1.0)
 
