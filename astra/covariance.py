@@ -144,17 +144,30 @@ def _exact_pc_2d_integral(
     def _y_hi(x: float) -> float:
         return math.sqrt(max(rc * rc - x * x, 0.0))
     try:
-        result, _err = scipy.integrate.dblquad(  # type: ignore[call-overload]
+        # `limit` is a `quad` option, not a top-level dblquad keyword.
+        # Use epsabs/epsrel only at the top level; scipy handles sub-interval
+        # allocation internally.
+        result, err = scipy.integrate.dblquad(  # type: ignore[call-overload]
             _integrand,
             -rc,
             rc,
             _y_lo,
             _y_hi,
-            limit=200,
             epsabs=1e-10,
             epsrel=1e-8,
         )
-    except Exception:
+        # H-07: Check quadrature error estimate.  If the relative error exceeds
+        # 1%, the Pc value is dominated by integration error — log a warning so
+        # operators can flag the conjunction for manual review.
+        if result > 0.0 and err / max(result, 1e-15) > 0.01:
+            import logging as _quad_log
+            _quad_log.getLogger(__name__).warning(
+                "_exact_pc_2d_integral: quadrature relative error %.2e exceeds 1%% "
+                "(result=%.3e, err=%.3e). Pc value may be unreliable for very "
+                "small hard-body radii or extreme covariance aspect ratios.",
+                err / max(result, 1e-15), result, err,
+            )
+    except (ValueError, RuntimeError, np.linalg.LinAlgError, FloatingPointError, ArithmeticError):
         # Numerical failure — fall through to Chan approximation.
         area = math.pi * rc**2
         result = math.exp(-0.5 * float(miss_2d @ inv_C_p @ miss_2d)) * area * norm
@@ -300,22 +313,19 @@ def compute_collision_probability(
             # Very close encounters (Mahalanobis < 1): Chan's point
             # approximation can underestimate Pc by 30-40%.  Use the exact
             # 2D Gaussian integral via scipy.integrate.dblquad.
-            if mahalanobis_sq < 1.0:
-                _m5_logger.warning(
-                    "Near-hit encounter (mahalanobis_sq=%.3f < 1.0) with 3×3 covariances: "
-                    "using exact scipy.integrate.dblquad. "
-                    "Supply 6×6 CDM covariances to use Monte Carlo instead.",
-                    mahalanobis_sq,
-                )
-                return _exact_pc_2d_integral(r_p, inv_C_p, det_C_p, combined_radius_km)
-            # mahalanobis_sq in [1.0, 4.0) with 3×3 — Chan/Foster is adequate;
-            # emit a warning so the caller can decide whether to provide CDM data.
+            # BL-04: Extend exact 2D Gaussian integral to the full near-hit regime
+            # [0, 4.0).  Chan's approximation under-estimates Pc by 15-30% when
+            # mahalanobis_sq is in [1.0, 4.0) — operationally significant for
+            # 1e-4 threshold decisions.  The exact dblquad integral is valid
+            # across the full range and avoids the systematic under-estimate.
             _m5_logger.warning(
-                "co-orbital encounter (mahalanobis_sq=%.3f) detected but only 3×3 "
-                "covariances available — Foster/Chan formula applied (may under-estimate Pc). "
-                "Supply 6×6 state covariances from CDM for MC accuracy.",
+                "Near-hit / co-orbital encounter (mahalanobis_sq=%.3f < 4.0) with "
+                "3×3 positional covariances: using exact scipy.integrate.dblquad "
+                "to avoid Chan under-estimation (up to 15-30%% in this regime). "
+                "Supply 6×6 CDM covariances to use Monte Carlo instead.",
                 mahalanobis_sq,
             )
+            return _exact_pc_2d_integral(r_p, inv_C_p, det_C_p, combined_radius_km)
     # Area of collision cross-section
     area = math.pi * (combined_radius_km**2)
     # 2D Gaussian Density Integration Approximation (Chan's formulation)
@@ -629,7 +639,7 @@ def compute_collision_probability_mc(
     hits = np.sum(d_min <= combined_radius_km)
     return float(hits / n_samples)
 from astra._numba_compat import njit  # noqa: E402
-from astra.constants import J3, J4  # noqa: E402
+from astra.constants import J3, J4, J5, J6  # noqa: E402
 @njit(fastmath=True, cache=True)
 def _acceleration_njit(
     r: np.ndarray,
@@ -643,7 +653,14 @@ def _acceleration_njit(
     ap_daily: float = 15.0,
     use_nrlmsise: bool = False,
 ) -> np.ndarray:
-    """Covariance-STM acceleration kernel: J2/J3/J4 + drag.
+    """Covariance-STM acceleration kernel: J2/J3/J4/J5/J6 + drag.
+
+    BL-02: Extended from J4 to J6 to match the trajectory kernel in
+    ``propagator._acceleration_njit``.  The previous J4-only implementation
+    omitted J5/J6 secular nodal precession (~3–10 m/day error for MEO),
+    causing the covariance ellipsoid to drift relative to the true orbit plane
+    and producing systematically low Pc values.
+
     Supports two atmosphere models controlled by ``use_nrlmsise``:
     * ``use_nrlmsise=False`` (default): simple exponential density profile
       anchored at ``rho_ref_alt_km``.  Fast; suitable when space-weather data
@@ -654,7 +671,6 @@ def _acceleration_njit(
       NRLMSISE-00 model** (``DragConfig.model == "NRLMSISE00"``) so that the
       trajectory and its covariance use the same atmospheric drag model.
       Mismatched models cause 3-5× covariance growth-rate errors at solar max.
-      
     """
     x, y, z = r[0], r[1], r[2]
     r_mag = np.linalg.norm(r)
@@ -682,6 +698,25 @@ def _acceleration_njit(
     a_total[0] += fJ4 * x * (63.0 * z4 / r2 - 42.0 * z2 + 3.0 * r2)
     a_total[1] += fJ4 * y * (63.0 * z4 / r2 - 42.0 * z2 + 3.0 * r2)
     a_total[2] += fJ4 * z * (63.0 * z4 / r2 - 70.0 * z2 + 15.0 * r2)
+    # --- J5 Perturbation ---
+    # BL-02: Synced from propagator._acceleration_njit.
+    # Ref: EGM96 (Lemoine et al. 1998, NASA/TP-1998-206861).
+    r11 = r9 * r2
+    z5 = z4 * z
+    fJ5 = -(15.0 / 8.0) * J5 * mu * Re**5 / r11
+    a_j5_x = fJ5 * x * (21.0 * z4 / r2 - 14.0 * z2 + r2 / 3.0)
+    a_j5_y = fJ5 * y * (21.0 * z4 / r2 - 14.0 * z2 + r2 / 3.0)
+    a_j5_z = fJ5 * (21.0 * z5 / r2 - 10.5 * z2 * z + 2.5 * r2 * z)
+    # --- J6 Perturbation ---
+    r13 = r11 * r2
+    z6 = z4 * z2
+    fJ6 = -(1.0 / 16.0) * J6 * mu * Re**6 / r13
+    a_j6_x = fJ6 * x * (231.0 * z6 / r2 - 315.0 * z4 + 105.0 * z2 * r2 - 5.0 * r2 * r2)
+    a_j6_y = fJ6 * y * (231.0 * z6 / r2 - 315.0 * z4 + 105.0 * z2 * r2 - 5.0 * r2 * r2)
+    a_j6_z = fJ6 * (231.0 * z6 * z / r2 - 315.0 * z4 * z + 105.0 * z2 * z * r2 - 5.0 * z * r2 * r2)
+    a_total[0] += a_j5_x + a_j6_x
+    a_total[1] += a_j5_y + a_j6_y
+    a_total[2] += a_j5_z + a_j6_z
     # --- Atmospheric Drag (LEO Only) ---
     # When use_nrlmsise=True, use the native
     # Numba NRLMSISE-00 implementation (_nrlmsise00_density_njit) to match
@@ -795,21 +830,42 @@ def propagate_covariance_stm(
     """Propagate a full 6x6 covariance matrix using the State Transition Matrix.
 
     .. warning::
-        The STM Jacobian includes J2+J3+J4 and atmospheric drag only. The trajectory
-        kernel includes J5, J6, Sun/Moon third-body gravity, and SRP. For GEO/HEO
-        objects these omitted terms are significant. Use
-        ``propagate_cowell(include_stm=True)`` for force-model-consistent covariance.
-        This function is appropriate for LEO conjunction screening only.
+        The STM Jacobian includes J2–J6 zonal harmonics and atmospheric drag.
+        It does **not** include Sun/Moon third-body gravity or SRP.  For GEO/HEO
+        objects, omitting third-body perturbations causes significant secular
+        nodal-rate errors.  Use ``propagate_cowell(include_stm=True)`` for
+        force-model-consistent covariance at those altitudes.
 
-    Uses linearized J2/J3/J4 + drag dynamics to compute the 6x6 STM
+        This function is appropriate for LEO conjunction screening where the
+        dominant perturbations are J2–J6 and atmospheric drag.
+
+    Uses linearized J2–J6 + drag dynamics to compute the 6x6 STM
     via numerical integration, mapping the full 6x6 state uncertainty:
         C(t) = Φ(t, t₀) · C₀ · Φ(t, t₀)ᵀ
     The state-transition matrix Φ is computed by integrating the variational
     equations along the nominal trajectory. The Jacobian includes:
     - Point-mass gravity (μ/r³)
-    - Zonal harmonics (J2, J3, J4)
+    - Zonal harmonics (J2, J3, J4, J5, J6)
     - **Atmospheric Drag** partials (∂a/∂v) for LEO satellites.
     """
+    # BL-03: Emit a runtime warning for MEO/GEO/HEO objects.  The docstring
+    # states this function is LEO-only, but that warning was silently ignored.
+    # Users propagating GEO/HEO covariance get J4-truncated (now J6-corrected,
+    # but still no third-body/SRP) results — still unsuitable for GEO ops.
+    from astra.constants import EARTH_EQUATORIAL_RADIUS_KM as _Re_cov
+    _r0_mag_check = float(np.linalg.norm(r0_km))
+    _alt_km_check = _r0_mag_check - _Re_cov
+    if _alt_km_check > 2000.0:
+        import logging as _cov_alt_log
+        _cov_alt_log.getLogger(__name__).warning(
+            "propagate_covariance_stm called for MEO/GEO/HEO orbit "
+            "(altitude=%.0f km > 2000 km). This STM Jacobian includes J2–J6 + drag "
+            "only — Sun/Moon third-body gravity and SRP are absent. "
+            "Covariance orientation may diverge from the true orbit plane "
+            "over multi-day propagations at this altitude. "
+            "Use propagate_cowell(include_stm=True) for force-model-accurate covariance.",
+            _alt_km_check,
+        )
     if drag_config is not None and getattr(drag_config, "include_srp", False):
         import logging as _cov_log
         _cov_log.getLogger(__name__).warning(
