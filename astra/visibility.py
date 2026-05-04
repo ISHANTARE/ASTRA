@@ -117,8 +117,7 @@ def _find_exact_crossing(
     assert ts is not None
     # Cache precession-nutation rotation matrix which changes <0.00001 deg over the pass
     # t_low and t_high are UTC Julian Dates.
-    t_mid_initial = ts._utc_jd((t_low + t_high) / 2.0, 0.0)
-    R_teme_to_gcrs_cached = np.transpose(TEME.rotation_at(t_mid_initial))
+
     tl = t_low
     th = t_high
     for _ in range(iterations):

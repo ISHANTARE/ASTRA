@@ -179,7 +179,7 @@ def teme_to_ecef(
     omega_earth = 7.292115146706979e-5  # rad/s  — IAU/IERS 2010 Earth rotation rate
     _MAX_DUT1 = 1.0  # seconds — IERS hard limit for UT1-UTC
     _MAX_PM_RAD = 0.01  # radians ≈ 2062 arcsec — well beyond any observed value
-    _MAX_THETA = _MAX_DUT1 * omega_earth  # corresponding phase limit
+
     if np.any(np.abs(d_dut1) > _MAX_DUT1):
         _flog.warning(
             "EOP anomaly: |Δ-DUT1|=%.4f s exceeds %.1f s limit — clamping. "

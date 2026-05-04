@@ -1433,7 +1433,7 @@ def _powered_derivative_njit(
     # _build_vnb_matrix_njit to divide by np.linalg.norm(vel) without a guard.
     # A near-zero velocity (apoapsis of extreme HEO, or halted simulation) caused
     # NaN thrust acceleration that silently poisoned all subsequent states.
-    r_mag = max(1e-12, np.linalg.norm(r))
+
     v_mag = max(1e-12, np.linalg.norm(v))
     thrust_a_mag = (burn_thrust_N / 1000.0) / m
     if v_mag < 1e-6:

@@ -163,7 +163,6 @@ def plot_ground_track(
 
     lats = [p[0] for p in points]
     lons = [p[1] for p in points]
-    alts = [p[2] for p in points]
 
     # Detect and break longitude wrap-arounds (>180 deg jump) for clean lines
     # Insert None to lift the pen when the track wraps around 180 deg.

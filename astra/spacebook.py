@@ -740,7 +740,7 @@ def _load_satcat_guid_map() -> None:
     if stale:
 
         def _bg_satcat_refresh() -> None:
-            global _guid_refresh_thread
+            global _guid_refresh_thread, _guid_last_success
             try:
                 logger.info("Spacebook satcat: background refresh starting download.")
                 resp = _sb_get(_SB_SATCAT_JSON_URL, timeout=60)
