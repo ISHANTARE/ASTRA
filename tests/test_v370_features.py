@@ -332,6 +332,25 @@ class TestPropagateAtTimes:
         with pytest.raises(ValueError, match="state0.t_jd"):
             propagate_cowell_at_times(state0, np.array([2459999.0]))
 
+    def test_propagate_at_times_mass_interpolated_during_burn(self) -> None:
+        """Mass at mid-burn epoch must be between initial and final mass."""
+        from astra.propagator import NumericalState, propagate_cowell_at_times
+        from astra.models import FiniteBurn, ManeuverFrame
+        t0 = 2460000.5
+        state0 = NumericalState(t_jd=t0,
+                                position_km=np.array([6778.0, 0.0, 0.0]),
+                                velocity_km_s=np.array([0.0, 7.668, 0.0]),
+                                mass_kg=1000.0)
+        burn = FiniteBurn(epoch_ignition_jd=t0 + 60/86400,
+                          duration_s=120.0, thrust_N=100.0, isp_s=300.0,
+                          direction=(1.0, 0.0, 0.0), frame=ManeuverFrame.VNB)
+        mid_burn_t = t0 + 120/86400  # 60 s into the burn
+        states = propagate_cowell_at_times(state0, np.array([mid_burn_t]),
+                                           maneuvers=[burn])
+        assert states[0].mass_kg < 1000.0, "Mid-burn mass must be less than initial"
+        assert states[0].mass_kg > 1000.0 - (100.0/(300.0*9.80665))*120.0, \
+            "Mid-burn mass must be greater than final mass"
+
 
 # ===========================================================================
 # AS-03: find_conjunction_windows

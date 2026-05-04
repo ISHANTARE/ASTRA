@@ -150,11 +150,11 @@ assert abs(J4 - (-1.61962159e-6)) < 1e-18, (
 )
 assert abs(J5 - (-2.27626414e-7)) < 1e-19, (
     f"J5 ({J5!r}) diverged from canonical EGM96 value -2.27626414e-7. "
-    "Update constants.py AND propagator.py inlined literals in sync."
+    "Update constants.py AND propagator.py/covariance.py inlined literals in sync."
 )
 assert abs(J6 - 5.40681239e-7) < 1e-19, (
     f"J6 ({J6!r}) diverged from canonical EGM96 value 5.40681239e-7. "
-    "Update constants.py AND propagator.py inlined literals in sync."
+    "Update constants.py AND propagator.py/covariance.py inlined literals in sync."
 )
 # Earth gravitational parameter guard.
 # propagator._acceleration_njit inlines mu = 398600.4418.
@@ -167,6 +167,13 @@ assert EARTH_MU_KM3_S2 == 398600.4418, (
 assert abs(G0_STD_KM_S2 - 9.80665e-3) < 1e-20, (
     f"G0_STD_KM_S2 ({G0_STD_KM_S2!r}) diverged from 9.80665e-3 km/s². "
     "Update constants.py AND propagator.py._powered_derivative_njit in sync."
+)
+
+# BL-05: _powered_derivative_njit (propagator.py:1417) inlines g0 = 9.80665e-3 km/s².
+# This assertion cross-checks the inlined literal against the constants definition.
+assert abs(9.80665e-3 - G0_STD_KM_S2) < 1e-20, (
+    f"g0 Numba literal (9.80665e-3) diverged from G0_STD_KM_S2 ({G0_STD_KM_S2!r}). "
+    "Update propagator._powered_derivative_njit AND this guard in sync."
 )
 # Universal gas constant guard.
 # propagator._nrlmsise00_density_njit inlines R_GAS = 8.314462618 J/(K·mol).

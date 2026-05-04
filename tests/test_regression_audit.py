@@ -652,3 +652,19 @@ def test_estimate_covariance_computation():
         assert np.all(eigvals >= -1e-12)
     finally:
         set_strict_mode(prev)
+
+def test_covariance_stm_acceleration_matches_propagator_j6():
+    """covariance._acceleration_njit must produce same z-accel as propagator (J2-J6)."""
+    from astra.covariance import _acceleration_njit as cov_accel
+    from astra.propagator import _acceleration_njit as prop_accel
+    r = np.array([7000.0, 0.0, 500.0])
+    v = np.zeros(3)
+    empty = np.zeros((1, 1, 3))
+    t = 2451545.0
+    a_cov = cov_accel(r, v, 0.0, 0.0, 58.5, 400.0,
+                      150.0, 150.0, 15.0, False)
+    a_prop = prop_accel(t, r, v, False, 0.0, 0.0, 1.0, 0.0, 58.5, 400.0,
+                        150.0, 150.0, 15.0, False, False, t, 1.0,
+                        empty, empty, False, 1.5, False)
+    np.testing.assert_allclose(a_cov, a_prop, rtol=1e-10,
+        err_msg="covariance STM kernel diverges from propagator (J5/J6 mismatch)")

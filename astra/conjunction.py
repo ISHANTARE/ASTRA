@@ -259,7 +259,7 @@ def closest_approach(
                 tca_jd_fine = float(_res.x)
             min_dist_fine = float(_res.fun)
             return min_dist_fine, tca_jd_fine, t_idx  # type: ignore[no-any-return]
-    except Exception as exc:
+    except (ValueError, RuntimeError, np.linalg.LinAlgError, FloatingPointError) as exc:
         logger.debug(f"Brent TCA refinement failed ({exc}). Falling back to coarse 100-point scan.")
         pass  # fall back to coarse scan
     # Coarse fallback: dense 100-point bracket scan
@@ -422,7 +422,7 @@ def find_conjunctions(
                 min_dist = float(_brent.fun)
                 pos_A = spline_A(tca_s)
                 pos_B = spline_B(tca_s)
-        except Exception as exc:
+        except (ValueError, RuntimeError, np.linalg.LinAlgError, FloatingPointError) as exc:
             logger.debug(f"Brent TCA refinement failed ({exc}). Falling back to dense scan.")
             samples_in_bracket = max(100, int(math.ceil(_hi_t - _lo_t)) + 1)
             t_dense = np.linspace(_lo_t, _hi_t, samples_in_bracket)
@@ -782,11 +782,15 @@ class ConjunctionWindow:
 
     Unlike :class:`ConjunctionEvent` (a point-event at TCA), a
     ``ConjunctionWindow`` defines the **entry** and **exit** epochs of the
-    close-approach interval. This is required for:
+    close-approach interval.  Use ``ConjunctionWindow`` for interval-based
+    monitoring (e.g. CDM 7-day look-ahead, communication blackout windows,
+    or maneuver-avoidance window computation).  Use ``ConjunctionEvent`` for
+    point-event TCA analysis and Pc computation.
 
-    - Communication blackout window analysis.
-    - Maneuver planning (avoidance window computation).
-    - CDM screening compliance (7-day look-ahead windows).
+    Relationship:
+        A ``ConjunctionEvent.tca_jd`` always falls within the corresponding
+        ``ConjunctionWindow.entry_jd`` to ``ConjunctionWindow.exit_jd``
+        interval for the same object pair.
 
     Attributes:
         object_a_id: NORAD ID of object A.
@@ -795,7 +799,7 @@ class ConjunctionWindow:
         exit_jd: Julian Date when distance first rises above threshold.
         tca_jd: Julian Date of closest approach within the window.
         min_distance_km: Minimum separation within the window (km).
-        duration_s: Window duration in seconds.
+        duration_s: Window duration in seconds (computed property).
     """
     object_a_id: str
     object_b_id: str
@@ -950,7 +954,7 @@ def find_conjunction_windows(
                         min_idx = int(np.argmin(sub_dists)) + win_start_idx
                         tca_s = float(times_s[min_idx])
                         min_dist = float(dists[min_idx])
-                except Exception:
+                except (ValueError, RuntimeError, np.linalg.LinAlgError, FloatingPointError):
                     sub_dists = dists[win_start_idx:win_end_idx + 1]
                     min_idx = int(np.argmin(sub_dists)) + win_start_idx
                     tca_s = float(times_s[min_idx])

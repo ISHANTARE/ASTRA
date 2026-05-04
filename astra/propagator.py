@@ -287,7 +287,21 @@ def srp_cylindrical_illumination_factor_njit(r_km: Any, r_sun_km: Any) -> float:
             return 0.0
     return 1.0
 def srp_cylindrical_illumination_factor(r_km: Any, r_sun_km: Any) -> float:
-    """Public pure-Python legacy cylindrical umbra model."""
+    """Public pure-Python legacy cylindrical umbra model.
+
+    .. deprecated:: 3.7.1
+        The cylindrical shadow model is less accurate than the dual-cone model.
+        Use :func:`srp_illumination_factor` instead, which applies the
+        correct conical Earth umbra/penumbra geometry.
+    """
+    import warnings
+    warnings.warn(
+        "srp_cylindrical_illumination_factor is deprecated — the cylindrical "
+        "shadow model is less accurate than the dual-cone model. Use "
+        "srp_illumination_factor() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     return srp_cylindrical_illumination_factor_njit(r_km, r_sun_km)  # type: ignore[no-any-return]
 # ---------------------------------------------------------------------------
 # Data Structures
@@ -311,18 +325,28 @@ class NumericalState:
     covariance_km2: Optional[np.ndarray] = None  # shape (6, 6)
     error_message: Optional[str] = None
     def __post_init__(self) -> None:
-        """Basic range validation on state vectors."""
+        """Validate state vectors and enforce array immutability.
+
+        H-05: Copies all numpy array fields so that each NumericalState owns
+        its data exclusively.  Without this, ``frozen=True`` only prevents
+        field *reassignment* — the underlying numpy buffer is still shared
+        and mutable, allowing silent corruption of trajectory data.
+        """
+        # --- Defensive copy of array fields (H-05) ---
+        if self.position_km is not None:
+            object.__setattr__(self, 'position_km', np.array(self.position_km, copy=True))
+        if self.velocity_km_s is not None:
+            object.__setattr__(self, 'velocity_km_s', np.array(self.velocity_km_s, copy=True))
+        if self.covariance_km2 is not None:
+            object.__setattr__(self, 'covariance_km2', np.array(self.covariance_km2, copy=True))
+        # --- Range validation ---
         if self.position_km is not None:
             r_mag = np.linalg.norm(self.position_km)
-            # Use correct Earth equatorial radius (~6378 km),
-            # not the arbitrary 6000 km that was flagging sub-orbital but
-            # physically-above-surface positions (6000–6378 km range).
             if 1.0 < r_mag < EARTH_EQUATORIAL_RADIUS_KM:
                 logger.warning(
                     f"NumericalState position radius {r_mag:.2f} km is inside Earth radius."
                 )
             elif r_mag < 0.1:
-                # Likely an unitialized or zeroed state
                 logger.debug(
                     "NumericalState initialized with nearly-zero position vector."
                 )
@@ -332,14 +356,29 @@ class NumericalState:
         return f"<NumericalState JD={self.t_jd:.6f} R={r_mag:.1f}km>"
 @dataclass(frozen=True)
 class DragConfig:
-    """Atmospheric drag and optional solar radiation pressure inputs.
+    """Atmospheric drag and optional solar radiation pressure (SRP) inputs.
+
     This dataclass is frozen (immutable) to prevent accidental mutation
     after construction. Create a new instance to modify parameters.
 
-    ``area_m2`` is the aerodynamic drag area. ``srp_area_m2`` is the optical
-    cross-section for solar radiation pressure and defaults to ``area_m2`` when
-    omitted, allowing spacecraft with different drag and SRP projected areas to
-    be modeled without changing ``cr``.
+    Attributes:
+        cd: Aerodynamic drag coefficient (dimensionless). Default 2.2.
+            Typical range: 2.0–2.5 for LEO satellites.
+        area_m2: Aerodynamic drag cross-section (m²). Default 10.0.
+        mass_kg: Spacecraft mass (kg). Default 1000.0.
+        cr: Solar radiation pressure reflectivity coefficient (dimensionless).
+            Default 1.5.  Range: 1.0 (absorber) to 2.0 (perfect reflector).
+        include_srp: Enable/disable SRP force model. Default True.
+        model: Atmospheric density model. ``"NRLMSISE00"`` (default) uses the
+            NRLMSISE-00 empirical model with space-weather indices. ``"EXPONENTIAL"``
+            uses a single-layer exponential profile (faster, lower fidelity).
+        srp_conical_shadow: Use the conical (umbra/penumbra) Earth shadow
+            model for SRP. Default True. When False, the satellite is assumed
+            to always be in sunlight (conservative for SRP force magnitude).
+        srp_area_m2: Optical cross-section for SRP (m²). Defaults to
+            ``area_m2`` when ``None``, which is correct for compact spacecraft.
+            Set explicitly for satellites where the solar-panel area differs
+            significantly from the aerodynamic drag area.
     """
     cd: float = 2.2
     area_m2: float = 10.0
@@ -381,7 +420,7 @@ class SNCConfig:
             raise NotImplementedError(
                 f"SNCConfig.mode={self.mode!r} is not yet implemented. "
                 "Only 'white_noise' is currently supported. "
-                "DMC (Dynamic Model Compensation) is planned for v3.7.0."
+                "DMC (Dynamic Model Compensation) is planned for a future release."
             )
         if self.q_psd_m2_s3 < 0.0:
             raise ValueError(
@@ -1824,7 +1863,10 @@ def propagate_cowell(
         if include_stm:
             raise ValueError(
                 "propagate_cowell: `include_stm=True` requires `state0.covariance_km2` to be set. "
-                "Cannot propagate covariance without an initial uncertainty."
+                "Cannot propagate covariance without an initial uncertainty. "
+                "Set state0 = NumericalState(..., covariance_km2=np.diag("
+                "[sigma_r**2]*3 + [sigma_v**2]*3)) where sigma_r (km) and "
+                "sigma_v (km/s) are your 1-sigma position/velocity uncertainties."
             )
         current_P0 = np.eye(3, dtype=np.float64) * 1e-6
     ctx = _PropagatorContext(
@@ -2042,8 +2084,18 @@ def propagate_cowell_at_times(
     # Total propagation duration
     duration_s = (max_t - t0_jd) * 86400.0
     if duration_s < 1e-6:
-        # All requested times are at epoch — return copies of state0
-        return [state0] * len(times_jd)
+        # All requested times are at or before epoch — return per-epoch copies
+        # with the correct t_jd.  Returning the same object N times would allow
+        # a caller mutation to corrupt all N entries simultaneously.
+        return [
+            NumericalState(
+                t_jd=float(t),
+                position_km=state0.position_km.copy(),
+                velocity_km_s=state0.velocity_km_s.copy(),
+                mass_kg=state0.mass_kg,
+            )
+            for t in times_jd
+        ]
 
     # Propagate with dense output (small dt_out for interpolation accuracy)
     # Use 10s steps for LEO, or 60s steps if > 6 hours
@@ -2062,7 +2114,17 @@ def propagate_cowell_at_times(
     )
 
     if len(dense_states) < 2:
-        return [dense_states[0]] * len(times_jd)
+        # Single-state trajectory — return a copy for each requested epoch.
+        s0 = dense_states[0]
+        return [
+            NumericalState(
+                t_jd=float(t),
+                position_km=s0.position_km.copy(),
+                velocity_km_s=s0.velocity_km_s.copy(),
+                mass_kg=s0.mass_kg,
+            )
+            for t in times_jd
+        ]
 
     # Build interpolation arrays
     dense_t_jd = np.array([s.t_jd for s in dense_states])
@@ -2080,17 +2142,35 @@ def propagate_cowell_at_times(
     spline_pos = scipy.interpolate.CubicSpline(t_s, dense_pos, bc_type="natural")
     spline_vel = scipy.interpolate.CubicSpline(t_s, dense_vel, bc_type="natural")
 
-    # Evaluate at requested times
+    # BL-01: Interpolate mass along the trajectory so mid-burn queries return
+    # the physically correct instantaneous mass, not always the final mass.
+    # For coast-only propagations every entry is None; fall back to None.
+    dense_masses_raw = [s.mass_kg for s in dense_states]
+    _has_mass = any(m is not None for m in dense_masses_raw)
+    if _has_mass:
+        dense_masses = np.array(
+            [m if m is not None else 0.0 for m in dense_masses_raw],
+            dtype=float,
+        )
+        spline_mass = scipy.interpolate.CubicSpline(t_s, dense_masses, bc_type="natural")
+        interp_mass_arr = spline_mass(req_s_clamped)
+    else:
+        interp_mass_arr = None
+
+    # Evaluate position and velocity at requested times
     interp_pos = spline_pos(req_s_clamped)
     interp_vel = spline_vel(req_s_clamped)
 
     result = []
     for k in range(len(times_jd)):
+        m_k: Optional[float] = (
+            float(interp_mass_arr[k]) if interp_mass_arr is not None else None
+        )
         result.append(NumericalState(
             t_jd=float(times_jd[k]),
             position_km=interp_pos[k],
             velocity_km_s=interp_vel[k],
-            mass_kg=dense_states[-1].mass_kg,
+            mass_kg=m_k,
         ))
     return result
 
@@ -2106,6 +2186,7 @@ def propagate_cowell_batch(
     include_third_body: bool = True,
     include_stm: bool = False,
     max_workers: Optional[int] = None,
+    use_empirical_drag: bool = True,
 ) -> dict[str, list["NumericalState"]]:
     """Propagate multiple satellites concurrently with the high-fidelity Cowell integrator.
     This is a production batch wrapper around :func:`propagate_cowell` that
@@ -2128,7 +2209,9 @@ def propagate_cowell_batch(
         maneuvers: Optional ``dict[satellite_id, list[FiniteBurn]]``.
             Missing keys default to an empty burn sequence.
         include_third_body: Enable Sun/Moon third-body gravity.
+        include_stm: Whether to propagate the 6x6 State Transition Matrix.
         max_workers: Thread pool size.  Defaults to ``min(32, len(states))``.
+        use_empirical_drag: Whether to use empirical (F10.7/Ap) drag calculations.
     Note:
         Atmosphere model (NRLMSISE-00 or exponential) and SRP are controlled
         via the ``drag_config`` argument.  Set ``DragConfig(model='NRLMSISE00',
@@ -2179,7 +2262,7 @@ def propagate_cowell_batch(
             maneuvers=burns_map.get(sat_id, []),
             include_third_body=include_third_body,
             include_stm=include_stm,
-            use_empirical_drag=True,
+            use_empirical_drag=use_empirical_drag,
         )
         return sat_id, traj
     future_to_id: dict = {}
