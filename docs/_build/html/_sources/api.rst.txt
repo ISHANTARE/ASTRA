@@ -1,0 +1,423 @@
+API reference
+=============
+
+These pages are **generated automatically** on each documentation build from
+the installed ``astra`` package (``sphinx-apidoc``). Narrative guides:
+:doc:`quickstart`, :doc:`limitations`, :doc:`maneuvers`.
+
+Quick API map
+-------------
+
+The table below groups the most important top-level names by use-case so you
+can find the right function without scrolling through the full auto-generated
+index.
+
+Data ingestion
+~~~~~~~~~~~~~~
+
+.. list-table::
+   :header-rows: 1
+   :widths: 42 15 43
+
+   * - Function
+     - Returns
+     - Notes
+   * - ``fetch_celestrak_active()``
+     - ``list[SatelliteTLE]``
+     - Full active catalog, no auth
+   * - ``fetch_celestrak_group(group)``
+     - ``list[SatelliteTLE]``
+     - e.g. ``"starlink"``, ``"stations"``
+   * - ``fetch_celestrak_active_omm()``
+     - ``list[SatelliteOMM]``
+     - Recommended for new code
+   * - ``fetch_celestrak_group_omm(group)``
+     - ``list[SatelliteOMM]``
+     - OMM with mass, RCS metadata
+   * - ``fetch_celestrak_comprehensive_omm()``
+     - ``list[SatelliteOMM]``
+     - Multi-source merged catalog
+   * - ``fetch_spacetrack_active()``
+     - ``list[SatelliteOMM]``
+     - Requires ``SPACETRACK_USER/PASS``
+   * - ``fetch_spacetrack_group(group)``
+     - ``list[SatelliteOMM]``
+     - Authenticated Space-Track fetch
+   * - ``fetch_spacetrack_satcat()``
+     - ``list[dict]``
+     - SATCAT metadata records
+   * - ``fetch_xp_tle_catalog()``
+     - ``list[SatelliteTLE]``
+     - Spacebook Extended-Precision TLEs
+   * - ``fetch_tle_catalog()``
+     - ``list[SatelliteTLE]``
+     - Standard Spacebook TLE catalog
+   * - ``fetch_synthetic_covariance_stk(norad_id)``
+     - ``str``
+     - Raw STK ephemeris text (Spacebook)
+   * - ``fetch_satcat_details(norad_id)``
+     - ``dict``
+     - Per-object Spacebook metadata
+   * - ``refresh_satcat_cache()``
+     - ``int``
+     - Force-refresh Spacebook NORAD-to-GUID cache
+   * - ``get_space_weather_sb(t_jd)``
+     - ``(f107, f107adj, ap)``
+     - COMSPOC live space weather
+   * - ``get_eop_sb(t_jd)``
+     - ``(xp, yp, dut1)``
+     - COMSPOC live Earth Orientation Parameters
+
+Parsing
+~~~~~~~
+
+.. list-table::
+   :header-rows: 1
+   :widths: 42 20 38
+
+   * - Function
+     - Returns
+     - Notes
+   * - ``parse_tle(name, l1, l2)``
+     - ``SatelliteTLE``
+     - Single TLE from two lines
+   * - ``load_tle_catalog(lines)``
+     - ``list[SatelliteTLE]``
+     - Bulk TLE text parser
+   * - ``validate_tle(name, l1, l2)``
+     - ``bool``
+     - Checksum + range check
+   * - ``parse_omm_json(text)``
+     - ``list[SatelliteOMM]``
+     - CCSDS JSON string
+   * - ``parse_omm_record(dict)``
+     - ``SatelliteOMM``
+     - Single OMM dict
+   * - ``load_omm_file(path)``
+     - ``list[SatelliteOMM]``
+     - From disk
+   * - ``validate_omm(dict)``
+     - ``bool``
+     - Required-field check
+   * - ``xptle_to_satellite_omm(tle_objects)``
+     - ``list[SatelliteOMM]``
+     - Convert ``list[SatelliteTLE]`` XP-TLEs to OMM-like records
+   * - ``parse_stk_ephemeris(text)``
+     - ``list[NumericalState]``
+     - STK ``EphemerisTimePosVel`` state-vector block
+   * - ``parse_cdm_xml(text)``
+     - ``ConjunctionDataMessage``
+     - CCSDS CDM XML (defusedxml)
+   * - ``parse_ocm(text)``
+     - ``list[NumericalState]``
+     - CCSDS OCM (auto XML/KVN)
+   * - ``parse_ocm_xml(text)``
+     - ``list[NumericalState]``
+     - CCSDS OCM XML
+   * - ``parse_ocm_kvn(text)``
+     - ``list[NumericalState]``
+     - CCSDS OCM KVN
+   * - ``export_ocm_xml(states, name)``
+     - ``str``
+     - Export to CCSDS OCM XML
+
+Filtering & catalog
+~~~~~~~~~~~~~~~~~~~
+
+.. list-table::
+   :header-rows: 1
+   :widths: 42 18 40
+
+   * - Function / Class
+     - Signature
+     - Notes
+   * - ``make_debris_object(source)``
+     - ``→ DebrisObject``
+     - Wraps TLE or OMM
+   * - ``filter_altitude(objects, min_km, max_km)``
+     - ``→ list[DebrisObject]``
+     - LEO / MEO / GEO band filter
+   * - ``filter_region(objects, lat_min_deg, lat_max_deg, lon_min_deg=None, lon_max_deg=None)``
+     - ``→ list[DebrisObject]``
+     - Geographic region filter; latitude-only bounds are valid
+   * - ``filter_time_window(objects, t0, t1)``
+     - ``→ list[DebrisObject]``
+     - Epoch freshness filter
+   * - ``apply_filters(objects, config)``
+     - ``→ list[DebrisObject]``
+     - Chained via ``FilterConfig``
+   * - ``catalog_statistics(objects)``
+     - ``→ dict``
+     - LEO/MEO/GEO/type counts
+
+Orbit propagation
+~~~~~~~~~~~~~~~~~
+
+.. list-table::
+   :header-rows: 1
+   :widths: 42 18 40
+
+   * - Function
+     - Returns
+     - Notes
+   * - ``propagate_orbit(sat, times_jd)``
+     - ``list[OrbitalState]``
+     - Single satellite, SGP4
+   * - ``propagate_many(sats, times_jd)``
+     - ``(TrajectoryMap, VelocityMap)``
+     - Vectorized SGP4 positions and velocities
+   * - ``propagate_many_generator(sats, times_jd)``
+     - generator of ``(times, TrajectoryMap, VelocityMap)``
+     - Memory-efficient streaming
+   * - ``propagate_trajectory(sat, t_start_jd, t_end_jd, step_minutes=5.0)``
+     - ``(times, positions, velocities)``
+     - Single-satellite trajectory arrays
+   * - ``ground_track(sat, times_jd)``
+     - ``list[tuple]``
+     - lat/lon/alt at each step
+   * - ``propagate_cowell(state, duration_s, ...)``
+     - ``list[NumericalState]``
+     - High-fidelity numerical integrator
+
+Conjunction analysis
+~~~~~~~~~~~~~~~~~~~~
+
+.. list-table::
+   :header-rows: 1
+   :widths: 42 20 38
+
+   * - Function
+     - Returns
+     - Notes
+   * - ``find_conjunctions(traj, times, elements_map)``
+     - ``list[ConjunctionEvent]``
+     - Full 3-phase screening pipeline
+   * - ``closest_approach(traj_a, traj_b, times)``
+     - ``ConjunctionEvent``
+     - Single pair TCA refinement
+   * - ``distance_3d(pos_a, pos_b)``
+     - ``ndarray``
+     - Per-timestep Euclidean distance
+   * - ``compute_collision_probability(...)``
+     - ``float``
+     - Analytical Foster / Chan P_c
+   * - ``compute_collision_probability_mc(...)``
+     - ``float``
+     - Monte Carlo P_c (6D sampling)
+   * - ``estimate_covariance(days_since_epoch)``
+     - ``ndarray(3,3)``
+     - Heuristic diagonal RTN (relaxed mode only)
+   * - ``propagate_covariance_stm(cov0, Phi)``
+     - ``ndarray(6,6)``
+     - STM-based covariance propagation
+   * - ``rotate_covariance_rtn_to_eci(cov, pos, vel)``
+     - ``ndarray(3,3)``
+     - RTN → ECI rotation
+   * - ``load_spacebook_covariance(norad_id)``
+     - ``ndarray(6,6) | None``
+     - Fetch + parse Spacebook ``CovarianceTimePosVel`` matrix
+
+Maneuvers
+~~~~~~~~~
+
+.. list-table::
+   :header-rows: 1
+   :widths: 42 20 38
+
+   * - Function / Class
+     - Signature / Returns
+     - Notes
+   * - ``validate_burn(burn)``
+     - ``None | raises ManeuverError``
+     - Single-burn parameter check
+   * - ``validate_burn_sequence(burns)``
+     - ``None | raises ManeuverError``
+     - Overlap + ordering check
+   * - ``rotation_vnb_to_inertial(r, v)``
+     - ``ndarray(3,3)``
+     - VNB frame rotation matrix
+   * - ``rotation_rtn_to_inertial(r, v)``
+     - ``ndarray(3,3)``
+     - RTN frame rotation matrix
+   * - ``frame_to_inertial(dir, r, v, frame)``
+     - ``ndarray(3)``
+     - Direction → inertial
+   * - ``thrust_acceleration_inertial(burn, r, v, m)``
+     - ``ndarray(3)``
+     - Thrust vector in ECI km/s²
+   * - ``FiniteBurn``
+     - dataclass
+     - ``thrust_N, isp_s, t_start_s, t_end_s, direction_vnb, frame``
+   * - ``DragConfig``
+     - dataclass
+     - ``cd, area_m2, mass_kg, cr, include_srp, srp_conical_shadow``
+
+Visibility
+~~~~~~~~~~
+
+.. list-table::
+   :header-rows: 1
+   :widths: 42 20 38
+
+   * - Function
+     - Returns
+     - Notes
+   * - ``passes_over_location(sat, observer, t0, t1)``
+     - ``list[PassEvent]``
+     - AOS / TCA / LOS per pass
+   * - ``visible_from_location(sats, observer, t_jd)``
+     - ``list[DebrisObject]``
+     - Visible objects at a single epoch
+
+Utilities & configuration
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. list-table::
+   :header-rows: 1
+   :widths: 42 20 38
+
+   * - Function / Symbol
+     - Signature / Returns
+     - Notes
+   * - ``warmup()``
+     - ``None``
+     - Pre-compile Numba JIT kernels
+   * - ``set_strict_mode(enabled)``
+     - ``None``
+     - Thread-safe strict / relaxed toggle
+   * - ``astra.config.ASTRA_STRICT_MODE``
+     - ``bool``
+     - Direct mode flag
+   * - ``convert_time(dt, to)``
+     - varies
+     - UTC ↔ JD ↔ ISO conversions
+   * - ``vincenty_distance(lat1, lon1, lat2, lon2)``
+     - ``float`` km
+     - WGS-84 great-circle distance
+   * - ``orbit_period(mean_motion_rev_per_day)``
+     - ``float`` min
+     - Keplerian period
+   * - ``orbital_elements(source, v=None)``
+     - ``dict``
+     - Classical elements from TLE line 2, Cartesian vectors, or state object
+   * - ``SpatialIndex``
+     - class
+     - cKDTree wrapper for catalog screening
+   * - ``sun_position_de(t_jd)``
+     - ``ndarray(3)``
+     - Geocentric Sun (GCRS, km) from DE421
+   * - ``moon_position_de(t_jd)``
+     - ``ndarray(3)``
+     - Geocentric Moon (GCRS, km) from DE421
+   * - ``sun_position_teme(t_jd)``
+     - ``ndarray(3)``
+     - Geocentric Sun (TEME, km) from DE421
+   * - ``moon_position_teme(t_jd)``
+     - ``ndarray(3)``
+     - Geocentric Moon (TEME, km) from DE421
+   * - ``atmospheric_density_empirical(alt, f107, f107adj, ap)``
+     - ``float`` kg/m³
+     - NRLMSISE-00 density model
+   * - ``teme_to_ecef(r_teme, times_jd, ...)``
+     - ``ndarray(3)``
+     - TEME → ECEF (with EOP)
+   * - ``ecef_to_geodetic_wgs84(x, y, z)``
+     - ``(lat, lon, alt)``
+     - ECEF → WGS-84 Geodetic
+   * - ``get_eop_correction(times_jd)``
+     - ``(xp, yp, dut1)``
+     - Batch Spacebook EOP fetch
+   * - ``prefetch_iers_data_async()``
+     - ``None``
+     - Non-blocking IERS load
+   * - ``jd_utc_to_datetime(jd)``
+     - ``datetime``
+     - Julian Date → UTC datetime
+   * - ``datetime_utc_to_jd(dt)``
+     - ``float``
+     - UTC datetime → Julian Date
+   * - ``astra.constants``
+     - ``module``
+     - Physical and simulation constants
+
+Key data types
+~~~~~~~~~~~~~~
+
+.. list-table::
+   :header-rows: 1
+   :widths: 28 72
+
+   * - Type
+     - Description
+   * - ``SatelliteTLE``
+     - Legacy TLE satellite record (NORAD, epoch, orbital elements)
+   * - ``SatelliteOMM``
+     - Modern CCSDS OMM record — adds mass, RCS, ballistic coefficient
+   * - ``SatelliteState``
+     - ``Union[SatelliteTLE, SatelliteOMM]`` — accepted by all physics APIs
+   * - ``DebrisObject``
+     - Enriched catalog entry with altitude, period, radius, source
+   * - ``NumericalState``
+     - Cowell output: position, velocity, optional mass and 6×6 covariance
+   * - ``DragConfig``
+     - Drag + SRP parameters for ``propagate_cowell``
+   * - ``SNCConfig``
+     - State Noise Compensation (process noise PSD) for covariance propagation
+   * - ``FiniteBurn``
+     - Finite burn definition: thrust, Isp, timing, direction frame
+   * - ``ConjunctionEvent``
+     - Screening result with TCA, miss distance, P_c, risk level, covariance source
+   * - ``ConjunctionDataMessage``
+     - Parsed CCSDS CDM XML
+   * - ``Observer``
+     - Ground station: ``name``, ``latitude_deg``, ``longitude_deg``,
+       ``elevation_m``, optional ``min_elevation_deg``
+   * - ``PassEvent``
+     - Ground pass: ``aos_jd``, ``tca_jd``, ``los_jd``,
+       ``max_elevation_deg``, AOS/LOS azimuths, duration
+   * - ``OrbitalState``
+     - SGP4 output: position, velocity, altitude, frame
+   * - ``TrajectoryMap``
+     - ``dict[norad_id, ndarray(T, 3)]`` — positions for all satellites × times
+   * - ``VelocityMap``
+     - ``dict[norad_id, ndarray(T, 3)]`` — velocities for TCA velocity accuracy
+
+Error types
+~~~~~~~~~~~
+
+All errors inherit from ``AstraError``.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 35 65
+
+   * - Exception
+     - Raised when
+   * - ``InvalidTLEError``
+     - TLE checksum mismatch or out-of-range field
+   * - ``PropagationError``
+     - SGP4 error code; NaN trajectory in strict mode
+   * - ``EphemerisError``
+     - DE421 unavailable in strict mode
+   * - ``SpaceWeatherError``
+     - Space weather data missing in strict mode
+   * - ``CoordinateError``
+     - Frame transformation failure
+   * - ``ManeuverError``
+     - Invalid burn sequence or parameter
+   * - ``FilterError``
+     - Catalog filter configuration error
+   * - ``SpacebookError``
+     - Spacebook network / HTTP failure; disabled module
+   * - ``SpacebookLookupError``
+     - NORAD ID not found in Spacebook SATCAT
+
+---
+
+Auto-generated API
+------------------
+
+.. toctree::
+   :maxdepth: 3
+
+   apidoc/modules

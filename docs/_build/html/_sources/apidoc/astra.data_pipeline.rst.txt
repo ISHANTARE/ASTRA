@@ -1,0 +1,7 @@
+astra.data\_pipeline module
+===========================
+
+.. automodule:: astra.data_pipeline
+   :members:
+   :show-inheritance:
+   :undoc-members:

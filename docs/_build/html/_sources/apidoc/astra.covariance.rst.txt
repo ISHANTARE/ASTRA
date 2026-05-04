@@ -1,0 +1,7 @@
+astra.covariance module
+=======================
+
+.. automodule:: astra.covariance
+   :members:
+   :show-inheritance:
+   :undoc-members:

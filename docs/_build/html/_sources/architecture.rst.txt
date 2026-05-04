@@ -1,0 +1,112 @@
+Architecture & Physics
+======================
+
+ASTRA-Core uses **SGP4** for large catalogs and **Cowell** for high-fidelity
+segments. For **model assumptions** (ephemeris span, P\ :sub:`c` inputs, strict
+mode), see :doc:`limitations`.
+
+The stack is organized around numerical rigor and clear separation of parsing,
+propagation, and screening.
+
+Two Propagation Tiers
+---------------------
+
+1. **Analytical SGP4 (Vectorized)**
+
+   The standard for processing massive space catalogs (e.g., all active
+   satellites). SGP4 is incredibly fast but limited by the accuracy of the
+   underlying Two-Line Element (TLE) mean-element models. ASTRA-Core
+   vectorizes SGP4 natively via NumPy, propagating thousands of trajectories
+   concurrently with a single ``propagate_many`` call.
+
+2. **Numerical Cowell Integrator (7-DOF)**
+
+   For high-fidelity operations, ASTRA implements a **Dormand-Prince DOP853**
+   (8th-order, ``scipy.integrate.solve_ivp``) direct integration scheme.
+   A **segmented orchestrator** slices the propagation at engine ignition /
+   cutoff boundaries so the integrator never steps across a force-model
+   discontinuity:
+
+   - **Coast arc (6-DOF):** state vector ``[x, y, z, vx, vy, vz]``.
+   - **Powered arc (7-DOF):** state vector ``[x, y, z, vx, vy, vz, mass]``,
+     with continuous mass depletion via the Tsiolkovsky equation
+     :math:`\dot{m} = -F / (I_{sp} \cdot g_0)`.
+
+   Physical forces modelled:
+
+   - **Gravity:** WGS-84 zonal harmonics through :math:`J_6`.
+   - **Atmospheric Drag:** NRLMSISE-00 atmospheric density model driven by live
+     Space Weather indicators (F10.7, Ap).  Calibration anchor:
+     ρ(400 km, F10.7 = 150, Ap = 15) ≈ 3.7 × 10\ :sup:`−12` kg/m³.
+   - **Third-Body Dynamics:** Lunar & Solar gravitational perturbations from
+     **JPL DE421** (1900–2050, ~17 MB).
+   - **Solar Radiation Pressure (SRP):** Cannonball model with a high-fidelity
+     **conical Earth umbra/penumbra** geometry.  The illumination factor ν is
+     computed as the fractional area of the solar disk not occulted by Earth,
+     transitioning smoothly from ν = 1 (full sun) through the penumbra to
+     ν = 0 (full umbra).  Use ``DragConfig(srp_conical_shadow=True)``
+     (the default); the old alias ``srp_cylindrical_shadow`` is deprecated.
+
+Numba JIT Acceleration
+----------------------
+
+The innermost loop of the Cowell integrator—where forces are summed at every
+substep—is JIT-compiled to LLVM machine code using ``@njit(fastmath=True, cache=True)``.
+
+To prevent I/O bottlenecks inside the tight integration loop, JPL DE421 planetary
+positions are pre-fitted into **piecewise 7-day, 20-node Chebyshev polynomial
+splines** via Clenshaw recurrence (``_eval_cheb_3d_njit``).  The splines are
+evaluated entirely in memory with no file I/O during integration.
+
+A pure-Python fallback (``_acceleration``) is available when Numba is not
+installed; it produces numerically identical results but is significantly slower.
+
+6×6 State Transition Matrix (STM) Covariance
+---------------------------------------------
+
+``propagate_covariance_stm(cov0, Phi)`` propagates an initial covariance
+matrix forward in time using the 6×6 state transition matrix:
+
+.. math::
+
+   P(t) = \Phi(t, t_0) \, P_0 \, \Phi(t, t_0)^T
+
+The Jacobian ``_compute_force_jacobian`` includes exact analytical J\ :sub:`2`
+partial derivatives (Montenbruck & Gill §3.2.4) alongside the two-body term,
+so the dominant nodal-precession uncertainty growth in LEO is captured
+correctly.  A co-rotating drag Jacobian correction preserves covariance
+positive-definiteness.
+
+JIT Warm-Up
+-----------
+
+``astra.warmup()`` pre-compiles all Numba kernels (Cowell force model,
+``SpatialIndex`` screening) by running a trivial 1-second propagation and
+a do-nothing conjunction check.  Call it **once at worker startup** in
+production to eliminate first-call latency.
+
+Data Source Priority
+--------------------
+
+When physics models require environmental data, ASTRA follows a strict
+priority hierarchy:
+
+1. **Spacebook / COMSPOC** (live observational) — space weather, EOP,
+   synthetic covariance.
+2. **CelesTrak** — ``SW-All.csv`` space weather fallback; standard TLE/OMM.
+3. **Synthetic defaults** — (F10.7 = 150, Ap = 15); forbidden in strict mode.
+
+Error Hierarchy
+---------------
+
+All ASTRA errors inherit from ``AstraError``:
+
+- ``InvalidTLEError`` — malformed TLE checksum or out-of-range field.
+- ``PropagationError`` — SGP4 error code or NaN trajectory in strict mode.
+- ``EphemerisError`` — DE421 unavailable in strict mode.
+- ``SpaceWeatherError`` — space weather data missing in strict mode.
+- ``CoordinateError`` — frame transformation failure.
+- ``ManeuverError`` — invalid burn sequence or parameter.
+- ``FilterError`` — catalog filter configuration error.
+- ``SpacebookError`` — Spacebook network / HTTP failure.
+- ``SpacebookLookupError`` — NORAD ID not found in Spacebook SATCAT.
