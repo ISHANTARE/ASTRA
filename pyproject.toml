@@ -44,7 +44,7 @@ dependencies = [
 
 [project.optional-dependencies]
 viz = ["plotly>=5.18.0"]
-test = ["pytest>=8.0.0", "mypy>=1.10.0", "plotly>=5.18.0", "scipy-stubs", "types-requests", "types-defusedxml"]
+test = ["pytest>=8.0.0", "mypy>=1.10.0", "flake8", "plotly>=5.18.0", "scipy-stubs", "types-requests", "types-defusedxml"]
 
 [tool.setuptools.packages.find]
 where = ["."]
