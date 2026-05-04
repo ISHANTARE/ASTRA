@@ -246,7 +246,7 @@ def closest_approach(
             return float(np.linalg.norm(spline_A(t_jd) - spline_B(t_jd)))
         _lo = float(spline_times[idx_low])
         _hi = float(spline_times[idx_high])
-        _res = minimize_scalar(
+        _res = minimize_scalar(  # type: ignore[call-overload]
             _dist_fn,
             bounds=(_lo, _hi),
             method="bounded",
@@ -410,7 +410,7 @@ def find_conjunctions(
         try:
             from scipy.optimize import minimize_scalar
             _spline_dist = lambda t: float(np.linalg.norm(spline_A(t) - spline_B(t)))  # noqa: E731
-            _brent = minimize_scalar(
+            _brent = minimize_scalar(  # type: ignore[call-overload]
                 _spline_dist,
                 bounds=(_lo_t, _hi_t),
                 method="bounded",
@@ -940,7 +940,7 @@ def find_conjunction_windows(
                 # ── Find TCA within window ───────────────────────────────
                 try:
                     from scipy.optimize import minimize_scalar
-                    res = minimize_scalar(
+                    res = minimize_scalar(  # type: ignore[call-overload]
                         _dist_at_s,
                         bounds=(entry_s, exit_s),
                         method="bounded",
