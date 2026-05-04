@@ -6,7 +6,6 @@
 max-line-length = 127
 
 # Ignore long-imports in __init__ (justified when importing many public API symbols)
-max-line-length = 100
 exclude =
     .git,
     __pycache__,
