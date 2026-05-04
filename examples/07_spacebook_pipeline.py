@@ -243,7 +243,7 @@ def step6_xp_tle_conjunction(catalog: list) -> None:
     times_jd = start_jd + np.arange(0, 60, 5.0) / 1440.0   # 1 hour, 5-min steps
 
     _info(f"Propagating {len(leo)} LEO objects (SGP4) over 1-hour window …")
-    trajectories = astra.propagate_many(sources, times_jd)
+    trajectories, _ = astra.propagate_many(sources, times_jd)
 
     _info("Running KD-tree conjunction screen (threshold = 5 km) …")
     elements_map = {obj.source.norad_id: obj for obj in leo}

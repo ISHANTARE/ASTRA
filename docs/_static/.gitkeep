@@ -1,0 +1,2 @@
+# This file ensures the _static directory exists for the Sphinx theme.
+# Add custom CSS, fonts, or images here for ReadTheDocs branding.

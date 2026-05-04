@@ -85,7 +85,8 @@ def main():
     times_jd = start_jd + np.arange(0, 60, 5) / 1440.0
 
     # propagate_many accepts SatelliteOMM exactly like SatelliteTLE
-    trajectories = astra.propagate_many(subset_omms, times_jd)
+    trajectories, _ = astra.propagate_many(subset_omms, times_jd)  # DEBUG
+# Let's fix the actual line:
 
     for omm in subset_omms:
         positions = trajectories[omm.norad_id]

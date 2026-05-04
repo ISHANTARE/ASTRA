@@ -1,0 +1,32 @@
+[flake8]
+# ASTRA linting rules
+
+# Respect PEP8: 79 char line length for library code
+# (127 char override for readability in test/data config code)
+max-line-length = 127
+
+# Ignore long-imports in __init__ (justified when importing many public API symbols)
+max-line-length = 100
+exclude =
+    .git,
+    __pycache__,
+    .pytest_cache,
+    .mypy_cache,
+    build,
+    dist,
+    *.egg-info,
+    docs/apidoc,
+    .eggs
+
+# Ignore complexity warnings for now (can be re-enabled after audit)
+max-complexity = 20
+
+# Ignores
+ignore =
+    # Auto-discovers most Python 3 incompatibilities
+    F401,  # imported but unused (legitimate for __init__.py re-exports)
+    F403,  # 'from module import *' (used intentionally in astra/__init__.py)
+    F811,  # redefinition (legitimate in test mocks)
+    E501,  # line too long (handled by max-line-length above)
+    W503,  # line break before binary operator (PEP8 discourages but doesn't forbid)
+    E203,  # whitespace before ':' (conflicts with Black)

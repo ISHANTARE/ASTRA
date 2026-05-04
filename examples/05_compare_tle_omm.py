@@ -93,10 +93,10 @@ def main():
     omm_list = [p[1] for p in pairs]
 
     print("\n[4] Propagating TLE objects...")
-    traj_tle = astra.propagate_many(tle_list, times_jd)
+    traj_tle, _ = astra.propagate_many(tle_list, times_jd)
 
     print("    Propagating OMM objects...")
-    traj_omm = astra.propagate_many(omm_list, times_jd)
+    traj_omm, _ = astra.propagate_many(omm_list, times_jd)
 
     # ------------------------------------------------------------------
     # 5. Compute positional deltas per object

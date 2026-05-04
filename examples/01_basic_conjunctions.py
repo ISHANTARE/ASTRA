@@ -40,7 +40,7 @@ def main():
     # 4. Propagate all orbits simultaneously using SGP4 arrays
     print(f"Propagating {len(leo_objects)} orbits over {len(time_steps_min)} time steps...")
     tles = [obj.tle for obj in leo_objects]
-    trajectories = astra.propagate_many(tles, times_jd)
+    trajectories, _ = astra.propagate_many(tles, times_jd)
     
     # 5. Find conjunctions (miss distance < 5 km)
     print("Running Sweep-and-Prune spatial collision filter...")
