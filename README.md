@@ -1,4 +1,4 @@
-# ASTRA-Core v3.6.0 (Autonomous Space Traffic Risk Analyzer) 🛰️
+# ASTRA-Core v3.6.1 (Autonomous Space Traffic Risk Analyzer) 🛰️
 
 ![PyPI - Version](https://img.shields.io/pypi/v/astra-core-engine?color=blue&label=astra-core-engine)
 
@@ -157,7 +157,18 @@ ASTRA-Core implements widely used models suitable for **research, education, int
 | **Monte Carlo P_c** | Uses a **straight-line** relative-motion model per sample; very **slow** co-orbital encounters need careful interpretation and finer time sampling. |
 | **Catalog quality** | Stale or poor elements dominate error—always check epoch and data source. |
 
-**Strict mode:** `astra.set_strict_mode(True)` or `astra.config.ASTRA_STRICT_MODE = True` makes many missing-data paths **raise** instead of warn-and-continue—recommended when building tools that must not guess.
+**Strict mode:** **Enabled by default as of v3.6.1.** `astra.config.ASTRA_STRICT_MODE` makes many missing-data paths **raise** instead of warn-and-continue—this is the recommended setting for production systems. When strict mode is enabled (default), the following raise exceptions:
+- EOP fetch failures → `EphemerisError`
+- Covariance dimension mismatches → `ValueError`
+- Monte Carlo Pc failures → `ValueError`
+- Invalid space weather → `SpaceWeatherError`
+- Missing ephemeris data → `EphemerisError`
+
+To disable strict mode for development or backwards compatibility:
+
+```python
+astra.config.ASTRA_STRICT_MODE = False
+```
 
 **Banner suppression:** Set `ASTRA_NO_BANNER=1` in the environment to suppress the startup banner—useful for production worker pools where each subprocess would otherwise emit it independently.
 
@@ -411,7 +422,7 @@ Release notes: [CHANGELOG.md](./CHANGELOG.md).
   publisher = {GitHub},
   journal = {GitHub repository},
   howpublished = {\url{https://github.com/ISHANTARE/ASTRA}},
-  version = {3.5.0}
+  version = {3.6.1}
 }
 ```
 

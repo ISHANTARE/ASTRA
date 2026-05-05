@@ -87,7 +87,20 @@ Validation
 Strict vs relaxed mode
 ----------------------
 
-Set ``astra.config.ASTRA_STRICT_MODE`` (or ``astra.set_strict_mode(True)``) so
-missing ephemeris, stale space weather, NaN trajectories, or policy violations
-**fail fast** instead of silent fallbacks. See :doc:`installation` and the
-main README for environment variable configuration.
+**As of v3.6.1, strict mode is enabled by default.** ``astra.config.ASTRA_STRICT_MODE``
+ensures missing ephemeris, stale space weather, NaN trajectories, or policy violations
+**fail fast** with typed exceptions instead of silent fallbacks:
+
+* EOP fetch failures → ``EphemerisError``
+* Covariance dimension mismatches → ``ValueError``
+* Monte Carlo Pc failures → ``ValueError``
+* Invalid space weather → ``SpaceWeatherError``
+* Missing ephemeris data → ``EphemerisError``
+
+To disable strict mode for development or backwards compatibility:
+
+.. code-block:: python
+
+    astra.config.ASTRA_STRICT_MODE = False
+
+See :doc:`installation` for the full list of strict mode exceptions.

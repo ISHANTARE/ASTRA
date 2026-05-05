@@ -101,6 +101,37 @@ ASTRA prints a one-line startup banner to ``stderr`` on import. To suppress it
     # Linux / macOS
     export ASTRA_NO_BANNER=1
 
+Strict mode (default ON)
+-------------------------
+
+**As of v3.6.1, strict mode is enabled by default.** This is the recommended
+setting for production systems. When strict mode is enabled, the library
+raises typed exceptions instead of silently continuing with degraded data:
+
+.. list-table:: Strict mode exceptions
+   :widths: 25 75
+   :header-rows: 1
+
+   * - Condition
+     - Exception
+   * - EOP fetch failure
+     - ``EphemerisError``
+   * - Covariance dimension mismatch
+     - ``ValueError``
+   * - Monte Carlo Pc failure
+     - ``ValueError``
+   * - Invalid space weather
+     - ``SpaceWeatherError``
+   * - Missing ephemeris data
+     - ``EphemerisError``
+
+To disable strict mode for development or backwards compatibility:
+
+.. code-block:: python
+
+    import astra
+    astra.config.ASTRA_STRICT_MODE = False
+
 Type hints (PEP 561)
 --------------------
 

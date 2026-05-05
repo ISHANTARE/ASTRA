@@ -43,7 +43,7 @@ _MAX_WORKERS_LOCK: threading.RLock = threading.RLock()
 # Default: Relaxed mode — synthesises fallback data and emits warnings.
 # Set True to enforce strict orbital equations and raise on missing data.
 # ---------------------------------------------------------------------------
-ASTRA_STRICT_MODE: bool = False
+ASTRA_STRICT_MODE: bool = True
 
 
 def set_strict_mode(enabled: bool) -> None:

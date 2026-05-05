@@ -74,8 +74,12 @@ def test_numba_graceful_fallback():
     """Ensure modules load without hard Numba import failures"""
     try:
         import astra.frames  # noqa: F401
-
-        assert True
+        
+        # Verify the module loaded correctly and has expected functions
+        from astra.frames import teme_to_ecef, ecef_to_geodetic_wgs84, get_eop_correction
+        assert callable(teme_to_ecef), "teme_to_ecef should be callable"
+        assert callable(ecef_to_geodetic_wgs84), "ecef_to_geodetic_wgs84 should be callable"
+        assert callable(get_eop_correction), "get_eop_correction should be callable"
     except ImportError as e:
         pytest.fail(f"frames.py Numba hard-import occurred: {e}")
 

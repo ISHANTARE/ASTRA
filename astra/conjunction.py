@@ -501,6 +501,13 @@ def find_conjunctions(
             # mixing a velocity-aware covariance with a positional-only one breaks
             # the statistical symmetry of the Mahalanobis projection.
             if cov_A.shape != cov_B.shape:
+                from astra import config
+                if config.ASTRA_STRICT_MODE:
+                    raise ValueError(
+                        f"[ASTRA STRICT] Pair ({A},{B}): Covariance dimension mismatch "
+                        f"({cov_A.shape} vs {cov_B.shape}). Cannot compute Pc with "
+                        "asymmetric covariance dimensions. Supply matching 3x3 or 6x6 matrices."
+                    )
                 logger.warning(
                     f"Pair ({A},{B}): Covariance dimension mismatch "
                     f"({cov_A.shape} vs {cov_B.shape}). Pc set to None."

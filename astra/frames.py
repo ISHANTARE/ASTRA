@@ -88,8 +88,23 @@ def get_eop_correction(
         return xps, yps, dut1s  # type: ignore[no-any-return]
     except Exception as e:
         import logging
-        logging.getLogger(__name__).warning(
-            "EOP fetch failed (%s); defaulting to zero correction.", e
+        from astra import config
+        from astra.errors import EphemerisError
+        
+        _log = logging.getLogger(__name__)
+        
+        if config.ASTRA_STRICT_MODE:
+            raise EphemerisError(
+                f"[ASTRA STRICT] EOP fetch failed: {e}. "
+                "Cannot continue with degraded accuracy. "
+                "Check network connectivity or set ASTRA_STRICT_MODE=False for relaxed mode."
+            ) from e
+        
+        _log.error(
+            "EOP fetch failed (%s); defaulting to zero correction. "
+            "This may introduce up to ~35 km ground track error in HEO geometries. "
+            "Enable strict mode to prevent silent degradation.",
+            e
         )
         if is_scalar_input:
             return 0.0, 0.0, 0.0
@@ -289,3 +304,52 @@ def ecef_to_geodetic_wgs84(
     lat_deg = lat * (180.0 / np.pi)
     lon_deg = lon * (180.0 / np.pi)
     return lat_deg, lon_deg, alt  # type: ignore[no-any-return]
+
+
+def geodetic_to_ecef_wgs84(
+    lat_deg: np.ndarray,
+    lon_deg: np.ndarray,
+    alt_km: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Convert WGS84 Geodetic coordinates to ECEF Cartesian coordinates.
+    
+    Inverse of :func:`ecef_to_geodetic_wgs84`. Converts latitude, longitude,
+    and altitude to Earth-Centered Earth-Fixed (ECEF) Cartesian coordinates.
+    
+    Uses the WGS84 ellipsoid parameters:
+        a = 6378.137 km (semi-major axis)
+        f = 1/298.257223563 (flattening)
+        
+    Args:
+        lat_deg: Latitude in degrees (WGS84), shape (N,).
+        lon_deg: Longitude in degrees (WGS84), shape (N,).
+        alt_km: Altitude above WGS84 ellipsoid in km, shape (N,).
+        
+    Returns:
+        Tuple of (x_km, y_km, z_km) ECEF coordinates in km.
+        
+    Reference:
+        Borkowski, K. M. (1989). "Accurate algorithms for transforming
+        geocentric to geodetic coordinates". Bulletin Géodésique.
+    """
+    a = 6378.137  # WGS84 Semi-major axis (km)
+    f = 1.0 / 298.257223563  # Flattening
+    e2 = 2.0 * f - f * f  # First eccentricity squared
+    
+    lat = np.radians(lat_deg)
+    lon = np.radians(lon_deg)
+    
+    sin_lat = np.sin(lat)
+    cos_lat = np.cos(lat)
+    sin_lon = np.sin(lon)
+    cos_lon = np.cos(lon)
+    
+    # Radius of curvature in the prime vertical
+    N = a / np.sqrt(1.0 - e2 * sin_lat * sin_lat)
+    
+    # ECEF coordinates
+    x_km = (N + alt_km) * cos_lat * cos_lon
+    y_km = (N + alt_km) * cos_lat * sin_lon
+    z_km = (N * (1.0 - e2) + alt_km) * sin_lat
+    
+    return x_km, y_km, z_km  # type: ignore[no-any-return]

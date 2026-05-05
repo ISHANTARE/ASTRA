@@ -126,6 +126,7 @@ from astra.errors import (
     SpaceWeatherError,
     SpacebookError,
     SpacebookLookupError,
+    SGP4ErrorCode,  # Enum for SGP4 error codes with descriptions
 )
 
 # ---------------------------------------------------------------------------
@@ -176,6 +177,7 @@ from astra.ocm import (
 from astra.frames import (
     teme_to_ecef,               # TEME → ECEF with optional Spacebook EOP correction
     ecef_to_geodetic_wgs84,     # ECEF (km) → (lat_deg, lon_deg, alt_km) WGS-84
+    geodetic_to_ecef_wgs84,     # (lat_deg, lon_deg, alt_km) → ECEF (km) WGS-84
     get_eop_correction,         # Batch Spacebook EOP fetch for propagation time grids
 )
 
@@ -352,6 +354,7 @@ __all__ = [
     # --- Coordinate Frame Transforms ---
     "teme_to_ecef",
     "ecef_to_geodetic_wgs84",
+    "geodetic_to_ecef_wgs84",
     "get_eop_correction",
     # --- General Utilities ---
     "vincenty_distance",
@@ -396,6 +399,7 @@ __all__ = [
     "EphemerisError",
     "SpacebookError",
     "SpacebookLookupError",
+    "SGP4ErrorCode",  # Enum for SGP4 error codes
     # --- Config & Mode Control ---
     "set_strict_mode",
     "set_spacebook_enabled",
@@ -417,6 +421,7 @@ from astra.config import set_strict_mode
 from astra.config import set_spacebook_enabled
 from typing import Any
 import numpy as np
+import threading  # noqa: E402
 
 
 def warmup() -> None:
@@ -537,6 +542,7 @@ def __getattr__(name: str) -> Any:
 import os  # noqa: E402
 
 _BANNER_SHOWN = False
+_BANNER_LOCK = threading.Lock()
 
 
 def _show_banner() -> None:
@@ -545,33 +551,38 @@ def _show_banner() -> None:
     AUDIT-F-03 Fix: Suppressed when ``ASTRA_NO_BANNER=1`` is set, preventing
     log pollution in production worker pools where each subprocess would
     otherwise emit the banner independently.
+    
+    AUDIT-FIX: Thread-safe banner using Lock to prevent race conditions
+    in multi-threaded environments where multiple threads might try to
+    show the banner simultaneously.
     """
     global _BANNER_SHOWN
-    if _BANNER_SHOWN:
-        return
-    if os.environ.get("ASTRA_NO_BANNER", "0").strip() == "1":
+    with _BANNER_LOCK:
+        if _BANNER_SHOWN:
+            return
+        if os.environ.get("ASTRA_NO_BANNER", "0").strip() == "1":
+            _BANNER_SHOWN = True
+            return
+        mode = (
+            "STRICT (Flight-Grade)"
+            if config.ASTRA_STRICT_MODE
+            else "Relaxed (Beginner-Friendly)"
+        )
+        print(f"[ASTRA-Core v{__version__}] Mode: {mode}", file=sys.stderr)
+        if not config.ASTRA_STRICT_MODE:
+            print(
+                "[ASTRA-Core] -> Missing data will be estimated with warnings.",
+                file=sys.stderr,
+            )
+            print(
+                "[ASTRA-Core] -> Flight-grade: astra.config.ASTRA_STRICT_MODE = True",
+                file=sys.stderr,
+            )
+        print(
+            "[ASTRA-Core] -> Cache: ~/.astra/data | Creds: SPACETRACK_USER / SPACETRACK_PASS",
+            file=sys.stderr,
+        )
         _BANNER_SHOWN = True
-        return
-    mode = (
-        "STRICT (Flight-Grade)"
-        if config.ASTRA_STRICT_MODE
-        else "Relaxed (Beginner-Friendly)"
-    )
-    print(f"[ASTRA-Core v{__version__}] Mode: {mode}", file=sys.stderr)
-    if not config.ASTRA_STRICT_MODE:
-        print(
-            "[ASTRA-Core] -> Missing data will be estimated with warnings.",
-            file=sys.stderr,
-        )
-        print(
-            "[ASTRA-Core] -> Flight-grade: astra.config.ASTRA_STRICT_MODE = True",
-            file=sys.stderr,
-        )
-    print(
-        "[ASTRA-Core] -> Cache: ~/.astra/data | Creds: SPACETRACK_USER / SPACETRACK_PASS",
-        file=sys.stderr,
-    )
-    _BANNER_SHOWN = True
 
 
 _show_banner()

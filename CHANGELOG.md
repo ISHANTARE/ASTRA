@@ -9,7 +9,73 @@ The canonical version string lives in `file astra/version.py` and `file pyprojec
 ---
 
 
-## \[3.6.0\] — 2026-04-25
+## [3.6.1] — 2026-05-05
+
+### ⚠️ Breaking Changes
+
+- **`ASTRA_STRICT_MODE` is now `True` by default.** This matches the library's 
+  "flight-grade" documentation claims. Previously silent failures will now raise
+  exceptions. Users relying on relaxed behavior should set:
+  ```python
+  astra.config.ASTRA_STRICT_MODE = False
+  ```
+  or via environment: `export ASTRA_STRICT_MODE=false`
+
+### Added
+
+- **`SGP4ErrorCode` enum** in `astra.errors` — Documents all SGP4 error codes
+  with human-readable descriptions. Use `SGP4ErrorCode.describe()` for error messages.
+  ```python
+  from astra.errors import SGP4ErrorCode
+  if state.error_code != SGP4ErrorCode.OK:
+      print(SGP4ErrorCode(state.error_code).describe())
+  ```
+
+- **`geodetic_to_ecef_wgs84()` function** in `astra.frames` — Inverse coordinate
+  transform for round-trip geodetic ↔ ECEF conversions. Enables:
+  ```python
+  lat, lon, alt = ecef_to_geodetic_wgs84(x, y, z)
+  x, y, z = geodetic_to_ecef_wgs84(lat, lon, alt)  # NEW
+  ```
+
+- **Illumination status in `PassEvent`** — Two new fields:
+  - `satellite_illuminated: bool` — True if satellite is sunlit at TCA
+  - `observer_in_darkness: bool` — True if observer is in Earth's shadow at TCA
+
+- **`azimuth_at_tca_deg` in `PassEvent`** — Azimuth at Time of Closest Approach
+  (previously only AOS and LOS azimuths were available).
+
+- **Thread-safe banner** — Startup banner now uses `threading.Lock()` to prevent
+  race conditions in multi-threaded environments.
+
+### Changed
+
+- **EOP fetch failures now raise in strict mode** — Previously returned zeros silently,
+  causing up to 35km ground-track errors. Now raises `EphemerisError` in strict mode.
+
+- **Illumination computation failures return safe defaults** — Now returns `(False, False)`
+  instead of `(True, False)`, preventing false claims of visibility when uncertain.
+
+- **Monte Carlo Pc errors logged and raised** — Previously swallowed silently. Now logs
+  in relaxed mode and raises `ValueError` in strict mode.
+
+- **Covariance dimension mismatch raises in strict mode** — Previously only warned and
+  set Pc to None. Now raises `ValueError` when mixing 3x3 and 6x6 covariances.
+
+### Fixed
+
+- **Phantom test `assert True`** in `test_new_defect_fixes.py` — Replaced with actual
+  verification that frames module loaded correctly with expected functions.
+
+### Security
+
+- **Stricter error handling** — Many previously silent failures now surface errors,
+  preventing hidden data quality issues from corrupting analysis results.
+
+---
+
+
+## [3.6.0] — 2026-04-25
 
 ### Added
 

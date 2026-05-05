@@ -89,7 +89,7 @@ Data Source Priority
 --------------------
 
 When physics models require environmental data, ASTRA follows a strict
-priority hierarchy:
+priority hierarchy (**strict mode is enabled by default as of v3.6.1**):
 
 1. **Spacebook / COMSPOC** (live observational) — space weather, EOP,
    synthetic covariance.

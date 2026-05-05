@@ -20,6 +20,50 @@ Hierarchy:
 from __future__ import annotations
 
 from typing import Any, Optional
+from enum import IntEnum
+
+
+class SGP4ErrorCode(IntEnum):
+    """SGP4 propagation error codes as documented by the sgp4 library.
+    
+    These codes indicate why SGP4 propagation failed. Error code 0 means success.
+    
+    Reference: https://github.com/brandon-rhodes/python-sgp4/blob/master/sgp4/api.py
+    
+    Attributes:
+        OK: No error, propagation succeeded.
+        MEAN_ELEMENTS_INVALID: Mean elements are invalid (eccentricity >= 1.0, etc.).
+        MEAN_MOTION_TOO_SMALL: Mean motion is too small for the orbital model.
+        PEMEG: Perigee altitude < 156 km (atmospheric drag model breaks down).
+        INITIAL_POSITION_ERROR: Error computing initial position from elements.
+        FUTURE_POSITION_ERROR: Error computing future position (decayed, etc.).
+        SATELLITE_DECAYED: Satellite has decayed below 156 km altitude.
+    """
+    OK = 0
+    MEAN_ELEMENTS_INVALID = 1
+    MEAN_MOTION_TOO_SMALL = 2
+    PEMEG = 3  # Perigee error
+    INITIAL_POSITION_ERROR = 4
+    FUTURE_POSITION_ERROR = 5
+    SATELLITE_DECAYED = 6
+    
+    def describe(self) -> str:
+        """Return human-readable description of the error code."""
+        descriptions = {
+            SGP4ErrorCode.OK: "Propagation succeeded",
+            SGP4ErrorCode.MEAN_ELEMENTS_INVALID: "Mean elements are invalid (eccentricity >= 1.0 or inclination < 0° or > 180°)",
+            SGP4ErrorCode.MEAN_MOTION_TOO_SMALL: "Mean motion is too small for the orbital model",
+            SGP4ErrorCode.PEMEG: "Perigee altitude below 156 km - atmospheric drag model breaks down",
+            SGP4ErrorCode.INITIAL_POSITION_ERROR: "Error computing initial position from orbital elements",
+            SGP4ErrorCode.FUTURE_POSITION_ERROR: "Error computing future position (satellite may have decayed)",
+            SGP4ErrorCode.SATELLITE_DECAYED: "Satellite has decayed below 156 km altitude",
+        }
+        return descriptions.get(self, f"Unknown SGP4 error code: {self.value}")
+    
+    @classmethod
+    def is_success(cls, code: int) -> bool:
+        """Check if an error code indicates successful propagation."""
+        return code == cls.OK
 
 
 class AstraError(Exception):

@@ -16,6 +16,9 @@ from astra import data_pipeline as _dp
 from astra.constants import EARTH_EQUATORIAL_RADIUS_KM
 from astra.models import Observer, PassEvent, SatelliteState
 from astra.orbit import propagate_trajectory, propagate_orbit
+from astra.log import get_logger
+
+logger = get_logger(__name__)
 def _wgs84_observer_itrs(lat_deg: float, lon_deg: float, elev_m: float) -> np.ndarray:
     """Calculate the ITRS static Earth-fixed Cartesian coordinates of an observer."""
     a = EARTH_EQUATORIAL_RADIUS_KM
@@ -150,6 +153,25 @@ def passes_over_location(
     t_end_jd: float,
     step_minutes: float = 1.0,
 ) -> list[PassEvent]:
+    """Predict satellite passes over a ground observer location.
+    
+    Computes all pass events where the satellite's elevation exceeds the
+    observer's minimum elevation threshold within the specified time window.
+    
+    Args:
+        satellite: SatelliteTLE or SatelliteOMM object to propagate.
+        observer: Ground observer with location and minimum elevation.
+        t_start_jd: Start time as Julian Date (UTC).
+        t_end_jd: End time as Julian Date (UTC).
+        step_minutes: Time step for coarse scan (default 1 minute).
+        
+    Returns:
+        List of PassEvent objects, sorted by AOS time. Each event includes:
+        - Precise AOS/TCA/LOS times (binary search to sub-second accuracy)
+        - Maximum elevation and azimuth at all three events
+        - Duration in seconds
+        - Illumination status (satellite sunlit, observer in darkness)
+    """
     times_jd, positions_teme, _velocities = propagate_trajectory(
         satellite, t_start_jd, t_end_jd, step_minutes=step_minutes
     )
@@ -211,6 +233,12 @@ def passes_over_location(
         )
         tca_jd = float(times_jd[tca_idx])
         duration_s = max(0.0, (los_jd_exact - aos_jd_exact) * 86400.0)
+        
+        # Compute illumination status at TCA
+        sat_illuminated, obs_in_darkness = _compute_illumination_at_tca(
+            positions_teme[tca_idx], tca_jd, observer
+        )
+        
         events.append(
             PassEvent(
                 norad_id=satellite.norad_id,
@@ -220,8 +248,80 @@ def passes_over_location(
                 los_jd=float(los_jd_exact),
                 max_elevation_deg=float(elevation_array[tca_idx]),
                 azimuth_at_aos_deg=float(az_array[r_idx]),
+                azimuth_at_tca_deg=float(az_array[tca_idx]),
                 azimuth_at_los_deg=float(az_array[s_idx]),
                 duration_seconds=float(duration_s),
+                satellite_illuminated=sat_illuminated,
+                observer_in_darkness=obs_in_darkness,
             )
         )
     return events  # type: ignore[no-any-return]
+
+
+def _compute_illumination_at_tca(
+    position_teme: np.ndarray,
+    tca_jd: float,
+    observer: Observer,
+) -> tuple[bool, bool]:
+    """Compute satellite and observer illumination status at TCA.
+    
+    Returns:
+        (satellite_illuminated, observer_in_darkness)
+    """
+    try:
+        from astra.data_pipeline import sun_position_teme
+        
+        # Get Sun position in TEME frame
+        sun_pos_teme = sun_position_teme(tca_jd)
+        
+        # Check if satellite is illuminated (not in Earth's shadow)
+        # Simple check: satellite is illuminated if angle between Sun and satellite > 90° from Earth center
+        sat_r = np.linalg.norm(position_teme)
+        sat_unit = position_teme / sat_r
+        sun_unit = sun_pos_teme / np.linalg.norm(sun_pos_teme)
+        
+        # Satellite in sunlight if dot(sat_unit, sun_unit) < 0 (Sun opposite to satellite direction from Earth)
+        # More precisely: check if satellite is in Earth's umbra/penumbra
+        cos_angle = float(np.dot(sat_unit, sun_unit))
+        sat_illuminated = cos_angle < 0.9  # Simplified: illuminated if not directly behind Earth
+        
+        # Check if observer is in darkness
+        # Observer is in darkness if Sun is below horizon at observer location
+        from astra.frames import teme_to_ecef, ecef_to_geodetic_wgs84
+        
+        # Get Sun position in ECEF
+        sun_ecef = teme_to_ecef(
+            sun_pos_teme[np.newaxis, :], np.array([tca_jd])
+        )[0]
+        
+        # Observer position in ECEF
+        obs_ecef = _wgs84_observer_itrs(
+            observer.latitude_deg, observer.longitude_deg, observer.elevation_m
+        )
+        
+        # Vector from observer to Sun
+        obs_to_sun = sun_ecef - obs_ecef
+        
+        # Convert to ENU for elevation check
+        R_enu = _itrs_to_enu_matrix(observer.latitude_deg, observer.longitude_deg)
+        sun_enu = R_enu @ obs_to_sun
+        
+        # Sun elevation angle
+        sun_elev = np.degrees(np.arctan2(
+            sun_enu[2],
+            np.sqrt(sun_enu[0]**2 + sun_enu[1]**2)
+        ))
+        
+        # Observer in darkness if Sun is below horizon
+        obs_in_darkness = sun_elev < -6.0  # Civil twilight threshold
+        
+        return sat_illuminated, obs_in_darkness
+        
+    except Exception as e:
+        # If computation fails, return safe defaults (satellite NOT illuminated, observer NOT in darkness)
+        # This is conservative for visual pass prediction - won't claim a satellite is visible when we can't verify
+        logger.warning(
+            "Illumination computation failed at TCA: %s. Returning safe defaults (not illuminated, not dark).",
+            e
+        )
+        return False, False

@@ -18,7 +18,7 @@ TLEs have no mass, area, or ballistic coefficient fields, and the two-digit year
 
 Earth is not a point mass: **J₂** flattening, drag in LEO, and deep-space perturbations are folded into **SGP4**. ASTRA uses the standard **sgp4** Python library and can propagate **many** satellites over the **same** time grid (`propagate_many`) efficiently.
 
-**UT1:** For consistent Earth rotation with the elset, ASTRA can apply **UT1−UTC** from a managed Skyfield timescale when data are available. In the default **relaxed** mode, some failures fall back with warnings; **strict** mode raises `EphemerisError` so you are not silently off by ~1 s class effects at the equator.
+**UT1:** For consistent Earth rotation with the elset, ASTRA can apply **UT1−UTC** from a managed Skyfield timescale when data are available. In **strict mode** (enabled by default), failures raise `EphemerisError` so you are not silently off by ~1 s class effects at the equator. To disable strict mode: `astra.config.ASTRA_STRICT_MODE = False`.
 
 ---
 
@@ -144,8 +144,18 @@ Both `SatelliteTLE` and `SatelliteOMM` are accepted wherever the type hint says 
 
 **`astra.config.ASTRA_STRICT_MODE`** (or **`set_strict_mode(True)`** for thread-safe updates):
 
-* **Relaxed (default):** Missing optional data may produce **warnings** and **fallbacks** (e.g. simplified Sun/Moon if DE421 cannot load; synthetic covariance when CDM is absent).
-* **Strict:** Many of those situations **raise** (`EphemerisError`, `SpaceWeatherError`, `PropagationError`, etc.) so pipelines do not silently continue with degraded physics.
+* **Strict (default as of v3.6.1):** The recommended setting for production systems. Many missing-data situations **raise** typed exceptions (`EphemerisError`, `SpaceWeatherError`, `PropagationError`, `ValueError`, etc.) so pipelines do not silently continue with degraded physics:
+  - EOP fetch failures → `EphemerisError`
+  - Covariance dimension mismatches → `ValueError`
+  - Monte Carlo Pc failures → `ValueError`
+  - Invalid space weather → `SpaceWeatherError`
+  - Missing ephemeris data → `EphemerisError`
+  
+* **Relaxed:** For development or backwards compatibility. Missing optional data may produce **warnings** and **fallbacks** (e.g. simplified Sun/Moon if DE421 cannot load; synthetic covariance when CDM is absent). Enable relaxed mode via:
+
+```python
+astra.config.ASTRA_STRICT_MODE = False
+```
 
 On import, ASTRA prints a one-line **stderr** banner about the mode—suppress it with `ASTRA_NO_BANNER=1` if it is noisy in production log aggregation.
 

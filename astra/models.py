@@ -356,6 +356,19 @@ class PassEvent:
     """Satellite pass over a ground observer.
     A time interval during which the satellite's elevation angle exceeds
     the observer's minimum elevation threshold.
+    Attributes:
+        norad_id: NORAD catalog ID of the satellite.
+        observer_name: Name of the ground observer/station.
+        aos_jd: Acquisition of Signal time (Julian Date) - satellite rises above horizon.
+        tca_jd: Time of Closest Approach (Julian Date) - maximum elevation.
+        los_jd: Loss of Signal time (Julian Date) - satellite drops below horizon.
+        max_elevation_deg: Maximum elevation angle during pass (degrees).
+        azimuth_at_aos_deg: Azimuth at AOS (degrees, 0-360, N=0, E=90).
+        azimuth_at_tca_deg: Azimuth at TCA (degrees, 0-360, N=0, E=90).
+        azimuth_at_los_deg: Azimuth at LOS (degrees, 0-360, N=0, E=90).
+        duration_seconds: Pass duration in seconds.
+        satellite_illuminated: True if satellite is sunlit at TCA (for visual passes).
+        observer_in_darkness: True if observer is in Earth's shadow at TCA.
     """
     norad_id: str
     observer_name: str
@@ -364,8 +377,11 @@ class PassEvent:
     los_jd: float
     max_elevation_deg: float
     azimuth_at_aos_deg: float
+    azimuth_at_tca_deg: float  # Required - no default before fields without defaults
     azimuth_at_los_deg: float
     duration_seconds: float
+    satellite_illuminated: bool = True  # Is satellite in sunlight at TCA?
+    observer_in_darkness: bool = False  # Is observer in Earth's shadow at TCA?
 # ---------------------------------------------------------------------------
 # FilterConfig
 # ---------------------------------------------------------------------------

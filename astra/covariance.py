@@ -1087,9 +1087,21 @@ def compute_collision_probability_timeseries(
                 radius_b_km=radius_b_km,
             )
             pc_series[k] = pc
-        except (ValueError, ArithmeticError, np.linalg.LinAlgError):
+        except (ValueError, ArithmeticError, np.linalg.LinAlgError) as exc:
             # Singular covariance, zero velocity, or other numerical issue.
             # Leave as NaN — caller can identify failed steps.
-            pass
+            import logging
+            from astra import config
+            
+            _log = logging.getLogger(__name__)
+            if config.ASTRA_STRICT_MODE:
+                raise ValueError(
+                    f"[ASTRA STRICT] Pc computation failed at time index {k}: {exc}"
+                ) from exc
+            _log.warning(
+                "Pc computation failed at time index %d: %s. "
+                "Leaving as NaN in time series.",
+                k, exc
+            )
 
     return pc_series
