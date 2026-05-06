@@ -413,6 +413,7 @@ __all__ = [
     "sun_position_teme",
     "moon_position_teme",
     "warmup",
+    "help",
 ]
 
 import sys
@@ -583,6 +584,316 @@ def _show_banner() -> None:
             file=sys.stderr,
         )
         _BANNER_SHOWN = True
+
+
+def help(topic: str = "") -> None:
+    """Print help for ASTRA-Core API discovery.
+    
+    Args:
+        topic: Optional topic to get specific help. One of:
+            - "" (empty): Show all categories and key functions
+            - "propagation": Orbit propagation functions
+            - "conjunction": Conjunction analysis functions  
+            - "visibility": Pass prediction functions
+            - "data": Data fetching functions
+            - "frames": Coordinate frame transforms
+            - "maneuver": Maneuver planning functions
+            - "config": Configuration options
+            - "errors": Exception hierarchy
+            - "env": Environment variables
+    
+    Examples:
+        >>> import astra
+        >>> astra.help()               # Show all categories
+        >>> astra.help("propagation")  # Show propagation functions
+        >>> astra.help("env")          # Show environment variables
+    """
+    _HELP_TEXT = {
+        "": """
+================================================================================
+                        ASTRA-Core v{version} Quick Reference
+================================================================================
+
+STRICT MODE IS ON BY DEFAULT (v3.6.1+)
+  To disable: astra.config.ASTRA_STRICT_MODE = False
+
+CATEGORIES:
+  propagation  - Orbit propagation (SGP4, Cowell)
+  conjunction  - Conjunction analysis & collision probability  
+  visibility   - Pass prediction over ground stations
+  data         - Fetch TLE/OMM from CelesTrak, Space-Track, Spacebook
+  frames       - Coordinate frame transforms (TEME, ECEF, geodetic)
+  maneuver     - Delta-V planning & finite burns
+  config       - Runtime configuration
+  errors       - Exception hierarchy
+  env          - Environment variables
+
+USAGE:
+  astra.help("propagation")  # Get help on a specific topic
+  astra.help("env")          # See all environment variables
+
+QUICK START:
+  import astra
+  
+  # Fetch TLEs
+  catalog = astra.fetch_celestrak_active()
+  
+  # Propagate
+  times = astra.datetime_utc_to_jd(datetime.now(timezone.utc)) + np.arange(0, 1440, 5)/1440
+  traj, vel = astra.propagate_many([catalog[0]], times)
+  
+  # Predict passes
+  obs = astra.Observer("NYC", 40.7, -74.0, 10.0)
+  passes = astra.passes_over_location(catalog[0], obs, times[0], times[-1])
+
+================================================================================
+""",
+        "propagation": """
+PROPAGATION FUNCTIONS:
+
+SGP4 (Fast, large catalogs):
+  propagate_orbit(satellite, epoch_jd, t_since_minutes) -> OrbitalState
+  propagate_many(satellites, times_jd) -> (TrajectoryMap, VelocityMap)
+  propagate_trajectory(satellite, t_start_jd, t_end_jd) -> (times, pos, vel)
+  ground_track(positions_teme, times_jd) -> [(lat, lon, alt), ...]
+
+Cowell (High-fidelity, single satellite):
+  propagate_cowell(state0, duration_s, dt_out, drag_config, maneuvers)
+  propagate_cowell_at_times(state0, times_jd, ...) -> list[NumericalState]
+  propagate_cowell_batch(states_dict, ...) -> dict[id, list[NumericalState]]
+
+DATA TYPES:
+  SatelliteTLE  - Legacy TLE format
+  SatelliteOMM   - Modern OMM format (recommended)
+  SatelliteState - Union[TLE, OMM] - accepted by all propagation functions
+
+EXAMPLE:
+  import astra, numpy as np
+  from datetime import datetime, timezone
+  
+  tle = astra.parse_tle("ISS", line1, line2)
+  t_jd = astra.datetime_utc_to_jd(datetime.now(timezone.utc))
+  state = astra.propagate_orbit(tle, tle.epoch_jd, (t_jd - tle.epoch_jd) * 1440)
+  print(state.position_km)  # [x, y, z] in TEME frame
+""",
+        "conjunction": """
+CONJUNCTION ANALYSIS:
+
+  find_conjunctions(trajectories, times_jd, elements_map, threshold_km, 
+                    max_workers=4) -> list[ConjunctionEvent]
+  run_conjunction_sweep(catalog, t_start_jd, t_end_jd, threshold_km) -> list[ConjunctionEvent]
+  closest_approach(traj_a, traj_b, times_jd) -> (min_dist_km, tca_jd, idx)
+  distance_3d(pos_a, pos_b) -> distances
+
+COLLISION PROBABILITY:
+  compute_collision_probability(miss_vec, rel_vel, cov_a, cov_b, 
+                                radius_a, radius_b) -> float
+  compute_collision_probability_mc(...) -> float  # Monte Carlo
+  estimate_covariance(days_since_epoch) -> 3x3 covariance (heuristic)
+
+COVARIANCE:
+  load_spacebook_covariance(norad_id) -> 6x6 covariance from COMSPOC
+  propagate_covariance_stm(cov0, Phi) -> propagated covariance
+
+PARALLELISM:
+  find_conjunctions(..., max_workers=8)  # Control thread pool size
+""",
+        "visibility": """
+PASS PREDICTION:
+
+  passes_over_location(satellite, observer, t_start_jd, t_end_jd, 
+                       step_minutes=1.0) -> list[PassEvent]
+  visible_from_location(positions_teme, times_jd, observer) -> elevations_deg
+
+OBSERVER:
+  obs = astra.Observer(
+      name="Station",
+      latitude_deg=40.7,      # NOT lat_deg!
+      longitude_deg=-74.0,    # NOT lon_deg!
+      elevation_m=10.0,
+      min_elevation_deg=10.0
+  )
+
+PASS EVENT ATTRIBUTES:
+  PassEvent.aos_jd              # Rise time (Julian Date)
+  PassEvent.tca_jd              # Time of closest approach
+  PassEvent.los_jd              # Set time
+  PassEvent.max_elevation_deg   # Maximum elevation
+  PassEvent.azimuth_at_aos_deg  # Azimuth at rise
+  PassEvent.azimuth_at_tca_deg  # Azimuth at peak
+  PassEvent.azimuth_at_los_deg  # Azimuth at set
+  PassEvent.duration_seconds
+  PassEvent.satellite_illuminated  # True if sunlit at TCA
+  PassEvent.observer_in_darkness   # True if observer in Earth shadow
+""",
+        "data": """
+DATA FETCHING:
+
+CELESTRAK (no account):
+  fetch_celestrak_active() -> list[SatelliteTLE]
+  fetch_celestrak_group("starlink") -> list[SatelliteTLE]
+  fetch_celestrak_active_omm() -> list[SatelliteOMM]  # Modern format
+  fetch_celestrak_group_omm("starlink") -> list[SatelliteOMM]
+
+SPACE-TRACK (requires free account):
+  Set env vars: SPACETRACK_USER, SPACETRACK_PASS
+  fetch_spacetrack_active() -> list[SatelliteOMM]
+  fetch_spacetrack_group("starlink") -> list[SatelliteOMM]
+  spacetrack_logout()  # End session
+
+SPACEBOOK/COMSPOC (no account):
+  fetch_tle_catalog() -> list[SatelliteTLE]
+  fetch_xp_tle_catalog() -> list[SatelliteTLE]  # High-precision XP-TLE
+  fetch_synthetic_covariance_stk(norad_id) -> str  # STK ephemeris with covariance
+  get_space_weather_sb(jd) -> (f107, f107_adj, ap)
+  get_eop_sb(jd) -> (xp, yp, dut1)
+
+PARSING:
+  parse_tle(name, line1, line2) -> SatelliteTLE
+  validate_tle(name, line1, line2) -> bool
+  parse_omm_json(text) -> list[SatelliteOMM]
+  load_omm_file(path) -> list[SatelliteOMM]
+""",
+        "frames": """
+COORDINATE FRAMES:
+
+  TEME (SGP4 output) -> ECEF (Earth-fixed):
+    teme_to_ecef(positions_teme, times_jd, use_spacebook_eop=True) -> (N,3) ECEF km
+
+  ECEF -> Geodetic:
+    ecef_to_geodetic_wgs84(x, y, z) -> (lat_deg, lon_deg, alt_km)
+
+  Geodetic -> ECEF:
+    geodetic_to_ecef_wgs84(lat_deg, lon_deg, alt_km) -> (x, y, z) km
+
+  EOP (Earth Orientation Parameters):
+    get_eop_correction(times_jd) -> (xp, yp, dut1)
+
+FRAME CHAIN:
+  TLE --SGP4--> TEME --teme_to_ecef--> ECEF --ecef_to_geodetic--> Lat/Lon/Alt
+
+EXAMPLE:
+  pos_ecef = astra.teme_to_ecef(state.position_km[np.newaxis,:], 
+                                 np.array([t_jd]))
+  lat, lon, alt = astra.ecef_to_geodetic_wgs84(pos_ecef[0,0], 
+                                                pos_ecef[0,1], 
+                                                pos_ecef[0,2])
+""",
+        "maneuver": """
+MANEUVER PLANNING:
+
+IMPULSIVE DELTA-V:
+  plan_hohmann(r1_km, r2_km, mass_kg, thrust_N, isp_s, 
+               epoch_jd, initial_true_anomaly_deg) -> list[FiniteBurn]
+  plan_bielliptic(r1_km, r2_km, rb_km, ...) -> list[FiniteBurn]
+  plan_inclination_change(inc1_deg, inc2_deg, r_km, ...) -> FiniteBurn
+
+DELTA-V BUDGET:
+  compute_delta_v_budget(burns, initial_mass_kg) -> DeltaVBudget
+  budget.total_delta_v_m_s  # Total delta-V in m/s
+  budget.propellant_kg      # Total propellant used
+
+VALIDATION:
+  validate_burn(burn: FiniteBurn) -> bool
+  validate_burn_sequence(burns: list[FiniteBurn]) -> bool
+
+FINITE BURN ATTRIBUTES:
+  FiniteBurn.epoch_ignition_jd  # Start time
+  FiniteBurn.duration_s
+  FiniteBurn.thrust_N
+  FiniteBurn.isp_s
+  FiniteBurn.direction  # Unit vector in VNB or RTN frame
+  FiniteBurn.frame      # ManeuverFrame.VNB or ManeuverFrame.RTN
+""",
+        "config": """
+CONFIGURATION:
+
+STRICT MODE (ON by default since v3.6.1):
+  astra.config.ASTRA_STRICT_MODE  # Current setting
+  astra.set_strict_mode(True)     # Enable strict mode
+  astra.set_strict_mode(False)    # Disable for relaxed mode
+
+SPACEBOOK:
+  astra.config.SPACEBOOK_ENABLED
+  astra.set_spacebook_enabled(False)  # Disable Spacebook I/O
+
+WHAT STRICT MODE DOES:
+  - Raises EphemerisError if DE421 unavailable
+  - Raises SpaceWeatherError if F10.7/Ap missing
+  - Raises PropagationError for NaN trajectories
+  - Rejects heuristic covariance in Pc computation
+  - Validates TLE staleness (>30 days)
+
+RELAXED MODE (non-strict):
+  - Falls back to analytical Sun/Moon approximations
+  - Uses synthetic space weather (F10.7=150, Ap=15)
+  - Estimates covariance when CDM unavailable
+  - Warns instead of raising on stale TLEs
+""",
+        "errors": """
+EXCEPTION HIERARCHY:
+
+  AstraError (base class)
+  ├── InvalidTLEError      - Malformed TLE (checksum, format)
+  ├── PropagationError     - SGP4 error code or NaN trajectory
+  ├── EphemerisError       - DE421 ephemeris unavailable (strict mode)
+  ├── SpaceWeatherError    - F10.7/Ap data unavailable (strict mode)
+  ├── FilterError          - Invalid filter configuration
+  ├── CoordinateError      - Frame transformation failure
+  ├── ManeuverError        - Invalid burn sequence
+  └── SpacebookError       - COMSPOC API failure
+      └── SpacebookLookupError - NORAD ID not found
+
+SGP4 ERROR CODES:
+  from astra.errors import SGP4ErrorCode
+  
+  SGP4ErrorCode.OK                    # 0 - Success
+  SGP4ErrorCode.MEAN_ELEMENTS_INVALID # 1
+  SGP4ErrorCode.MEAN_MOTION_TOO_SMALL # 2
+  SGP4ErrorCode.SEMIMAJOR_AXIS_NEG    # 3
+  SGP4ErrorCode.ECCENTRICITY_INVALID  # 4
+  SGP4ErrorCode.FUTURE_POSITION_ERROR # 5 - May have decayed
+  SGP4ErrorCode.SATELLITE_DECAYED     # 6 - Below 156 km
+
+EXAMPLE:
+  state = astra.propagate_orbit(tle, ...)
+  if state.error_code != astra.SGP4ErrorCode.OK:
+      print(f"Error: {astra.SGP4ErrorCode(state.error_code).name}")
+""",
+        "env": """
+ENVIRONMENT VARIABLES:
+
+CACHE DIRECTORY:
+  ASTRA_DATA_DIR=~/.astra/data
+  # Where DE421 ephemeris, IERS finals, space weather CSV are cached
+  # Default: ~/.astra/data/
+
+STRICT MODE (overridden by code):
+  ASTRA_STRICT_MODE=1   # Enable strict mode
+  ASTRA_STRICT_MODE=0   # Disable strict mode
+
+SPACEBOOK:
+  ASTRA_SPACEBOOK_ENABLED=true   # Enable COMSPOC data sources
+  ASTRA_SPACEBOOK_ENABLED=false  # Disable
+
+BANNER:
+  ASTRA_NO_BANNER=1   # Suppress startup banner
+
+SPACE-TRACK CREDENTIALS:
+  SPACETRACK_USER=your@email.com
+  SPACETRACK_PASS=your_password
+  # Required for fetch_spacetrack_* functions
+
+PARALLELISM:
+  ASTRA_MAX_WORKERS=8  # Default thread pool size for conjunction sweep
+
+TESTING:
+  ASTRA_TEST_CACHE_DIR=/tmp/astra-test  # Test cache location
+""",
+    }
+    
+    version = __version__ if '__version__' in dir() else "3.6.1"
+    print(_HELP_TEXT.get(topic.lower(), _HELP_TEXT[""]).format(version=version))
 
 
 _show_banner()
