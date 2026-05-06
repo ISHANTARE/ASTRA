@@ -9,6 +9,13 @@ The canonical version string lives in `file astra/version.py` and `file pyprojec
 ---
 
 
+## [3.6.2] — 2026-05-06
+
+### Added
+
+- **`astra.help(topic)`** — Interactive API discovery function. Users can now
+
+
 ## [3.6.1] — 2026-05-05
 
 ### ⚠️ Breaking Changes
