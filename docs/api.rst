@@ -3,6 +3,34 @@ API reference
 
 These pages are **generated automatically** on each documentation build from
 the installed ``astra`` package (``sphinx-apidoc``). Narrative guides:
+
+.. _help-function:
+
+Interactive API Discovery (v3.6.2+)
+-----------------------------------
+
+.. versionadded:: 3.6.2
+
+Use ``astra.help(topic)`` for in-terminal API discovery:
+
+.. code-block:: python
+
+   >>> import astra
+   >>> astra.help()                    # Quick reference
+   >>> astra.help("propagation")       # Propagation functions
+   >>> astra.help("conjunction")       # Conjunction analysis
+   >>> astra.help("visibility")        # Pass prediction
+   >>> astra.help("data")              # Fetch TLE/OMM
+   >>> astra.help("frames")            # Coordinate transforms
+   >>> astra.help("maneuver")          # Delta-V planning
+   >>> astra.help("config")            # Runtime configuration
+   >>> astra.help("errors")            # Exception hierarchy
+   >>> astra.help("env")               # Environment variables
+
+The ``help()`` function prints formatted reference cards to stdout,
+including function signatures, return types, and environment variable
+names — useful when working in a REPL or notebook.
+
 :doc:`quickstart`, :doc:`limitations`, :doc:`maneuvers`.
 
 Quick API map
@@ -279,6 +307,9 @@ Utilities & configuration
    * - Function / Symbol
      - Signature / Returns
      - Notes
+   * - ``help(topic="")``
+     - ``None``
+     - Interactive API discovery (v3.6.2+)
    * - ``warmup()``
      - ``None``
      - Pre-compile Numba JIT kernels

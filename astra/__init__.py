@@ -892,7 +892,7 @@ TESTING:
 """,
     }
     
-    version = __version__ if '__version__' in dir() else "3.6.1"
+    version = __version__ if '__version__' in dir() else "3.6.2"
     print(_HELP_TEXT.get(topic.lower(), _HELP_TEXT[""]).format(version=version))
 
 

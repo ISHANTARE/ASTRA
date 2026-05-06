@@ -62,7 +62,7 @@ Verifying the install
 .. code-block:: python
 
     import astra
-    print(astra.__version__)   # Should print e.g. "3.5.0"
+    print(astra.__version__)   # Should print e.g. "3.6.2"
 
 Optional: pre-fetch IERS / cache data before long runs:
 

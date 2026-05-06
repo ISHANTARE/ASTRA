@@ -422,7 +422,7 @@ Release notes: [CHANGELOG.md](./CHANGELOG.md).
   publisher = {GitHub},
   journal = {GitHub repository},
   howpublished = {\url{https://github.com/ISHANTARE/ASTRA}},
-  version = {3.6.1}
+  version = {3.6.2}
 }
 ```
 
